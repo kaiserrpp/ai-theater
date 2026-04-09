@@ -1,11 +1,11 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface Dialogue { p: string; t: string; a: string; }
 export interface ScriptData { obra: string; personajes: string[]; guion: Dialogue[]; }
 
-const apiKey = process.env.EXPO_PUBLIC_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
+const genAI = new GoogleGenerativeAI(API_KEY);
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -13,6 +13,33 @@ export const useGemini = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+
+  // --- DESCUBRIMIENTO DINÁMICO POR FETCH (Tu código de éxito) ---
+  useEffect(() => {
+    const fetchModels = async () => {
+      if (!API_KEY) return;
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
+        const data = await response.json();
+        
+        if (data.models) {
+          const utiles = data.models
+            .filter((m: any) => 
+              m.supportedGenerationMethods.includes('generateContent') && 
+              (m.name.includes('flash') || m.name.includes('pro'))
+            )
+            .map((m: any) => m.name.replace('models/', ''));
+          
+          console.log("✅ Modelos descubiertos dinámicamente:", utiles);
+          setAvailableModels(utiles);
+        }
+      } catch (err) {
+        console.error("❌ Error en el descubrimiento:", err);
+      }
+    };
+    fetchModels();
+  }, []);
 
   const promptText = `Extract script data from this PDF into JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
 
@@ -21,82 +48,59 @@ export const useGemini = () => {
     setError(null);
     setScriptData(null);
 
-    if (!apiKey) {
-      setError("Error: Falta EXPO_PUBLIC_API_KEY en las variables de entorno.");
+    if (!API_KEY) {
+      setError("Error: Falta la API Key.");
       setLoading(false);
       return;
     }
 
-    try {
-      // 1. DESCUBRIMIENTO REAL
-      console.log("🔍 Iniciando listModels()...");
-      const modelResponse = await genAI.listModels();
-      
-      // 2. FILTRADO POR CAPACIDAD
-      // Obtenemos todos los modelos que Google dice que tu clave puede usar para generar contenido
-      const dynamicModels = modelResponse.models
-        .filter(m => m.supportedGenerationMethods.includes('generateContent'))
-        .map(m => m.name);
+    // Usamos los modelos descubiertos o un fallback si el fetch aún no terminó
+    const modelsToTry = availableModels.length > 0 
+      ? availableModels 
+      : ["gemini-1.5-flash", "gemini-1.5-pro"];
 
-      if (dynamicModels.length === 0) {
-        throw new Error("Google devolvió una lista vacía de modelos para tu API Key.");
-      }
+    let lastError = "";
+    let triedModels: string[] = [];
 
-      console.log("✅ Modelos vivos detectados:", dynamicModels);
+    for (const modelName of modelsToTry) {
+      triedModels.push(modelName);
+      try {
+        console.log(`🚀 Probando modelo descubierto: ${modelName}`);
+        const model = genAI.getGenerativeModel({ 
+          model: modelName,
+          generationConfig: { responseMimeType: "application/json" }
+        });
 
-      let lastError = "";
-      let triedModels: string[] = [];
+        const result = await model.generateContent([
+          { text: promptText },
+          { inlineData: { data: base64String, mimeType: "application/pdf" } }
+        ]);
 
-      // 3. BUCLE DE EJECUCIÓN
-      for (const modelName of dynamicModels) {
-        triedModels.push(modelName);
-        try {
-          console.log(`🚀 Intentando con el modelo oficial: ${modelName}`);
-          
-          const model = genAI.getGenerativeModel({ 
-            model: modelName,
-            // Forzamos la configuración de respuesta para evitar que divague
-            generationConfig: { responseMimeType: "application/json" }
-          });
+        const response = await result.response;
+        const text = response.text();
+        
+        // Limpiamos el JSON por si la IA se pone charlatana
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}') + 1;
+        const cleanJson = text.substring(start, end);
+        
+        setScriptData(JSON.parse(cleanJson));
+        setLoading(false);
+        return; // ¡ÉXITO!
 
-          const result = await model.generateContent([
-            { text: promptText },
-            { inlineData: { data: base64String, mimeType: "application/pdf" } }
-          ]);
+      } catch (err: any) {
+        lastError = err.message;
+        console.warn(`⚠️ Fallo con ${modelName}:`, lastError);
 
-          const response = await result.response;
-          const text = response.text();
-          
-          // Limpieza de JSON
-          const start = text.indexOf('{');
-          const end = text.lastIndexOf('}') + 1;
-          const cleanJson = text.substring(start, end);
-          
-          setScriptData(JSON.parse(cleanJson));
-          setLoading(false);
-          return; // Éxito total
-
-        } catch (err: any) {
-          lastError = err.message;
-          console.warn(`❌ Fallo en ${modelName}:`, lastError);
-
-          // Si el error es de cuota (429), pausamos para no quemar el siguiente modelo al instante
-          if (lastError.includes("429")) {
-            await wait(3000);
-          }
-          // Si el error es 404, el bucle sigue inmediatamente al siguiente modelo de la lista real
+        if (lastError.includes("429")) {
+          // Si es cuota, pausa de seguridad antes de quemar el siguiente modelo
+          await wait(2500);
         }
       }
-
-      // Si terminamos el bucle sin éxito
-      setError(`Modelos oficiales intentados: ${triedModels.join(', ')}. Error final: ${lastError}`);
-
-    } catch (err: any) {
-      // Este catch atrapa fallos en listModels() o errores de red generales
-      setError(`Error en fase de descubrimiento: ${err.message}`);
-    } finally {
-      setLoading(false);
     }
+
+    setError(`Agotados modelos: ${triedModels.join(', ')}. Último error: ${lastError}`);
+    setLoading(false);
   };
 
   return { analyzePdf, loading, error, scriptData, setScriptData };
