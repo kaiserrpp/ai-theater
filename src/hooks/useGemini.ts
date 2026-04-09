@@ -12,54 +12,66 @@ export const useGemini = () => {
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
 
-  const promptText = `
-    Analiza este guion teatral y devuélvelo en formato JSON.
-    Formato: {"obra": "título", "personajes": ["lista"], "guion": [{"p": "PERSONAJE", "t": "texto", "a": "acotación"}]}
-    IMPORTANTE: Responde SOLO con el JSON, sin bloques de código markdown.
-  `;
+  const promptText = `Extract script data from this PDF into JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
 
-  const processPayload = async (base64String: string) => {
+  const analyzePdf = async (base64String: string) => {
     setLoading(true);
     setError(null);
     setScriptData(null);
 
     if (!apiKey) {
-      setError("Error: No se detecta la API Key en este entorno.");
+      setError("Error: No hay API Key configurada.");
       setLoading(false);
       return;
     }
 
-    try {
-      // Usamos directamente el modelo 1.5-flash que es el que mejor gestiona archivos pesados en la capa gratuita
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // Lista de modelos con nombres exactos que suelen evitar el error 404
+    const modelsToTry = [
+      "gemini-1.5-flash-latest", // La versión más compatible actualmente
+      "gemini-1.5-pro-latest",
+      "gemini-pro-vision"        // Fallback clásico para archivos
+    ];
 
-      const result = await model.generateContent([
-        { text: promptText },
-        { inlineData: { data: base64String, mimeType: "application/pdf" } }
-      ]);
+    let lastErrorMessage = "";
 
-      const response = await result.response;
-      let text = response.text();
-      
-      // Limpiamos posibles etiquetas de markdown que Gemini a veces añade
-      text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-      
-      setScriptData(JSON.parse(text));
-    } catch (err: any) {
-      console.error(err);
-      // Si el error es por tamaño, intentamos dar un consejo útil
-      if (err.message?.includes("fetch") || err.message?.includes("429")) {
-        setError("Error de conexión/cuota. El guion es muy pesado para la red móvil. Intenta con un WiFi estable o un guion más corto para probar.");
-      } else {
-        setError(`Error: ${err.message}`);
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`🤖 Intentando con: ${modelName}`);
+        const model = genAI.getGenerativeModel({ model: modelName });
+
+        const result = await model.generateContent([
+          { text: promptText },
+          { inlineData: { data: base64String, mimeType: "application/pdf" } }
+        ]);
+
+        const response = await result.response;
+        let text = response.text();
+        
+        // Limpiamos la respuesta
+        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        const parsed = JSON.parse(text);
+        setScriptData(parsed);
+        setLoading(false);
+        return; // ÉXITO
+
+      } catch (err: any) {
+        lastErrorMessage = err.message;
+        console.error(`Fallo en ${modelName}:`, lastErrorMessage);
+
+        // Si es un error de cuota (429), paramos el bucle porque la API Key está bloqueada
+        if (lastErrorMessage.includes("429")) {
+          setError("Límite de cuota alcanzado. Google nos ha bloqueado temporalmente. Espera 1 minuto.");
+          setLoading(false);
+          return;
+        }
+        
+        // Si es 404 u otro, el bucle continuará al siguiente modelo...
       }
-    } finally {
-      setLoading(false);
     }
-  };
 
-  const analyzePdf = (base64String: string) => {
-    processPayload(base64String);
+    setError(`No se pudo conectar con ningún modelo. Último error: ${lastErrorMessage}`);
+    setLoading(false);
   };
 
   return { analyzePdf, loading, error, scriptData, setScriptData };
