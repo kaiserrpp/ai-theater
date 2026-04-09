@@ -7,6 +7,9 @@ export interface ScriptData { obra: string; personajes: string[]; guion: Dialogu
 const apiKey = process.env.EXPO_PUBLIC_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
 
+// Función auxiliar para esperar (freno de seguridad)
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const useGemini = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,24 +30,16 @@ export const useGemini = () => {
     }
   `;
 
-  // --- FUNCIÓN DE AUTODESCUBRIMIENTO ---
   const getCompatibleModels = async () => {
     try {
       const result = await genAI.listModels();
-      // Filtramos modelos que:
-      // 1. Permitan generar contenido
-      // 2. Sean "flash" o "pro" (que suelen soportar archivos)
-      // 3. NO sean modelos antiguos o de solo texto
       const compatible = result.models
         .filter(m => m.supportedGenerationMethods.includes('generateContent'))
         .filter(m => m.name.includes('flash') || m.name.includes('pro'))
-        // Ordenamos para que los "flash" vayan primero (son más rápidos y baratos)
         .sort((a, b) => a.name.includes('flash') ? -1 : 1);
       
       return compatible.map(m => m.name);
     } catch (e) {
-      console.error("Error listando modelos:", e);
-      // Si falla el listado, usamos un fallback seguro
       return ['models/gemini-1.5-flash', 'models/gemini-2.0-flash'];
     }
   };
@@ -60,16 +55,12 @@ export const useGemini = () => {
       return;
     }
 
-    // 1. Descubrimos qué modelos hay disponibles hoy
     const availableModels = await getCompatibleModels();
-    console.log("Modelos detectados:", availableModels);
-
     let lastErrorMsg = "";
 
-    // 2. Intentamos con los modelos encontrados
     for (const modelId of availableModels) {
       try {
-        console.log(`🤖 Probando descubrimiento automático: ${modelId}`);
+        console.log(`🤖 Intentando con freno de seguridad: ${modelId}`);
         const model = genAI.getGenerativeModel({ 
             model: modelId,
             generationConfig: { responseMimeType: "application/json" }
@@ -86,17 +77,22 @@ export const useGemini = () => {
 
       } catch (err: any) {
         lastErrorMsg = err.message;
-        console.warn(`⚠️ Modelo ${modelId} falló o no es compatible.`);
         
+        // Si es error de cuota (429), Google nos ha bloqueado temporalmente
         if (err.message.includes("429")) {
-            setError("Cuota agotada. Espera 60 segundos.");
+            setError("Google dice: 'Vas muy rápido'. Espera 60 segundos sin tocar nada.");
             setLoading(false);
             return;
         }
+
+        // Si es otro error (como el 404), esperamos un poco antes de probar el siguiente modelo
+        // para no saturar al vigilante
+        console.warn(`Modelo ${modelId} falló. Esperando 2 segundos antes del siguiente...`);
+        await sleep(2000); 
       }
     }
 
-    setError(`No se encontró ningún modelo compatible activo: ${lastErrorMsg}`);
+    setError(`Agotados todos los intentos: ${lastErrorMsg}`);
     setLoading(false);
   };
 

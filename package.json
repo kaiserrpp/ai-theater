@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.04.003",
+  "version": "2026.04.004",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
