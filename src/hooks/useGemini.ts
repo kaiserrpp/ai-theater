@@ -7,97 +7,59 @@ export interface ScriptData { obra: string; personajes: string[]; guion: Dialogu
 const apiKey = process.env.EXPO_PUBLIC_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 export const useGemini = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
 
   const promptText = `
-    Actúa como un extractor de datos estructurados especializado en guiones teatrales.
-    Transforma el documento proporcionado en un objeto JSON estricto con las claves "obra", "personajes" (array de nombres) y "guion" (array de objetos {p, t, a}).
+    Analiza este guion teatral y devuélvelo en formato JSON.
+    Formato: {"obra": "título", "personajes": ["lista"], "guion": [{"p": "PERSONAJE", "t": "texto", "a": "acotación"}]}
+    IMPORTANTE: Responde SOLO con el JSON, sin bloques de código markdown.
   `;
 
-  const getCompatibleModels = async () => {
-    try {
-      const result = await genAI.listModels();
-      return result.models
-        .filter(m => m.supportedGenerationMethods.includes('generateContent'))
-        .filter(m => m.name.includes('flash') || m.name.includes('pro'))
-        .sort((a, b) => a.name.includes('flash') ? -1 : 1)
-        .map(m => m.name);
-    } catch (e) {
-      return ['models/gemini-1.5-flash', 'models/gemini-2.0-flash'];
-    }
-  };
-
-  const processPayload = async (contentPayload: any[]) => {
+  const processPayload = async (base64String: string) => {
     setLoading(true);
     setError(null);
     setScriptData(null);
 
     if (!apiKey) {
-      setError("DEBUG: Falta API KEY en Vercel.");
+      setError("Error: No se detecta la API Key en este entorno.");
       setLoading(false);
       return;
     }
 
     try {
-      const availableModels = await getCompatibleModels();
-      let lastRawError = "";
+      // Usamos directamente el modelo 1.5-flash que es el que mejor gestiona archivos pesados en la capa gratuita
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      for (const modelId of availableModels) {
-        try {
-          console.log(`Intentando: ${modelId}`);
-          const model = genAI.getGenerativeModel({ 
-              model: modelId,
-              generationConfig: { responseMimeType: "application/json" }
-          });
+      const result = await model.generateContent([
+        { text: promptText },
+        { inlineData: { data: base64String, mimeType: "application/pdf" } }
+      ]);
 
-          const result = await model.generateContent(contentPayload);
-          const response = await result.response;
-          const text = response.text();
-          
-          setScriptData(JSON.parse(text));
-          setLoading(false);
-          return; 
-
-        } catch (err: any) {
-          // CAPTURA DE DIAGNÓSTICO PROFUNDO
-          const errorDetails = {
-            message: err.message,
-            status: err.status,
-            name: err.name,
-            stack: err.stack?.split('\n')[0] // Solo la primera línea del stack
-          };
-          
-          lastRawError = JSON.stringify(errorDetails);
-          console.error("Error en modelo:", lastRawError);
-
-          if (err.message?.includes("429")) {
-              setError(`CUOTA AGOTADA (429): Google dice que vas muy rápido. Detalles: ${lastRawError}`);
-              setLoading(false);
-              return;
-          }
-          
-          await sleep(2000); 
-        }
+      const response = await result.response;
+      let text = response.text();
+      
+      // Limpiamos posibles etiquetas de markdown que Gemini a veces añade
+      text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      
+      setScriptData(JSON.parse(text));
+    } catch (err: any) {
+      console.error(err);
+      // Si el error es por tamaño, intentamos dar un consejo útil
+      if (err.message?.includes("fetch") || err.message?.includes("429")) {
+        setError("Error de conexión/cuota. El guion es muy pesado para la red móvil. Intenta con un WiFi estable o un guion más corto para probar.");
+      } else {
+        setError(`Error: ${err.message}`);
       }
-
-      setError(`FALLO TOTAL EN TODOS LOS MODELOS. Último error: ${lastRawError}`);
-    } catch (rootErr: any) {
-      setError(`ERROR CRÍTICO INICIAL: ${rootErr.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   const analyzePdf = (base64String: string) => {
-    processPayload([
-      { text: promptText },
-      { inlineData: { data: base64String, mimeType: "application/pdf" } }
-    ]);
+    processPayload(base64String);
   };
 
   return { analyzePdf, loading, error, scriptData, setScriptData };
