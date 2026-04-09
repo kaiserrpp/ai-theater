@@ -7,7 +7,6 @@ export interface ScriptData { obra: string; personajes: string[]; guion: Dialogu
 const apiKey = process.env.EXPO_PUBLIC_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
 
-// Función de apoyo para esperar entre reintentos
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const useGemini = () => {
@@ -15,7 +14,7 @@ export const useGemini = () => {
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
 
-  const promptText = `Extract script data from this PDF into JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
+  const promptText = `Extrae los datos de este guion en JSON estricto: {"obra": "titulo", "personajes": ["nombre"], "guion": [{"p": "PERSONAJE", "t": "texto", "a": "acotacion"}]}. No incluyas markdown.`;
 
   const analyzePdf = async (base64String: string) => {
     setLoading(true);
@@ -23,35 +22,32 @@ export const useGemini = () => {
     setScriptData(null);
 
     if (!apiKey) {
-      setError("Error: No se encontró la API Key en las variables de entorno.");
+      setError("Error: API Key no configurada en Vercel.");
       setLoading(false);
       return;
     }
 
     try {
-      // 1. Obtener la lista de modelos disponibles para tu API Key
-      const modelList = await genAI.listModels();
+      // 1. Obtener la lista de modelos de forma correcta
+      // En la SDK actual, se accede a través de la API de administración o se definen los candidatos conocidos
+      // Como listModels() a veces falla en entornos de navegador por CORS, vamos a usar
+      // la lista de "Candidatos Probados" que Gemini soporta para PDFs en 2026.
       
-      // 2. Filtrar modelos candidatos (que soporten generación de contenido)
-      const candidates = modelList.models
-        .filter(m => m.supportedGenerationMethods.includes('generateContent'))
-        // Priorizamos modelos 'flash' por velocidad y cuota más alta
-        .sort((a, b) => a.name.includes('flash') ? -1 : 1);
-
-      if (candidates.length === 0) {
-        throw new Error("No se encontraron modelos compatibles en tu cuenta de Google AI.");
-      }
+      const candidates = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash-exp"
+      ];
 
       let usedModels: string[] = [];
       let lastError = "";
 
-      // 3. Bucle de reintentos inteligente
-      for (const modelInfo of candidates) {
-        const modelName = modelInfo.name;
+      // 2. Bucle de reintentos sobre los modelos candidatos
+      for (const modelName of candidates) {
         usedModels.push(modelName);
-
         try {
-          console.log(`🤖 Intentando con candidato: ${modelName}`);
+          console.log(`📡 Probando con: ${modelName}`);
           const model = genAI.getGenerativeModel({ model: modelName });
 
           const result = await model.generateContent([
@@ -62,33 +58,33 @@ export const useGemini = () => {
           const response = await result.response;
           let text = response.text();
           
-          text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+          // Limpieza manual por si la IA devuelve basura fuera del JSON
+          const jsonStart = text.indexOf('{');
+          const jsonEnd = text.lastIndexOf('}') + 1;
+          const cleanJson = text.substring(jsonStart, jsonEnd);
           
-          const parsed = JSON.parse(text);
+          const parsed = JSON.parse(cleanJson);
           setScriptData(parsed);
           setLoading(false);
-          return; // ÉXITO: Salimos de la función
+          return; // Si funciona, cortamos el bucle aquí
 
         } catch (err: any) {
           lastError = err.message;
-          console.warn(`⚠️ Fallo en ${modelName}: ${lastError}`);
+          console.warn(`❌ Modelo ${modelName} falló: ${lastError}`);
 
-          // Si el error es de cuota (429), esperamos un poco más antes de saltar al siguiente
+          // Si es un error de cuota (429), esperamos antes de saltar al siguiente
           if (lastError.includes("429")) {
-            console.log("Esperando 3 segundos por límite de cuota...");
-            await wait(3000);
-          } else {
-            // Para otros errores (como el 404 de antes), esperamos menos
-            await wait(1000);
+            await wait(2000); 
           }
+          // Si es 404 (no existe), pasamos rápido al siguiente
         }
       }
 
-      // 4. Si llegamos aquí, es que nada funcionó
-      setError(`Fallo tras intentar con: ${usedModels.join(', ')}. Último error: ${lastError}`);
+      // 3. Si ninguno funcionó
+      setError(`Agotados todos los modelos (${usedModels.join(', ')}). Último error: ${lastError}`);
 
     } catch (err: any) {
-      setError(`Error en el proceso de descubrimiento: ${err.message}`);
+      setError(`Error crítico: ${err.message}`);
     } finally {
       setLoading(false);
     }
