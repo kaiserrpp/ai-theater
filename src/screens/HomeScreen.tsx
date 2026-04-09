@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
+import { VersionBadge } from '../components/VersionBadge'; // <-- Importamos nuestro nuevo componente
 import { useGemini } from '../hooks/useGemini';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 
@@ -76,6 +77,10 @@ export const HomeScreen = () => {
     } catch (err) { console.error(err); }
   };
 
+  const resetAll = () => {
+    setScriptData(null); setFileName(null); setMyRoles([]); setIsRehearsing(false); setIsFromLibrary(false);
+  };
+
   if (isRehearsing && scriptData) {
     return (
       <ScreenWrapper>
@@ -131,16 +136,20 @@ export const HomeScreen = () => {
             <TouchableOpacity style={styles.btnMain} onPress={() => setIsRehearsing(true)} disabled={myRoles.length === 0}>
               <Text style={styles.btnText}>🎬 Comenzar Ensayo</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={resetAll} style={{marginTop:20}}><Text style={{color:'red'}}>Volver</Text></TouchableOpacity>
+            <TouchableOpacity onPress={resetAll} style={{marginTop:20, alignItems: 'center'}}><Text style={{color:'red'}}>Volver</Text></TouchableOpacity>
           </View>
         )}
+
+        {/* Nuestro nuevo chivato de versión */}
+        <VersionBadge />
+        
       </ScrollView>
     </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { padding: 20, alignItems: 'center' },
+  container: { padding: 20, alignItems: 'center', flexGrow: 1 },
   title: { fontSize: 32, fontWeight: '800', marginBottom: 20 },
   section: { width: '100%' },
   btnMain: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center' },
