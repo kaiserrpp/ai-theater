@@ -7,7 +7,6 @@ export interface ScriptData { obra: string; personajes: string[]; guion: Dialogu
 const apiKey = process.env.EXPO_PUBLIC_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
 
-// Función auxiliar para esperar (freno de seguridad)
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const useGemini = () => {
@@ -17,28 +16,17 @@ export const useGemini = () => {
 
   const promptText = `
     Actúa como un extractor de datos estructurados especializado en guiones teatrales.
-    Transforma el documento proporcionado en un objeto JSON estricto.
-    REGLAS:
-    1. Extrae personajes únicos en un array "personajes".
-    2. Extrae el título en "obra".
-    3. Crea un array "guion" con: "p" (PERSONAJE), "t" (texto hablado), "a" (acotación o "").
-    FORMATO JSON:
-    {
-      "obra": "Título",
-      "personajes": ["PERSONAJE A"],
-      "guion": [ { "p": "PERSONAJE A", "t": "Hola", "a": "entrando" } ]
-    }
+    Transforma el documento proporcionado en un objeto JSON estricto con las claves "obra", "personajes" (array de nombres) y "guion" (array de objetos {p, t, a}).
   `;
 
   const getCompatibleModels = async () => {
     try {
       const result = await genAI.listModels();
-      const compatible = result.models
+      return result.models
         .filter(m => m.supportedGenerationMethods.includes('generateContent'))
         .filter(m => m.name.includes('flash') || m.name.includes('pro'))
-        .sort((a, b) => a.name.includes('flash') ? -1 : 1);
-      
-      return compatible.map(m => m.name);
+        .sort((a, b) => a.name.includes('flash') ? -1 : 1)
+        .map(m => m.name);
     } catch (e) {
       return ['models/gemini-1.5-flash', 'models/gemini-2.0-flash'];
     }
@@ -50,50 +38,59 @@ export const useGemini = () => {
     setScriptData(null);
 
     if (!apiKey) {
-      setError("Falta la API Key en Vercel.");
+      setError("DEBUG: Falta API KEY en Vercel.");
       setLoading(false);
       return;
     }
 
-    const availableModels = await getCompatibleModels();
-    let lastErrorMsg = "";
+    try {
+      const availableModels = await getCompatibleModels();
+      let lastRawError = "";
 
-    for (const modelId of availableModels) {
-      try {
-        console.log(`🤖 Intentando con freno de seguridad: ${modelId}`);
-        const model = genAI.getGenerativeModel({ 
-            model: modelId,
-            generationConfig: { responseMimeType: "application/json" }
-        });
+      for (const modelId of availableModels) {
+        try {
+          console.log(`Intentando: ${modelId}`);
+          const model = genAI.getGenerativeModel({ 
+              model: modelId,
+              generationConfig: { responseMimeType: "application/json" }
+          });
 
-        const result = await model.generateContent(contentPayload);
-        const response = await result.response;
-        const text = response.text();
-        
-        const parsedData = JSON.parse(text) as ScriptData;
-        setScriptData(parsedData);
-        setLoading(false);
-        return; 
+          const result = await model.generateContent(contentPayload);
+          const response = await result.response;
+          const text = response.text();
+          
+          setScriptData(JSON.parse(text));
+          setLoading(false);
+          return; 
 
-      } catch (err: any) {
-        lastErrorMsg = err.message;
-        
-        // Si es error de cuota (429), Google nos ha bloqueado temporalmente
-        if (err.message.includes("429")) {
-            setError("Google dice: 'Vas muy rápido'. Espera 60 segundos sin tocar nada.");
-            setLoading(false);
-            return;
+        } catch (err: any) {
+          // CAPTURA DE DIAGNÓSTICO PROFUNDO
+          const errorDetails = {
+            message: err.message,
+            status: err.status,
+            name: err.name,
+            stack: err.stack?.split('\n')[0] // Solo la primera línea del stack
+          };
+          
+          lastRawError = JSON.stringify(errorDetails);
+          console.error("Error en modelo:", lastRawError);
+
+          if (err.message?.includes("429")) {
+              setError(`CUOTA AGOTADA (429): Google dice que vas muy rápido. Detalles: ${lastRawError}`);
+              setLoading(false);
+              return;
+          }
+          
+          await sleep(2000); 
         }
-
-        // Si es otro error (como el 404), esperamos un poco antes de probar el siguiente modelo
-        // para no saturar al vigilante
-        console.warn(`Modelo ${modelId} falló. Esperando 2 segundos antes del siguiente...`);
-        await sleep(2000); 
       }
-    }
 
-    setError(`Agotados todos los intentos: ${lastErrorMsg}`);
-    setLoading(false);
+      setError(`FALLO TOTAL EN TODOS LOS MODELOS. Último error: ${lastRawError}`);
+    } catch (rootErr: any) {
+      setError(`ERROR CRÍTICO INICIAL: ${rootErr.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const analyzePdf = (base64String: string) => {
