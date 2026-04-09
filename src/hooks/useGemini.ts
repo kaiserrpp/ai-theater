@@ -7,6 +7,9 @@ export interface ScriptData { obra: string; personajes: string[]; guion: Dialogu
 const apiKey = process.env.EXPO_PUBLIC_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
 
+// Función de apoyo para esperar entre reintentos
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const useGemini = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,58 +23,75 @@ export const useGemini = () => {
     setScriptData(null);
 
     if (!apiKey) {
-      setError("Error: No hay API Key configurada.");
+      setError("Error: No se encontró la API Key en las variables de entorno.");
       setLoading(false);
       return;
     }
 
-    // Lista de modelos con nombres exactos que suelen evitar el error 404
-    const modelsToTry = [
-      "gemini-1.5-flash-latest", // La versión más compatible actualmente
-      "gemini-1.5-pro-latest",
-      "gemini-pro-vision"        // Fallback clásico para archivos
-    ];
+    try {
+      // 1. Obtener la lista de modelos disponibles para tu API Key
+      const modelList = await genAI.listModels();
+      
+      // 2. Filtrar modelos candidatos (que soporten generación de contenido)
+      const candidates = modelList.models
+        .filter(m => m.supportedGenerationMethods.includes('generateContent'))
+        // Priorizamos modelos 'flash' por velocidad y cuota más alta
+        .sort((a, b) => a.name.includes('flash') ? -1 : 1);
 
-    let lastErrorMessage = "";
-
-    for (const modelName of modelsToTry) {
-      try {
-        console.log(`🤖 Intentando con: ${modelName}`);
-        const model = genAI.getGenerativeModel({ model: modelName });
-
-        const result = await model.generateContent([
-          { text: promptText },
-          { inlineData: { data: base64String, mimeType: "application/pdf" } }
-        ]);
-
-        const response = await result.response;
-        let text = response.text();
-        
-        // Limpiamos la respuesta
-        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        
-        const parsed = JSON.parse(text);
-        setScriptData(parsed);
-        setLoading(false);
-        return; // ÉXITO
-
-      } catch (err: any) {
-        lastErrorMessage = err.message;
-        console.error(`Fallo en ${modelName}:`, lastErrorMessage);
-
-        // Si es un error de cuota (429), paramos el bucle porque la API Key está bloqueada
-        if (lastErrorMessage.includes("429")) {
-          setError("Límite de cuota alcanzado. Google nos ha bloqueado temporalmente. Espera 1 minuto.");
-          setLoading(false);
-          return;
-        }
-        
-        // Si es 404 u otro, el bucle continuará al siguiente modelo...
+      if (candidates.length === 0) {
+        throw new Error("No se encontraron modelos compatibles en tu cuenta de Google AI.");
       }
-    }
 
-    setError(`No se pudo conectar con ningún modelo. Último error: ${lastErrorMessage}`);
-    setLoading(false);
+      let usedModels: string[] = [];
+      let lastError = "";
+
+      // 3. Bucle de reintentos inteligente
+      for (const modelInfo of candidates) {
+        const modelName = modelInfo.name;
+        usedModels.push(modelName);
+
+        try {
+          console.log(`🤖 Intentando con candidato: ${modelName}`);
+          const model = genAI.getGenerativeModel({ model: modelName });
+
+          const result = await model.generateContent([
+            { text: promptText },
+            { inlineData: { data: base64String, mimeType: "application/pdf" } }
+          ]);
+
+          const response = await result.response;
+          let text = response.text();
+          
+          text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+          
+          const parsed = JSON.parse(text);
+          setScriptData(parsed);
+          setLoading(false);
+          return; // ÉXITO: Salimos de la función
+
+        } catch (err: any) {
+          lastError = err.message;
+          console.warn(`⚠️ Fallo en ${modelName}: ${lastError}`);
+
+          // Si el error es de cuota (429), esperamos un poco más antes de saltar al siguiente
+          if (lastError.includes("429")) {
+            console.log("Esperando 3 segundos por límite de cuota...");
+            await wait(3000);
+          } else {
+            // Para otros errores (como el 404 de antes), esperamos menos
+            await wait(1000);
+          }
+        }
+      }
+
+      // 4. Si llegamos aquí, es que nada funcionó
+      setError(`Fallo tras intentar con: ${usedModels.join(', ')}. Último error: ${lastError}`);
+
+    } catch (err: any) {
+      setError(`Error en el proceso de descubrimiento: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return { analyzePdf, loading, error, scriptData, setScriptData };
