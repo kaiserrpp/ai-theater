@@ -14,7 +14,7 @@ export const useGemini = () => {
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
 
-  const promptText = `Extrae los datos de este guion en JSON estricto: {"obra": "titulo", "personajes": ["nombre"], "guion": [{"p": "PERSONAJE", "t": "texto", "a": "acotacion"}]}.`;
+  const promptText = `Extract script data from this PDF into JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
 
   const analyzePdf = async (base64String: string) => {
     setLoading(true);
@@ -22,38 +22,42 @@ export const useGemini = () => {
     setScriptData(null);
 
     if (!apiKey) {
-      setError("Error: API Key no configurada.");
+      setError("Error: Falta EXPO_PUBLIC_API_KEY en las variables de entorno.");
       setLoading(false);
       return;
     }
 
     try {
-      // 1. LLAMADA REAL A LISTMODELS
-      // Usamos el cliente de genAI para listar lo que hay disponible para TU cuenta
-      console.log("📡 Solicitando lista oficial de modelos a Google...");
-      const responseList = await genAI.listModels();
+      // 1. DESCUBRIMIENTO REAL
+      console.log("🔍 Iniciando listModels()...");
+      const modelResponse = await genAI.listModels();
       
-      // 2. FILTRADO DINÁMICO
-      // Solo nos quedamos con los que permiten generar contenido
-      const dynamicCandidates = responseList.models
+      // 2. FILTRADO POR CAPACIDAD
+      // Obtenemos todos los modelos que Google dice que tu clave puede usar para generar contenido
+      const dynamicModels = modelResponse.models
         .filter(m => m.supportedGenerationMethods.includes('generateContent'))
         .map(m => m.name);
 
-      if (dynamicCandidates.length === 0) {
-        throw new Error("Google no devolvió ningún modelo compatible con generateContent.");
+      if (dynamicModels.length === 0) {
+        throw new Error("Google devolvió una lista vacía de modelos para tu API Key.");
       }
 
-      console.log("✅ Modelos reales detectados:", dynamicCandidates);
+      console.log("✅ Modelos vivos detectados:", dynamicModels);
 
-      let usedModels: string[] = [];
       let lastError = "";
+      let triedModels: string[] = [];
 
-      // 3. BUCLE DE REINTENTOS SOBRE LA LISTA REAL
-      for (const modelName of dynamicCandidates) {
-        usedModels.push(modelName);
+      // 3. BUCLE DE EJECUCIÓN
+      for (const modelName of dynamicModels) {
+        triedModels.push(modelName);
         try {
-          console.log(`🤖 Probando modelo oficial: ${modelName}`);
-          const model = genAI.getGenerativeModel({ model: modelName });
+          console.log(`🚀 Intentando con el modelo oficial: ${modelName}`);
+          
+          const model = genAI.getGenerativeModel({ 
+            model: modelName,
+            // Forzamos la configuración de respuesta para evitar que divague
+            generationConfig: { responseMimeType: "application/json" }
+          });
 
           const result = await model.generateContent([
             { text: promptText },
@@ -63,28 +67,33 @@ export const useGemini = () => {
           const response = await result.response;
           const text = response.text();
           
-          const jsonStart = text.indexOf('{');
-          const jsonEnd = text.lastIndexOf('}') + 1;
-          const cleanJson = text.substring(jsonStart, jsonEnd);
+          // Limpieza de JSON
+          const start = text.indexOf('{');
+          const end = text.lastIndexOf('}') + 1;
+          const cleanJson = text.substring(start, end);
           
           setScriptData(JSON.parse(cleanJson));
           setLoading(false);
-          return; 
+          return; // Éxito total
 
         } catch (err: any) {
           lastError = err.message;
-          console.warn(`❌ ${modelName} falló: ${lastError}`);
-          
+          console.warn(`❌ Fallo en ${modelName}:`, lastError);
+
+          // Si el error es de cuota (429), pausamos para no quemar el siguiente modelo al instante
           if (lastError.includes("429")) {
-            await wait(2500); // Si es cuota, pausa para respirar
+            await wait(3000);
           }
+          // Si el error es 404, el bucle sigue inmediatamente al siguiente modelo de la lista real
         }
       }
 
-      setError(`Agotados modelos oficiales: ${usedModels.join(', ')}. Último error: ${lastError}`);
+      // Si terminamos el bucle sin éxito
+      setError(`Modelos oficiales intentados: ${triedModels.join(', ')}. Error final: ${lastError}`);
 
     } catch (err: any) {
-      setError(`Error al listar o procesar: ${err.message}`);
+      // Este catch atrapa fallos en listModels() o errores de red generales
+      setError(`Error en fase de descubrimiento: ${err.message}`);
     } finally {
       setLoading(false);
     }
