@@ -15,7 +15,6 @@ export const HomeScreen = () => {
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [isRehearsing, setIsRehearsing] = useState<boolean>(false);
 
-  // Guardar automáticamente cuando termine todo el proceso
   useEffect(() => {
     if (scriptData && !loading && fileName && currentChunkIndex === totalChunks - 1) {
       saveScript(fileName, scriptData);
@@ -28,6 +27,10 @@ export const HomeScreen = () => {
       setFileName(result.assets[0].name);
       analyzeInStages(result.assets[0].uri, 'application/pdf');
     }
+  };
+
+  const toggleRole = (role: string) => {
+    setMyRoles(prev => prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]);
   };
 
   if (isRehearsing && scriptData) {
@@ -43,33 +46,52 @@ export const HomeScreen = () => {
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Teatro IA 🎭</Text>
         
-        {error && (
-          <View style={styles.errorBox}><Text style={styles.errorText}>⚠️ {error}</Text></View>
-        )}
+        {error && <View style={styles.errorBox}><Text style={styles.errorText}>⚠️ {error}</Text></View>}
 
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingMsg}>{statusText}</Text>
-            {totalChunks > 0 && (
-              <View style={styles.progressBox}>
-                <Text style={styles.progressText}>
-                  Progreso: {Math.round(((currentChunkIndex + 1) / totalChunks) * 100)}%
-                </Text>
-                <Text style={styles.subText}>{currentChunkIndex + 1} de {totalChunks} escenas</Text>
+        {(loading || scriptData) && !isRehearsing ? (
+          <View style={styles.section}>
+            {loading && (
+              <View style={styles.loadingHeader}>
+                <ActivityIndicator size="small" color="#007AFF" />
+                <Text style={styles.statusText}>{statusText} ({currentChunkIndex + 1}/{totalChunks})</Text>
               </View>
             )}
-            {/* Botón para empezar ya con lo que tengamos procesado */}
-            {scriptData && scriptData.guion.length > 5 && (
-              <TouchableOpacity style={styles.btnPartial} onPress={() => setIsRehearsing(true)}>
-                <Text style={styles.btnText}>🎬 Empezar con lo que hay</Text>
+
+            <Text style={styles.resultTitle}>{scriptData?.obra || "Procesando..."}</Text>
+            
+            <Text style={styles.subtitle}>Selecciona tu personaje (puedes hacerlo ya):</Text>
+            <View style={styles.tags}>
+              {scriptData?.personajes.map((p, i) => (
+                <TouchableOpacity 
+                  key={i} 
+                  style={[styles.tag, myRoles.includes(p) && styles.tagS]} 
+                  onPress={() => toggleRole(p)}
+                >
+                  <Text style={{color: myRoles.includes(p) ? '#2e7d32' : '#007AFF'}}>
+                    {myRoles.includes(p) ? '✅ ' : ''}{p}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.btnMain, myRoles.length === 0 && {backgroundColor: '#ccc'}]} 
+              onPress={() => setIsRehearsing(true)} 
+              disabled={myRoles.length === 0}
+            >
+              <Text style={styles.btnText}>🎬 Comenzar Ensayo ({scriptData?.guion.length || 0} líneas)</Text>
+            </TouchableOpacity>
+
+            {!loading && (
+              <TouchableOpacity onPress={() => {setScriptData(null); setMyRoles([]);}} style={styles.btnBack}>
+                <Text style={{color: '#666'}}>← Volver</Text>
               </TouchableOpacity>
             )}
           </View>
-        ) : !scriptData ? (
+        ) : (
           <View style={styles.section}>
             <TouchableOpacity style={styles.btnMain} onPress={handlePickDocument}>
-              <Text style={styles.btnText}>📄 Subir Guión y Procesar por Escenas</Text>
+              <Text style={styles.btnText}>📄 Subir Guión (PDF)</Text>
             </TouchableOpacity>
 
             {savedScripts.length > 0 && (
@@ -87,22 +109,6 @@ export const HomeScreen = () => {
               </View>
             )}
           </View>
-        ) : (
-          <View style={styles.section}>
-            <Text style={styles.resultTitle}>{scriptData.obra}</Text>
-            <Text style={styles.subtitle}>Selecciona tu(s) personaje(s):</Text>
-            <View style={styles.tags}>
-              {scriptData.personajes.map((p, i) => (
-                <TouchableOpacity key={i} style={[styles.tag, myRoles.includes(p) && styles.tagS]} onPress={() => setMyRoles(prev => prev.includes(p) ? prev.filter(r => r!==p) : [...prev, p])}>
-                  <Text style={{color: myRoles.includes(p) ? '#2e7d32' : '#007AFF'}}>{myRoles.includes(p) ? '✅ ' : ''}{p}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity style={styles.btnMain} onPress={() => setIsRehearsing(true)} disabled={myRoles.length === 0}>
-              <Text style={styles.btnText}>🎬 Comenzar Ensayo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setScriptData(null)} style={styles.btnBack}><Text>← Volver</Text></TouchableOpacity>
-          </View>
         )}
         <VersionBadge />
       </ScrollView>
@@ -113,14 +119,10 @@ export const HomeScreen = () => {
 const styles = StyleSheet.create({
   container: { padding: 20, alignItems: 'center' },
   title: { fontSize: 32, fontWeight: '800', marginBottom: 20 },
-  loadingContainer: { width: '100%', alignItems: 'center', marginTop: 40 },
-  loadingMsg: { marginTop: 15, fontSize: 16, fontWeight: '600', textAlign: 'center' },
-  progressBox: { marginTop: 20, alignItems: 'center' },
-  progressText: { fontSize: 24, fontWeight: 'bold', color: '#007AFF' },
-  subText: { fontSize: 14, color: '#666' },
+  loadingHeader: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', padding: 10, borderRadius: 20, marginBottom: 20 },
+  statusText: { marginLeft: 10, color: '#007AFF', fontWeight: '600', fontSize: 12 },
   section: { width: '100%' },
   btnMain: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center' },
-  btnPartial: { backgroundColor: '#34C759', padding: 15, borderRadius: 12, marginTop: 30 },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   btnBack: { marginTop: 20, alignItems: 'center' },
   errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20 },
@@ -131,8 +133,8 @@ const styles = StyleSheet.create({
   cardT: { fontWeight: 'bold' },
   cardD: { fontSize: 12, color: '#999' },
   resultTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
-  subtitle: { textAlign: 'center', color: '#666', marginBottom: 15 },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20, justifyContent: 'center' },
-  tag: { padding: 10, backgroundColor: '#f0f7ff', borderRadius: 15 },
-  tagS: { backgroundColor: '#e8f5e9' }
+  subtitle: { textAlign: 'center', color: '#666', marginBottom: 15, fontSize: 14 },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 30, justifyContent: 'center' },
+  tag: { padding: 10, backgroundColor: '#f0f7ff', borderRadius: 15, borderWidth: 1, borderColor: '#d0e3ff' },
+  tagS: { backgroundColor: '#e8f5e9', borderColor: '#a5d6a7' }
 });

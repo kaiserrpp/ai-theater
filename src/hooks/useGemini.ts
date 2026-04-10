@@ -19,182 +19,111 @@ export const useGemini = () => {
   const [chunks, setChunks] = useState<string[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(-1);
 
-  // 1. OBTENCIÓN DINÁMICA DE MODELOS CON CHIVATOS DE ERROR
   useEffect(() => {
     const fetchModels = async () => {
-      if (!API_KEY) {
-        setError("Error crítico: No hay API_KEY configurada en el proyecto.");
-        return;
-      }
-      
+      if (!API_KEY) return;
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
         const data = await response.json();
-        
-        // Si Google devuelve un status de error (ej. 403 Forbidden, 400 Bad Request)
-        if (!response.ok) {
-          throw new Error(data.error?.message || `Error HTTP del servidor: ${response.status}`);
-        }
-
-        if (data.models) {
-          // Filtramos solo los que soportan generación de contenido (sin forzar nombres 1.5)
+        if (response.ok && data.models) {
           const utiles = data.models
             .filter((m: any) => m.supportedGenerationMethods.includes('generateContent'))
             .map((m: any) => m.name.replace('models/', ''));
-          
-          if (utiles.length === 0) {
-            setError("Google respondió correctamente, pero NO devolvió modelos que soporten generación de texto.");
-          } else {
-            setAvailableModels(utiles);
-          }
-        } else {
-           setError("Google respondió, pero el JSON no contenía la lista de modelos.");
+          setAvailableModels(utiles);
         }
-      } catch (err: any) {
-        setError(`Excepción al obtener modelos: ${err.message}`);
-      }
+      } catch (err) {}
     };
-    
     fetchModels();
   }, []);
 
   const uploadAndWaitForActive = async (localUri: string, mimeType: string) => {
-    try {
-      setStatusText("Empaquetando PDF...");
-      const fileResp = await fetch(localUri);
-      const blob = await fileResp.blob();
+    const fileResp = await fetch(localUri);
+    const blob = await fileResp.blob();
+    const uploadResp = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`, {
+      method: 'POST',
+      headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Header-Content-Type': mimeType, 'Content-Type': mimeType },
+      body: blob
+    });
+    const uploadData = await uploadResp.json();
+    const fileUri = uploadData.file.uri;
+    const fileName = uploadData.file.name;
 
-      setStatusText("Enviando PDF a Google...");
-      const uploadResp = await fetch(
-        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`,
-        { method: 'POST', headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Header-Content-Type': mimeType, 'Content-Type': mimeType }, body: blob }
-      );
-
-      const uploadData = await uploadResp.json();
-      if (!uploadResp.ok) throw new Error(uploadData.error?.message || "Error al subir");
-
-      const fileUri = uploadData.file.uri;
-      const fileName = uploadData.file.name;
-
-      setStatusText("Google está procesando el guion...");
-      let isReady = false;
-      let attempts = 0;
-      
-      while (!isReady && attempts < 20) { 
-        await wait(3000);
-        attempts++;
-        setStatusText(`Google procesando guion... (Comprobación ${attempts})`);
-        
-        const checkResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${API_KEY}`);
-        const checkData = await checkResp.json();
-        
-        if (checkData.state === "ACTIVE") isReady = true;
-        else if (checkData.state === "FAILED") throw new Error("Google falló al procesar el PDF.");
-      }
-
-      if (!isReady) throw new Error("Tiempo de espera agotado en Google.");
-      return fileUri;
-    } catch (e: any) {
-      throw new Error(`${e.message}`);
+    let isReady = false;
+    let attempts = 0;
+    while (!isReady && attempts < 20) { 
+      await wait(3000);
+      attempts++;
+      setStatusText(`Preparando guion en Google... (${attempts})`);
+      const checkResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${API_KEY}`);
+      const checkData = await checkResp.json();
+      if (checkData.state === "ACTIVE") isReady = true;
     }
+    return fileUri;
   };
 
-  const tryAllModels = async (prompt: string, fileUri: string, requireJson: boolean = true) => {
+  const tryAllModels = async (prompt: string, fileUri: string) => {
     let lastErr = "";
-    
     for (const modelName of availableModels) {
       try {
-        const config: any = { maxOutputTokens: 8192 };
-        if (requireJson) config.responseMimeType = "application/json";
-
-        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: config });
-        const result = await model.generateContent([
-            { text: prompt },
-            { fileData: { mimeType: 'application/pdf', fileUri } }
-        ]);
+        const model = genAI.getGenerativeModel({ 
+          model: modelName, 
+          generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8192 } 
+        });
+        const result = await model.generateContent([{ text: prompt }, { fileData: { mimeType: 'application/pdf', fileUri } }]);
         return result.response.text();
       } catch (err: any) {
         lastErr = err.message;
-        console.warn(`[${modelName}] falló: ${lastErr}`);
-        if (lastErr.includes("429") || lastErr.includes("503")) await wait(4000);
-        else await wait(1500);
+        await wait(2000);
       }
     }
-    throw new Error(`Agotados los ${availableModels.length} modelos. Último error: ${lastErr}`);
+    throw new Error(lastErr);
   };
 
   const analyzeInStages = async (localUri: string, mimeType: string) => {
     setLoading(true); setError(null); setScriptData(null);
-    
-    // BLOQUEO DE SEGURIDAD
-    if (availableModels.length === 0) {
-        setError("No se puede iniciar el análisis: Google no ha devuelto modelos válidos.");
-        setLoading(false);
-        return;
-    }
-
     try {
       const fileUri = await uploadAndWaitForActive(localUri, mimeType);
-
-      setStatusText("Analizando estructura del documento...");
-      const indexPrompt = `Analiza este documento y extrae un índice secuencial de todas las escenas, actos o partes. 
-      Devuelve ÚNICAMENTE un array JSON válido de strings. Ejemplo: ["Acto 1 - Escena 1", "Acto 1 - Escena 2", "Acto 2"]. No devuelvas nada más que el array JSON.`;
+      setStatusText("Analizando estructura de escenas...");
       
-      const indexText = await tryAllModels(indexPrompt, fileUri, true);
-      
-      const startIdx = indexText.indexOf('[');
-      const endIdx = indexText.lastIndexOf(']') + 1;
-      const escenas = JSON.parse(indexText.substring(startIdx, endIdx));
-      
+      const indexPrompt = `Analiza el documento y devuelve un array JSON de las escenas/actos: ["Escena 1", "Escena 2"...]`;
+      const indexText = await tryAllModels(indexPrompt, fileUri);
+      const escenas = JSON.parse(indexText.substring(indexText.indexOf('['), indexText.lastIndexOf(']') + 1));
       setChunks(escenas);
-      
-      if (!Array.isArray(escenas) || escenas.length === 0) {
-          throw new Error("No se pudo detectar la estructura de escenas.");
-      }
 
       let finalGuion: Dialogue[] = [];
       let finalPersonajes = new Set<string>();
-      let obraTitle = "Obra Procesada";
+      let obraTitle = "Mi Obra";
 
       for (let i = 0; i < escenas.length; i++) {
         setCurrentChunkIndex(i);
-        setStatusText(`Extrayendo: ${escenas[i]} (${i + 1}/${escenas.length})...`);
+        setStatusText(`Procesando: ${escenas[i]}`);
         
-        const scenePrompt = `Extrae los diálogos ÚNICAMENTE de la parte correspondiente a "${escenas[i]}".
-        Devuelve SOLO JSON estricto con este formato: {"obra": "titulo general", "personajes": ["P1", "P2"], "guion": [{"p":"PERSONAJE", "t":"texto", "a":"acotacion"}]}`;
-        
+        const scenePrompt = `Extrae diálogos de "${escenas[i]}" en JSON: {"obra":"t", "personajes":["P1"], "guion":[{"p":"P", "t":"t", "a":"a"}]}`;
         try {
-          const chunkText = await tryAllModels(scenePrompt, fileUri, true);
-          
-          const start = chunkText.indexOf('{');
-          const end = chunkText.lastIndexOf('}') + 1;
-          const chunkData = JSON.parse(chunkText.substring(start, end));
+          const chunkText = await tryAllModels(scenePrompt, fileUri);
+          const chunkData = JSON.parse(chunkText.substring(chunkText.indexOf('{'), chunkText.lastIndexOf('}') + 1));
 
-          if (i === 0 && chunkData.obra) obraTitle = chunkData.obra;
-          chunkData.personajes?.forEach((p: string) => finalPersonajes.add(p));
+          if (i === 0) obraTitle = chunkData.obra || obraTitle;
+          chunkData.personajes?.forEach((p: string) => finalPersonajes.add(p.trim().toUpperCase()));
           
-          if (chunkData.guion && Array.isArray(chunkData.guion)) {
-             finalGuion = [...finalGuion, ...chunkData.guion];
+          if (chunkData.guion) {
+            finalGuion = [...finalGuion, ...chunkData.guion];
           }
-          
-          setScriptData({ 
-            obra: obraTitle, 
-            personajes: Array.from(finalPersonajes), 
-            guion: finalGuion 
+
+          // Actualización en tiempo real para la UI
+          setScriptData({
+            obra: obraTitle,
+            personajes: Array.from(finalPersonajes).sort(),
+            guion: finalGuion
           });
-          
-        } catch (e: any) {
-          console.warn(`Error en escena ${escenas[i]}:`, e.message);
-          setStatusText(`Saltando "${escenas[i]}" por error de lectura...`);
-          await wait(2000);
+        } catch (e) {
+          console.warn("Error en escena", i);
         }
       }
-
-      setStatusText("¡Proceso completado con éxito!");
+      setStatusText("Completado");
       setLoading(false);
-
     } catch (err: any) {
-      setError(`${err.message}`);
+      setError(err.message);
       setLoading(false);
     }
   };
