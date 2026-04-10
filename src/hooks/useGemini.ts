@@ -14,8 +14,10 @@ export const useGemini = () => {
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  
+  // NUEVO: Estado para saber qué está haciendo la app exactamente
+  const [statusText, setStatusText] = useState<string>("");
 
-  // 1. Descubrimiento de modelos
   useEffect(() => {
     const fetchModels = async () => {
       if (!API_KEY) return;
@@ -28,19 +30,18 @@ export const useGemini = () => {
             .map((m: any) => m.name.replace('models/', ''));
           setAvailableModels(utiles);
         }
-      } catch (err) {} // Silencioso para no ensuciar la pantalla si tarda
+      } catch (err) {}
     };
     fetchModels();
   }, []);
 
-  // 2. Función para subir archivos pesados sin usar memoria local
   const uploadToGemini = async (localUri: string, mimeType: string) => {
     try {
-      // Obtenemos el archivo puro desde el móvil (sin Base64)
+      setStatusText("Paso 1: Preparando el archivo local...");
       const fileResp = await fetch(localUri);
       const blob = await fileResp.blob();
 
-      // Lo subimos directamente al servidor de archivos de Google
+      setStatusText("Paso 2: Subiendo archivo pesado a Google...");
       const uploadResp = await fetch(
         `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`,
         {
@@ -56,62 +57,66 @@ export const useGemini = () => {
 
       const data = await uploadResp.json();
       if (!uploadResp.ok) {
-        throw new Error(data.error?.message || "Error en el servidor de subida");
+        throw new Error(data.error?.message || "Error en el servidor de subida de Google");
       }
-      return data.file.uri; // Este es el enlace interno que usará la IA
+      return data.file.uri; 
     } catch (e: any) {
       throw new Error(`Fallo al subir el archivo: ${e.message}`);
     }
   };
 
-  // 3. El análisis
   const analyzeScript = async (localUri: string, mimeType: string) => {
     setLoading(true);
     setError(null);
     setScriptData(null);
+    setStatusText("Iniciando proceso...");
 
     if (availableModels.length === 0) {
-      setError("Esperando conexión con Google...");
+      setError("Esperando conexión con Google. Revisa tu red o API Key.");
       setLoading(false);
       return;
     }
 
     try {
-      console.log("⬆️ Subiendo PDF de forma optimizada a Google...");
+      // 1. Subida
       const geminiFileUri = await uploadToGemini(localUri, mimeType);
-      console.log("✅ PDF Subido. URI interna:", geminiFileUri);
-
+      
       const promptText = `Extract script data from this document into strict JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
 
       let lastError = "";
       
-      // Intentamos con los modelos disponibles
+      // 2. Análisis
       for (const modelName of availableModels) {
         try {
-          console.log(`🚀 Procesando texto con: ${modelName}`);
+          setStatusText(`Paso 3: Analizando con IA (${modelName})...`);
+          
           const model = genAI.getGenerativeModel({ 
             model: modelName,
             generationConfig: { responseMimeType: "application/json" }
           });
 
-          // AHORA PASAMOS LA URI DEL ARCHIVO, NO EL ARCHIVO ENTERO
           const result = await model.generateContent([
             { text: promptText },
             { fileData: { mimeType, fileUri: geminiFileUri } }
           ]);
 
+          setStatusText("Paso 4: Procesando respuesta...");
           const response = await result.response;
           const text = response.text();
           
           const start = text.indexOf('{');
           const end = text.lastIndexOf('}') + 1;
           setScriptData(JSON.parse(text.substring(start, end)));
+          
           setLoading(false);
-          return; // ¡ÉXITO!
+          return; 
 
         } catch (err: any) {
           lastError = err.message;
-          if (lastError.includes("429")) await wait(2500);
+          if (lastError.includes("429")) {
+             setStatusText("Límite alcanzado. Esperando 3 segundos para reintentar...");
+             await wait(3000);
+          }
         }
       }
       setError(`Agotados modelos disponibles. Último error: ${lastError}`);
@@ -122,5 +127,5 @@ export const useGemini = () => {
     }
   };
 
-  return { analyzeScript, loading, error, scriptData, setScriptData };
+  return { analyzeScript, loading, error, scriptData, setScriptData, statusText };
 };

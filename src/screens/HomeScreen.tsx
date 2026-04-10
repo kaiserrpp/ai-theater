@@ -16,7 +16,8 @@ import { useGemini } from '../hooks/useGemini';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 
 export const HomeScreen = () => {
-  const { analyzeScript, loading, error, scriptData, setScriptData } = useGemini();
+  // Extraemos statusText
+  const { analyzeScript, loading, error, scriptData, setScriptData, statusText } = useGemini();
   const { savedScripts, saveScript, deleteScript } = useLibrary();
 
   const [fileName, setFileName] = useState<string | null>(null);
@@ -65,8 +66,6 @@ export const HomeScreen = () => {
         setFileName(file.name);
         setIsFromLibrary(false);
         
-        // Magia limpia: Le pasamos directamente la ruta local a Gemini
-        // Sin conversiones a texto que revienten la memoria RAM
         analyzeScript(file.uri, 'application/pdf');
       }
     } catch (err) { 
@@ -103,8 +102,9 @@ export const HomeScreen = () => {
             <View style={styles.progressBarBackground}>
               <Animated.View style={[styles.progressBarFill, { width: progressAnim.interpolate({inputRange: [0, 100], outputRange: ['0%', '100%']}) }]} />
             </View>
-            <Text style={styles.loadingMsg}>Subiendo y analizando "{fileName}"...</Text>
-            <Text style={styles.loadingSubMsg}>Esto puede tardar unos segundos</Text>
+            <Text style={styles.loadingMsg}>Procesando "{fileName}"...</Text>
+            {/* AQUÍ MOSTRAMOS EL TEXTO EN VIVO */}
+            <Text style={styles.statusText}>{statusText}</Text>
           </View>
         ) : !scriptData ? (
           <View style={styles.section}>
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
   progressBarBackground: { width: '100%', height: 10, backgroundColor: '#eee', borderRadius: 5, marginTop: 20, overflow: 'hidden' },
   progressBarFill: { height: '100%', backgroundColor: '#007AFF' },
   loadingMsg: { marginTop: 15, color: '#333', fontWeight: '600', textAlign: 'center' },
-  loadingSubMsg: { marginTop: 5, color: '#777', fontSize: 12, textAlign: 'center' },
+  statusText: { marginTop: 8, color: '#007AFF', fontSize: 14, textAlign: 'center', fontWeight: '500' },
   lib: { marginTop: 40, width: '100%' },
   libTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 15, color: '#333' },
   card: { flexDirection: 'row', backgroundColor: '#fff', padding: 15, borderRadius: 12, marginBottom: 10, alignItems: 'center', shadowOpacity: 0.1, elevation: 2, borderWidth: 1, borderColor: '#f0f0f0' },
