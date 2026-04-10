@@ -75,12 +75,31 @@ export const useGemini = () => {
       for (let i = startAt; i < sceneList.length; i++) {
         setCurrentChunkIndex(i);
         setStatusText(`Extrayendo ${sceneList[i]}...`);
-        const model = genAI.getGenerativeModel({ model: availableModels[0] || "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json", temperature: 0.1 } });
-        const res = await model.generateContent([{ text: `Extrae diálogos íntegros de "${sceneList[i]}" en JSON: {"obra":"t", "personajes":["P1"], "guion":[{"p":"P", "t":"t", "a":"a"}]}. NO RESUMAS.` }, { fileData: { mimeType: 'application/pdf', fileUri: currentFileUri } }]);
-        const t = res.response.text();
-        const chunkData = JSON.parse(t.substring(t.indexOf('{'), t.lastIndexOf('}') + 1));
+        
+        // PROMPT AGRESIVO ANTI-RESÚMENES
+        const scenePrompt = `INSTRUCCIÓN CRÍTICA: Actúa como un copista literal. Busca en el documento la parte EXACTA correspondiente a la escena "${sceneList[i]}".
+        Tu tarea es transcribir PALABRA POR PALABRA todos los diálogos de esa escena.
+        REGLAS:
+        1. NO asumas nada, NO resumas, NO saltes líneas.
+        2. Copia desde la primera palabra hasta la última de la escena, sin omitir ni una coma.
+        3. Formato estricto JSON: {"obra":"Título", "personajes":["P1", "P2"], "guion":[{"p":"PERSONAJE", "t":"texto exacto", "a":"acotacion"}]}
+        Si omites una sola línea, arruinarás el ensayo del actor.`;
 
-        // ACTUALIZACIÓN DE PERSONAJES SIN DUPLICADOS
+        let chunkData;
+        for (const modelName of availableModels) {
+           try {
+              const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json", temperature: 0.0 } });
+              const res = await model.generateContent([{ text: scenePrompt }, { fileData: { mimeType: 'application/pdf', fileUri: currentFileUri } }]);
+              const t = res.response.text();
+              chunkData = JSON.parse(t.substring(t.indexOf('{'), t.lastIndexOf('}') + 1));
+              break; // Si triunfa, sale del bucle de modelos
+           } catch (e) {
+              await wait(2000); // Reintenta con otro modelo si falla
+           }
+        }
+        
+        if(!chunkData) throw new Error("Fallo al procesar la escena tras varios intentos");
+
         const updatedPersonajes = [...currentScript.personajes];
         chunkData.personajes?.forEach((p: string) => {
           const up = p.trim().toUpperCase();

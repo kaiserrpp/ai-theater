@@ -6,7 +6,6 @@ import { Dialogue } from '../hooks/useGemini';
 interface Props { guion: Dialogue[]; myRoles: string[]; filterScenes: string[]; onExit: () => void; }
 
 export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, onExit }) => {
-  // Filtro de escenas elegidas
   const filteredGuion = guion.filter((line, index) => {
     let currentScene = "";
     for (let i = index; i >= 0; i--) {
@@ -20,25 +19,17 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
   const isMyTurn = currentLine && myRoles.includes(currentLine.p);
   const isFinished = currentIndex >= filteredGuion.length;
 
-  // FUNCIÓN PARA AVANZAR LÍNEA
   const advanceLine = () => {
-    if (currentIndex < filteredGuion.length) {
-      setCurrentIndex(prev => prev + 1);
-    }
+    if (currentIndex < filteredGuion.length) setCurrentIndex(prev => prev + 1);
   };
 
-  // Lógica de Voz y Avance Automático
   useEffect(() => {
     Speech.stop();
     if (!isFinished && currentLine && currentLine.p !== 'ESCENA_SISTEMA') {
       if (!isMyTurn) {
-        // Siri habla y al terminar AVANZA AUTOMÁTICAMENTE
         Speech.speak(currentLine.t, { 
           language: 'es-ES',
-          onDone: () => {
-             // Pequeña pausa de medio segundo para que no sea atropellado
-             setTimeout(advanceLine, 500);
-          }
+          onDone: () => setTimeout(advanceLine, 500)
         });
       }
     }
@@ -47,7 +38,6 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
 
   const handleExit = () => { Speech.stop(); onExit(); };
 
-  // Salto automático de marcadores de escena
   if (currentLine?.p === 'ESCENA_SISTEMA') {
     return (
       <View style={styles.intro}>
@@ -76,17 +66,21 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
         ) : (
           <View style={[styles.box, isMyTurn && styles.myBox]}>
             <Text style={[styles.name, isMyTurn && {color: 'red'}]}>
-              {currentLine?.p} {isMyTurn ? "(¡TE TOCA!)" : ""}
+              {currentLine?.p}
             </Text>
             {currentLine?.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
-            <Text style={styles.text}>{isMyTurn ? "(Recita tu línea y pulsa Siguiente)" : currentLine?.t}</Text>
+            
+            {/* TEXTO AHORA VISIBLE PARA EL USUARIO */}
+            <Text style={[styles.text, isMyTurn && styles.myText]}>{currentLine?.t}</Text>
+            
+            {isMyTurn && <Text style={styles.myTurnHint}>👆 (Tu turno: lee y pulsa siguiente)</Text>}
           </View>
         )}
       </ScrollView>
 
       {!isFinished && (
         <TouchableOpacity style={[styles.footer, isMyTurn && {backgroundColor: 'red'}]} onPress={advanceLine}>
-          <Text style={styles.btnText}>{isMyTurn ? 'HECHO (Siguiente)' : 'Saltar / Siguiente'}</Text>
+          <Text style={styles.btnText}>{isMyTurn ? 'HECHO (Siguiente)' : 'Saltar línea'}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -106,6 +100,8 @@ const styles = StyleSheet.create({
   name: { fontSize: 22, fontWeight: '900', marginBottom: 10 },
   acot: { fontStyle: 'italic', color: '#666', marginBottom: 15 },
   text: { fontSize: 26, textAlign: 'center', lineHeight: 38 },
+  myText: { color: '#d32f2f', fontWeight: '500' },
+  myTurnHint: { marginTop: 20, fontSize: 14, color: '#d32f2f', fontWeight: 'bold' },
   footer: { backgroundColor: '#007AFF', padding: 25, alignItems: 'center' },
   btnNext: { backgroundColor: '#007AFF', padding: 20, borderRadius: 15, width: '100%', alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },

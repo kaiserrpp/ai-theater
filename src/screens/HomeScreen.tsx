@@ -26,7 +26,6 @@ export const HomeScreen = () => {
     if (mode === 'ALL') {
       setSelectedScenes(allScenes);
     } else {
-      // Filtramos escenas donde aparezcan mis personajes
       const mine = allScenes.filter(sceneTitle => {
         const start = scriptData?.guion.findIndex(l => l.p === 'ESCENA_SISTEMA' && l.t === sceneTitle) || 0;
         const endIdx = scriptData?.guion.findIndex((l, i) => i > start && l.p === 'ESCENA_SISTEMA');
@@ -36,6 +35,13 @@ export const HomeScreen = () => {
       setSelectedScenes(mine);
     }
     setIsRehearsing(true);
+  };
+
+  // FIX: Borrar el estado pendiente al retomar
+  const handleResume = () => {
+    const jobToResume = pendingJob;
+    setPendingJob(null);
+    analyzeInStages(null, jobToResume);
   };
 
   if (isRehearsing && scriptData) {
@@ -54,7 +60,7 @@ export const HomeScreen = () => {
         {pendingJob && !loading && !scriptData && (
           <View style={styles.resumeBox}>
             <Text style={styles.resumeTitle}>📍 Guion incompleto detectado</Text>
-            <TouchableOpacity style={styles.btnResume} onPress={() => analyzeInStages(null, pendingJob)}>
+            <TouchableOpacity style={styles.btnResume} onPress={handleResume}>
               <Text style={styles.btnText}>Retomar (Escena {pendingJob.index + 1})</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={async () => { await clearCheckpoint(); setPendingJob(null); }} style={{marginTop:10}}><Text style={{color:'red'}}>Descartar</Text></TouchableOpacity>
