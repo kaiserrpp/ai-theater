@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import * as Speech from 'expo-speech';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Dialogue } from '../hooks/useGemini';
 
@@ -11,7 +12,30 @@ interface Props {
 export const RehearsalView: React.FC<Props> = ({ guion, myRoles, onExit }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Funciones para encontrar el nombre de la escena actual
+  const currentLine = guion[currentIndex];
+  const isMyTurn = currentLine && myRoles.includes(currentLine.p);
+  const isFinished = currentIndex >= guion.length;
+
+  // EFECTO DE VOZ (SIRI)
+  useEffect(() => {
+    Speech.stop(); // Paramos cualquier voz anterior
+    
+    if (currentLine && currentLine.p !== 'ESCENA_SISTEMA' && !isFinished) {
+      if (!isMyTurn) {
+        // Si no es mi turno, que hable la IA
+        Speech.speak(currentLine.t, { language: 'es-ES', rate: 1.0 });
+      }
+    }
+    
+    // Limpieza al desmontar o cambiar de línea
+    return () => { Speech.stop(); };
+  }, [currentIndex, guion, myRoles, isFinished]);
+
+  const handleExit = () => {
+    Speech.stop();
+    onExit();
+  };
+
   const getCurrentSceneName = () => {
     for (let i = currentIndex; i >= 0; i--) {
       if (guion[i]?.p === 'ESCENA_SISTEMA') return guion[i].t;
@@ -19,53 +43,47 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, onExit }) => {
     return "Inicio de Obra";
   };
 
-  // Navegación a Escena Siguiente
   const nextScene = () => {
+    Speech.stop();
     for (let i = currentIndex + 1; i < guion.length; i++) {
       if (guion[i].p === 'ESCENA_SISTEMA') {
-        setCurrentIndex(i + 1); // Saltamos al primer diálogo de la escena
+        setCurrentIndex(i + 1);
         return;
       }
     }
   };
 
-  // Navegación a Escena Anterior
   const prevScene = () => {
+    Speech.stop();
     let foundCurrent = false;
     for (let i = currentIndex - 1; i >= 0; i--) {
       if (guion[i].p === 'ESCENA_SISTEMA') {
         if (!foundCurrent) {
-          foundCurrent = true; // Ignoramos el marcador de la escena actual
+          foundCurrent = true;
         } else {
-          setCurrentIndex(i + 1); // Saltamos al primer diálogo de la anterior
+          setCurrentIndex(i + 1);
           return;
         }
       }
     }
-    setCurrentIndex(0); // Si no hay más atrás, vamos al inicio absoluto
+    setCurrentIndex(0);
   };
 
   const advanceLine = () => {
+    Speech.stop();
     if (currentIndex < guion.length) setCurrentIndex(currentIndex + 1);
   };
 
-  const currentLine = guion[currentIndex];
-  
-  // Si el marcador actual es de sistema, saltamos automáticamente
   if (currentLine?.p === 'ESCENA_SISTEMA') {
     setTimeout(() => setCurrentIndex(currentIndex + 1), 50);
     return null; 
   }
 
-  const isMyTurn = currentLine && myRoles.includes(currentLine.p);
-  const isFinished = currentIndex >= guion.length;
-
   return (
     <View style={styles.container}>
       
-      {/* BARRA SUPERIOR DE NAVEGACIÓN */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={onExit}>
+        <TouchableOpacity style={styles.headerBtn} onPress={handleExit}>
           <Text style={styles.headerBtnText}>⬅ Volver</Text>
         </TouchableOpacity>
         
@@ -76,13 +94,12 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, onExit }) => {
         </View>
       </View>
 
-      {/* ÁREA DE ENSAYO */}
       <ScrollView contentContainerStyle={styles.scrollArea}>
         {isFinished ? (
           <View style={styles.finishedBox}>
             <Text style={styles.finishedTitle}>Has llegado al final de las líneas extraídas.</Text>
-            <Text style={styles.finishedSub}>Si la IA sigue extrayendo la obra de fondo, en breve aparecerán más diálogos aquí. Puedes pulsar "Volver" para comprobar el progreso.</Text>
-            <TouchableOpacity style={styles.btnAdvance} onPress={onExit}>
+            <Text style={styles.finishedSub}>Si la IA sigue extrayendo la obra de fondo, en breve aparecerán más diálogos aquí. Pulsa "Volver" para comprobar el progreso.</Text>
+            <TouchableOpacity style={styles.btnAdvance} onPress={handleExit}>
               <Text style={styles.btnText}>Volver al Menú</Text>
             </TouchableOpacity>
           </View>
@@ -106,7 +123,6 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, onExit }) => {
         )}
       </ScrollView>
 
-      {/* BOTÓN DE AVANCE INFERIOR */}
       {!isFinished && (
         <View style={styles.footer}>
           <TouchableOpacity 

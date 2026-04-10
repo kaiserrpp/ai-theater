@@ -87,8 +87,10 @@ export const useGemini = () => {
     let lastErr = "";
     for (const modelName of availableModels) {
       try {
-        const config: any = { maxOutputTokens: 8192 };
+        // TEMPERATURA 0.1: Le quitamos la creatividad para que copie exactamente lo que pone.
+        const config: any = { maxOutputTokens: 8192, temperature: 0.1 };
         if (requireJson) config.responseMimeType = "application/json";
+        
         const model = genAI.getGenerativeModel({ model: modelName, generationConfig: config });
         const result = await model.generateContent([{ text: prompt }, { fileData: { mimeType: 'application/pdf', fileUri } }]);
         return result.response.text();
@@ -130,8 +132,11 @@ export const useGemini = () => {
         setCurrentChunkIndex(i);
         setStatusText(`Extrayendo: ${escenas[i]} (${i + 1}/${escenas.length})...`);
         
-        const scenePrompt = `Extrae los diálogos ÚNICAMENTE de "${escenas[i]}".
-        Devuelve SOLO JSON estricto: {"obra": "titulo", "personajes": ["P1"], "guion": [{"p":"PERSONAJE", "t":"texto", "a":"acotacion"}]}`;
+        // PROMPT ANTI-PEREZA
+        const scenePrompt = `Busca en el documento la parte EXACTA correspondiente a "${escenas[i]}".
+        Transcribe TODOS Y CADA UNO de los diálogos de esa parte. 
+        REGLA DE ORO: NO resumas. NO omitas ni una sola línea. Copia el texto palabra por palabra desde que empieza la escena hasta que termina.
+        Devuelve SOLO JSON estricto: {"obra": "titulo", "personajes": ["P1"], "guion": [{"p":"PERSONAJE", "t":"texto exacto", "a":"acotacion"}]}`;
         
         try {
           const chunkText = await tryAllModels(scenePrompt, fileUri, true);
@@ -143,7 +148,6 @@ export const useGemini = () => {
           chunkData.personajes?.forEach((p: string) => finalPersonajes.add(p));
           
           if (chunkData.guion && Array.isArray(chunkData.guion)) {
-             // MARCADOR DE ESCENA INYECTADO AQUÍ
              const sceneMarker: Dialogue = { p: 'ESCENA_SISTEMA', t: escenas[i], a: '' };
              finalGuion = [...finalGuion, sceneMarker, ...chunkData.guion];
           }
