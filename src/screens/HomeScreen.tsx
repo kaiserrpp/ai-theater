@@ -1,90 +1,33 @@
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated, Easing,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { VersionBadge } from '../components/VersionBadge';
 import { useGemini } from '../hooks/useGemini';
-import { SavedScript, useLibrary } from '../hooks/useLibrary';
+import { useLibrary } from '../hooks/useLibrary';
 
 export const HomeScreen = () => {
-  // Ahora usamos el useGemini que tiene el sistema de "Polling" (espera inteligente)
-  const { analyzeScript, loading, error, scriptData, setScriptData, statusText } = useGemini();
+  const { analyzeInStages, loading, error, scriptData, setScriptData, statusText, currentChunkIndex, totalChunks } = useGemini();
   const { savedScripts, saveScript, deleteScript } = useLibrary();
 
   const [fileName, setFileName] = useState<string | null>(null);
-  const [localError, setLocalError] = useState<string | null>(null);
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [isRehearsing, setIsRehearsing] = useState<boolean>(false);
-  const [isFromLibrary, setIsFromLibrary] = useState<boolean>(false);
 
+  // Guardar automáticamente cuando termine todo el proceso
   useEffect(() => {
-    if (scriptData && !isFromLibrary && fileName && !loading) {
+    if (scriptData && !loading && fileName && currentChunkIndex === totalChunks - 1) {
       saveScript(fileName, scriptData);
-      setIsFromLibrary(true);
     }
-  }, [scriptData, loading, isFromLibrary, fileName]);
-
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  
-  useEffect(() => {
-    if (loading) {
-      setLocalError(null);
-      progressAnim.setValue(0);
-      Animated.timing(progressAnim, { 
-        toValue: 90, 
-        duration: 25000, 
-        easing: Easing.out(Easing.cubic), 
-        useNativeDriver: false 
-      }).start();
-    } else {
-      Animated.timing(progressAnim, { 
-        toValue: 100, 
-        duration: 500, 
-        useNativeDriver: false 
-      }).start();
-    }
-  }, [loading]);
-
-  const loadSavedScript = (script: SavedScript) => {
-    setFileName(script.fileName);
-    setScriptData(script.data);
-    setIsFromLibrary(true);
-    setMyRoles([]);
-    setLocalError(null);
-  };
+  }, [scriptData, loading]);
 
   const handlePickDocument = async () => {
-    try {
-      setLocalError(null);
-      const result = await DocumentPicker.getDocumentAsync({ 
-        type: "application/pdf", 
-        copyToCacheDirectory: true 
-      });
-      
-      if (!result.canceled) {
-        const file = result.assets[0];
-        setFileName(file.name);
-        setIsFromLibrary(false);
-        
-        // Llamamos a la función principal que procesa la obra entera
-        analyzeScript(file.uri, 'application/pdf');
-      }
-    } catch (err) { 
-        setLocalError("Error abriendo el selector de archivos.");
+    const result = await DocumentPicker.getDocumentAsync({ type: "application/pdf" });
+    if (!result.canceled) {
+      setFileName(result.assets[0].name);
+      analyzeInStages(result.assets[0].uri, 'application/pdf');
     }
-  };
-
-  const resetAll = () => {
-    setScriptData(null); setFileName(null); setMyRoles([]); setIsRehearsing(false); setIsFromLibrary(false); setLocalError(null);
   };
 
   if (isRehearsing && scriptData) {
@@ -100,40 +43,45 @@ export const HomeScreen = () => {
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Teatro IA 🎭</Text>
         
-        {(error || localError) && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>⚠️ {error || localError}</Text>
-          </View>
+        {error && (
+          <View style={styles.errorBox}><Text style={styles.errorText}>⚠️ {error}</Text></View>
         )}
 
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#007AFF" />
-            <View style={styles.progressBarBackground}>
-              <Animated.View style={[styles.progressBarFill, { width: progressAnim.interpolate({inputRange: [0, 100], outputRange: ['0%', '100%']}) }]} />
-            </View>
-            <Text style={styles.loadingMsg}>Procesando "{fileName}"...</Text>
-            {/* Este es el chivato que nos dirá por qué intento de Polling va */}
-            <Text style={styles.statusText}>{statusText}</Text>
+            <Text style={styles.loadingMsg}>{statusText}</Text>
+            {totalChunks > 0 && (
+              <View style={styles.progressBox}>
+                <Text style={styles.progressText}>
+                  Progreso: {Math.round(((currentChunkIndex + 1) / totalChunks) * 100)}%
+                </Text>
+                <Text style={styles.subText}>{currentChunkIndex + 1} de {totalChunks} escenas</Text>
+              </View>
+            )}
+            {/* Botón para empezar ya con lo que tengamos procesado */}
+            {scriptData && scriptData.guion.length > 5 && (
+              <TouchableOpacity style={styles.btnPartial} onPress={() => setIsRehearsing(true)}>
+                <Text style={styles.btnText}>🎬 Empezar con lo que hay</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : !scriptData ? (
           <View style={styles.section}>
             <TouchableOpacity style={styles.btnMain} onPress={handlePickDocument}>
-              <Text style={styles.btnText}>📄 Subir Guión (PDF)</Text>
+              <Text style={styles.btnText}>📄 Subir Guión y Procesar por Escenas</Text>
             </TouchableOpacity>
 
             {savedScripts.length > 0 && (
               <View style={styles.lib}>
-                <Text style={styles.libTitle}>📚 Tus Guiones Guardados</Text>
+                <Text style={styles.libTitle}>📚 Biblioteca</Text>
                 {savedScripts.map(s => (
                   <View key={s.id} style={styles.card}>
-                    <TouchableOpacity style={{flex:1}} onPress={() => loadSavedScript(s)}>
+                    <TouchableOpacity style={{flex:1}} onPress={() => { setScriptData(s.data); setFileName(s.fileName); }}>
                       <Text style={styles.cardT}>{s.data.obra}</Text>
                       <Text style={styles.cardD}>{s.fileName}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteScript(s.id)}>
-                      <Text>🗑️</Text>
-                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => deleteScript(s.id)}><Text>🗑️</Text></TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -142,7 +90,7 @@ export const HomeScreen = () => {
         ) : (
           <View style={styles.section}>
             <Text style={styles.resultTitle}>{scriptData.obra}</Text>
-            <Text style={styles.subtitle}>Personajes detectados:</Text>
+            <Text style={styles.subtitle}>Selecciona tu(s) personaje(s):</Text>
             <View style={styles.tags}>
               {scriptData.personajes.map((p, i) => (
                 <TouchableOpacity key={i} style={[styles.tag, myRoles.includes(p) && styles.tagS]} onPress={() => setMyRoles(prev => prev.includes(p) ? prev.filter(r => r!==p) : [...prev, p])}>
@@ -153,10 +101,9 @@ export const HomeScreen = () => {
             <TouchableOpacity style={styles.btnMain} onPress={() => setIsRehearsing(true)} disabled={myRoles.length === 0}>
               <Text style={styles.btnText}>🎬 Comenzar Ensayo</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={resetAll} style={styles.btnBack}><Text style={{color:'#666'}}>← Volver al inicio</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setScriptData(null)} style={styles.btnBack}><Text>← Volver</Text></TouchableOpacity>
           </View>
         )}
-
         <VersionBadge />
       </ScrollView>
     </ScreenWrapper>
@@ -164,28 +111,28 @@ export const HomeScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { padding: 20, alignItems: 'center', flexGrow: 1 },
-  title: { fontSize: 32, fontWeight: '800', marginBottom: 20, color: '#111' },
-  subtitle: { fontSize: 16, color: '#666', marginBottom: 15 },
-  section: { width: '100%' },
-  btnMain: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center', shadowOpacity: 0.2, elevation: 4 },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
-  btnBack: { marginTop: 20, padding: 10, alignItems: 'center' },
-  errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20, width: '100%', borderWidth: 1, borderColor: '#ffcdd2' },
-  errorText: { color: '#c62828', fontSize: 14, textAlign: 'center', fontWeight: '500' },
+  container: { padding: 20, alignItems: 'center' },
+  title: { fontSize: 32, fontWeight: '800', marginBottom: 20 },
   loadingContainer: { width: '100%', alignItems: 'center', marginTop: 40 },
-  progressBarBackground: { width: '100%', height: 10, backgroundColor: '#eee', borderRadius: 5, marginTop: 20, overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: '#007AFF' },
-  loadingMsg: { marginTop: 15, color: '#333', fontWeight: '600', textAlign: 'center' },
-  statusText: { marginTop: 8, color: '#007AFF', fontSize: 14, textAlign: 'center', fontWeight: '500' },
-  lib: { marginTop: 40, width: '100%' },
-  libTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 15, color: '#333' },
-  card: { flexDirection: 'row', backgroundColor: '#fff', padding: 15, borderRadius: 12, marginBottom: 10, alignItems: 'center', shadowOpacity: 0.1, elevation: 2, borderWidth: 1, borderColor: '#f0f0f0' },
-  cardT: { fontWeight: 'bold', fontSize: 16, color: '#111' },
-  cardD: { fontSize: 12, color: '#999', marginTop: 2 },
-  deleteBtn: { padding: 10, marginLeft: 10 },
-  resultTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 5, color: '#111', textAlign: 'center' },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 30, justifyContent: 'center', marginTop: 10 },
-  tag: { paddingVertical: 10, paddingHorizontal: 15, backgroundColor: '#f0f7ff', borderRadius: 20 },
+  loadingMsg: { marginTop: 15, fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  progressBox: { marginTop: 20, alignItems: 'center' },
+  progressText: { fontSize: 24, fontWeight: 'bold', color: '#007AFF' },
+  subText: { fontSize: 14, color: '#666' },
+  section: { width: '100%' },
+  btnMain: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center' },
+  btnPartial: { backgroundColor: '#34C759', padding: 15, borderRadius: 12, marginTop: 30 },
+  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  btnBack: { marginTop: 20, alignItems: 'center' },
+  errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20 },
+  errorText: { color: '#c62828', textAlign: 'center' },
+  lib: { marginTop: 30, width: '100%' },
+  libTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
+  card: { flexDirection: 'row', backgroundColor: '#fff', padding: 15, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#eee' },
+  cardT: { fontWeight: 'bold' },
+  cardD: { fontSize: 12, color: '#999' },
+  resultTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
+  subtitle: { textAlign: 'center', color: '#666', marginBottom: 15 },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20, justifyContent: 'center' },
+  tag: { padding: 10, backgroundColor: '#f0f7ff', borderRadius: 15 },
   tagS: { backgroundColor: '#e8f5e9' }
 });
