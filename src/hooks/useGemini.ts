@@ -14,8 +14,6 @@ export const useGemini = () => {
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  
-  // NUEVO: Estado para saber qué está haciendo la app exactamente
   const [statusText, setStatusText] = useState<string>("");
 
   useEffect(() => {
@@ -37,11 +35,10 @@ export const useGemini = () => {
 
   const uploadToGemini = async (localUri: string, mimeType: string) => {
     try {
-      setStatusText("Paso 1: Preparando el archivo local...");
+      setStatusText("Subiendo PDF a Google...");
       const fileResp = await fetch(localUri);
       const blob = await fileResp.blob();
 
-      setStatusText("Paso 2: Subiendo archivo pesado a Google...");
       const uploadResp = await fetch(
         `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`,
         {
@@ -56,76 +53,78 @@ export const useGemini = () => {
       );
 
       const data = await uploadResp.json();
-      if (!uploadResp.ok) {
-        throw new Error(data.error?.message || "Error en el servidor de subida de Google");
-      }
+      if (!uploadResp.ok) throw new Error(data.error?.message || "Error al subir");
       return data.file.uri; 
     } catch (e: any) {
-      throw new Error(`Fallo al subir el archivo: ${e.message}`);
+      throw new Error(`Error en subida: ${e.message}`);
     }
   };
 
-  const analyzeScript = async (localUri: string, mimeType: string) => {
-    setLoading(true);
-    setError(null);
-    setScriptData(null);
-    setStatusText("Iniciando proceso...");
-
-    if (availableModels.length === 0) {
-      setError("Esperando conexión con Google. Revisa tu red o API Key.");
-      setLoading(false);
-      return;
-    }
+  // --- EXPERIMENTO: SOLO PERSONAJES ---
+  const analyzeCharactersOnly = async (localUri: string, mimeType: string) => {
+    setLoading(true); setError(null); setScriptData(null);
+    setStatusText("Iniciando prueba de velocidad (Solo Personajes)...");
 
     try {
-      // 1. Subida
       const geminiFileUri = await uploadToGemini(localUri, mimeType);
-      
-      const promptText = `Extract script data from this document into strict JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
+      setStatusText("Esperando digestión de Google (5s)...");
+      await wait(5000);
 
-      let lastError = "";
-      
-      // 2. Análisis
+      // Prompt mínimo: Salida muy pequeña
+      const promptText = `Extract ONLY the title and unique character names. Format: {"obra": "string", "personajes": ["string"], "guion": []}`;
+
       for (const modelName of availableModels) {
         try {
-          setStatusText(`Paso 3: Analizando con IA (${modelName})...`);
-          
-          const model = genAI.getGenerativeModel({ 
-            model: modelName,
-            generationConfig: { responseMimeType: "application/json" }
-          });
-
-          const result = await model.generateContent([
-            { text: promptText },
-            { fileData: { mimeType, fileUri: geminiFileUri } }
-          ]);
-
-          setStatusText("Paso 4: Procesando respuesta...");
+          setStatusText(`Analizando personajes con ${modelName}...`);
+          const model = genAI.getGenerativeModel({ model: modelName });
+          const result = await model.generateContent([{ text: promptText }, { fileData: { mimeType, fileUri: geminiFileUri } }]);
           const response = await result.response;
           const text = response.text();
           
           const start = text.indexOf('{');
           const end = text.lastIndexOf('}') + 1;
           setScriptData(JSON.parse(text.substring(start, end)));
-          
           setLoading(false);
-          return; 
-
+          return;
         } catch (err: any) {
-          lastError = err.message;
-          if (lastError.includes("429")) {
-             setStatusText("Límite alcanzado. Esperando 3 segundos para reintentar...");
-             await wait(3000);
-          }
+          console.warn(err);
         }
       }
-      setError(`Agotados modelos disponibles. Último error: ${lastError}`);
+      setError("No se pudo obtener la lista de personajes.");
     } catch (err: any) {
-      setError(`Error general: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+      setError(err.message);
+    } finally { setLoading(false); }
   };
 
-  return { analyzeScript, loading, error, scriptData, setScriptData, statusText };
+  // --- FUNCIÓN ORIGINAL (OBRA COMPLETA) ---
+  const analyzeScript = async (localUri: string, mimeType: string) => {
+    setLoading(true); setError(null); setScriptData(null);
+    try {
+      const geminiFileUri = await uploadToGemini(localUri, mimeType);
+      setStatusText("Procesando PDF completo (Esto es lo que tarda)...");
+      await wait(5000);
+
+      const promptText = `Extract EVERYTHING. No summary. Format: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}`;
+
+      for (const modelName of availableModels) {
+        try {
+          setStatusText(`Generando guion completo con ${modelName}...`);
+          const model = genAI.getGenerativeModel({ 
+            model: modelName, 
+            generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8192 } 
+          });
+          const result = await model.generateContent([{ text: promptText }, { fileData: { mimeType, fileUri: geminiFileUri } }]);
+          const response = await result.response;
+          const text = response.text();
+          const start = text.indexOf('{');
+          const end = text.lastIndexOf('}') + 1;
+          setScriptData(JSON.parse(text.substring(start, end)));
+          setLoading(false);
+          return;
+        } catch (err: any) { console.warn(err); }
+      }
+    } catch (err: any) { setError(err.message); } finally { setLoading(false); }
+  };
+
+  return { analyzeScript, analyzeCharactersOnly, loading, error, scriptData, setScriptData, statusText };
 };
