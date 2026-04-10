@@ -16,7 +16,6 @@ export const useGemini = () => {
   const [statusText, setStatusText] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   
-  // Estados para el progreso del troceado
   const [chunks, setChunks] = useState<string[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(-1);
 
@@ -49,37 +48,66 @@ export const useGemini = () => {
     return data.file.uri;
   };
 
-  // --- NUEVA LÓGICA DE PROCESAMIENTO POR ESCENAS ---
+  // --- FUNCIÓN RECUPERADA: BUCLE MULTI-MODELO ANTIFALLOS ---
+  const tryAllModels = async (prompt: string, fileUri?: string, requireJson: boolean = false) => {
+    let lastErr = "";
+    for (const modelName of availableModels) {
+      try {
+        const config: any = {};
+        if (requireJson) config.responseMimeType = "application/json";
+
+        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: config });
+        
+        const payload: any[] = [{ text: prompt }];
+        if (fileUri) {
+          payload.push({ fileData: { mimeType: 'application/pdf', fileUri } });
+        }
+
+        const result = await model.generateContent(payload);
+        return result.response.text();
+      } catch (err: any) {
+        lastErr = err.message;
+        console.warn(`Falló ${modelName}:`, lastErr);
+        // Si hay alta demanda (503) o cuota (429), esperamos un poco antes de saltar al siguiente
+        if (lastErr.includes("429") || lastErr.includes("503")) {
+          await wait(3000);
+        } else {
+          await wait(1000);
+        }
+      }
+    }
+    throw new Error(`Agotados todos los modelos. Último error: ${lastErr}`);
+  };
+
   const analyzeInStages = async (localUri: string, mimeType: string) => {
     setLoading(true);
     setError(null);
     setScriptData(null);
     
     try {
-      // 1. OBTENER EL TEXTO PURO PRIMERO
+      // 1. OBTENER EL TEXTO PURO (Ahora protegido por el bucle de modelos)
       setStatusText("Extrayendo texto íntegro del PDF...");
       const fileUri = await uploadToGemini(localUri, mimeType);
-      await wait(5000); // Digestión
+      await wait(5000); // Digestión de cortesía
 
-      const model = genAI.getGenerativeModel({ model: availableModels[0] || "gemini-1.5-flash" });
-      const textResult = await model.generateContent([
-        { text: "Devuelve el texto completo de este PDF, tal cual, sin resúmenes. Si es muy largo, haz lo mejor que puedas." },
-        { fileData: { mimeType, fileUri } }
-      ]);
-      const fullText = textResult.response.text();
+      const textPrompt = "Devuelve el texto completo de este PDF, tal cual, sin resúmenes. Si es muy largo, haz lo mejor que puedas.";
+      const fullText = await tryAllModels(textPrompt, fileUri, false);
 
       // 2. TROCEAR POR ESCENAS
-      // Buscamos "ESCENA", "ACTO", o cambios de escenario (INT./EXT.)
       setStatusText("Troceando el guion por escenas...");
       const sceneMarkers = /(?=ESCENA|ACTO|INT\.|EXT\.)/gi;
       const rawChunks = fullText.split(sceneMarkers).filter(c => c.trim().length > 50);
       setChunks(rawChunks);
       
+      if (rawChunks.length === 0) {
+          throw new Error("No se pudo extraer texto o detectar escenas en el documento.");
+      }
+
       let finalGuion: Dialogue[] = [];
       let finalPersonajes = new Set<string>();
       let obraTitle = "Obra Procesada";
 
-      // 3. PROCESAR CADA TROZO CON "CHECKPOINT"
+      // 3. PROCESAR CADA TROZO (También protegido por el bucle de modelos)
       for (let i = 0; i < rawChunks.length; i++) {
         setCurrentChunkIndex(i);
         setStatusText(`Analizando Escena ${i + 1} de ${rawChunks.length}...`);
@@ -87,33 +115,26 @@ export const useGemini = () => {
         const prompt = `Extrae diálogos de esta escena en JSON. 
         Formato: {"obra": "titulo", "personajes": ["P1"], "guion": [{"p":"PERSONAJE", "t":"texto", "a":"acotacion"}]}`;
         
-        let success = false;
-        let retryCount = 0;
+        try {
+          // Llama a la función antibalas
+          const chunkText = await tryAllModels(prompt + "\n\nTEXTO:\n" + rawChunks[i], undefined, true);
+          
+          const start = chunkText.indexOf('{');
+          const end = chunkText.lastIndexOf('}') + 1;
+          const chunkData = JSON.parse(chunkText.substring(start, end));
 
-        while (!success && retryCount < 3) {
-          try {
-            const chunkResult = await model.generateContent(prompt + "\n\nTEXTO:\n" + rawChunks[i]);
-            const chunkText = chunkResult.response.text();
-            
-            const start = chunkText.indexOf('{');
-            const end = chunkText.lastIndexOf('}') + 1;
-            const chunkData = JSON.parse(chunkText.substring(start, end));
-
-            // Combinar datos
-            if (i === 0) obraTitle = chunkData.obra;
-            chunkData.personajes.forEach((p: string) => finalPersonajes.add(p));
-            finalGuion = [...finalGuion, ...chunkData.guion];
-            
-            // GUARDAR PROGRESO LOCAL (Checkpoint)
-            const partialData = { obra: obraTitle, personajes: Array.from(finalPersonajes), guion: finalGuion };
-            setScriptData(partialData); // Actualizamos la UI en tiempo real
-            
-            success = true;
-          } catch (e) {
-            retryCount++;
-            setStatusText(`Error en escena ${i+1}. Reintento ${retryCount}...`);
-            await wait(2000);
-          }
+          if (i === 0) obraTitle = chunkData.obra;
+          chunkData.personajes.forEach((p: string) => finalPersonajes.add(p));
+          finalGuion = [...finalGuion, ...chunkData.guion];
+          
+          const partialData = { obra: obraTitle, personajes: Array.from(finalPersonajes), guion: finalGuion };
+          setScriptData(partialData);
+          
+        } catch (e: any) {
+          // Si falla un trozo por completo, lo logueamos y seguimos con el siguiente para no tirar la obra entera
+          console.error(`Fallo total en la escena ${i+1}:`, e.message);
+          setStatusText(`Saltando escena ${i+1} por error...`);
+          await wait(2000);
         }
       }
 
