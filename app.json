@@ -2,7 +2,7 @@
   "expo": {
     "name": "TeatroIA",
     "slug": "teatro-ia",
-    "version": "2026.04.031",
+    "version": "2026.04.032",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

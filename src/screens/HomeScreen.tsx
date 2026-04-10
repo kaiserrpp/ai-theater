@@ -37,7 +37,6 @@ export const HomeScreen = () => {
     setIsRehearsing(true);
   };
 
-  // FIX: Borrar el estado pendiente al retomar
   const handleResume = () => {
     const jobToResume = pendingJob;
     setPendingJob(null);
@@ -56,6 +55,13 @@ export const HomeScreen = () => {
     <ScreenWrapper>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Teatro IA 🎭</Text>
+
+        {/* ¡AQUÍ ESTÁ! LA CAJA DE ERRORES QUE BORRÉ POR ACCIDENTE */}
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>⚠️ {error}</Text>
+          </View>
+        )}
 
         {pendingJob && !loading && !scriptData && (
           <View style={styles.resumeBox}>
@@ -107,6 +113,8 @@ export const HomeScreen = () => {
 const styles = StyleSheet.create({
   container: { padding: 20, alignItems: 'center' },
   title: { fontSize: 30, fontWeight: 'bold', marginBottom: 20 },
+  errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20, width: '100%' },
+  errorText: { color: '#c62828', textAlign: 'center', fontWeight: 'bold' },
   resumeBox: { backgroundColor: '#e8f5e9', padding: 20, borderRadius: 15, width: '100%', alignItems: 'center', marginBottom: 20 },
   resumeTitle: { fontWeight: 'bold', marginBottom: 10 },
   btnResume: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 10, width: '100%', alignItems: 'center' },

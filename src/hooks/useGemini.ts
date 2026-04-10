@@ -43,6 +43,9 @@ export const useGemini = () => {
     let sceneList = resumeData?.totalChunks || [];
     let currentScript: ScriptData = resumeData?.data || { obra: "Procesando...", personajes: [], guion: [] };
 
+    // Cinturón de seguridad por si falla la carga inicial de modelos
+    const modelsToTry = availableModels.length > 0 ? availableModels : ['gemini-1.5-flash', 'gemini-1.5-pro'];
+
     try {
       if (!resumeData && localUri) {
         setStatusText("Subiendo PDF...");
@@ -52,21 +55,45 @@ export const useGemini = () => {
           method: 'POST', headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Header-Content-Type': 'application/pdf' }, body: blob
         });
         const uploadData = await uploadResp.json();
+        if (!uploadResp.ok) throw new Error("Error al subir archivo a Google.");
+        
         currentFileUri = uploadData.file.uri;
         const fileName = uploadData.file.name;
 
-        while(true) {
+        setStatusText("Esperando a Google...");
+        let active = false;
+        let attempts = 0;
+        while(!active && attempts < 20) {
           await wait(3000);
+          attempts++;
           const c = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${API_KEY}`);
           const d = await c.json();
-          if (d.state === "ACTIVE") break;
+          if (d.state === "ACTIVE") active = true;
+          else if (d.state === "FAILED") throw new Error("Google falló al procesar el archivo. Puede estar corrupto o protegido.");
         }
+        if (!active) throw new Error("Tiempo de espera agotado en los servidores de Google.");
 
         setStatusText("Mapeando escenas...");
-        const model = genAI.getGenerativeModel({ model: availableModels[0] || "gemini-1.5-flash" });
-        const res = await model.generateContent([{ text: 'JSON array of scene names: ["Scene 1", ...]' }, { fileData: { mimeType: 'application/pdf', fileUri: currentFileUri } }]);
-        const t = res.response.text();
-        sceneList = JSON.parse(t.substring(t.indexOf('['), t.lastIndexOf(']') + 1));
+        let indexText = "";
+        for (const m of modelsToTry) {
+           try {
+             const model = genAI.getGenerativeModel({ model: m });
+             // PROMPT RESTAURADO Y BLINDADO
+             const res = await model.generateContent([
+                { text: 'Analiza este documento y extrae un índice secuencial de todas las escenas. Devuelve ÚNICAMENTE un array JSON válido de strings. Ejemplo: ["Acto 1", "Escena 2"]. No devuelvas texto extra.' }, 
+                { fileData: { mimeType: 'application/pdf', fileUri: currentFileUri } }
+             ]);
+             indexText = res.response.text();
+             break;
+           } catch(e) { await wait(1500); }
+        }
+        
+        if (!indexText) throw new Error("La IA no pudo crear el índice de escenas.");
+        const startIdx = indexText.indexOf('[');
+        const endIdx = indexText.lastIndexOf(']') + 1;
+        if (startIdx === -1) throw new Error("El modelo no devolvió un formato JSON válido para las escenas.");
+        
+        sceneList = JSON.parse(indexText.substring(startIdx, endIdx));
       }
 
       setChunks(sceneList);
@@ -74,31 +101,27 @@ export const useGemini = () => {
 
       for (let i = startAt; i < sceneList.length; i++) {
         setCurrentChunkIndex(i);
-        setStatusText(`Extrayendo ${sceneList[i]}...`);
+        setStatusText(`Extrayendo: ${sceneList[i]}...`);
         
-        // PROMPT AGRESIVO ANTI-RESÚMENES
         const scenePrompt = `INSTRUCCIÓN CRÍTICA: Actúa como un copista literal. Busca en el documento la parte EXACTA correspondiente a la escena "${sceneList[i]}".
         Tu tarea es transcribir PALABRA POR PALABRA todos los diálogos de esa escena.
         REGLAS:
         1. NO asumas nada, NO resumas, NO saltes líneas.
-        2. Copia desde la primera palabra hasta la última de la escena, sin omitir ni una coma.
-        3. Formato estricto JSON: {"obra":"Título", "personajes":["P1", "P2"], "guion":[{"p":"PERSONAJE", "t":"texto exacto", "a":"acotacion"}]}
-        Si omites una sola línea, arruinarás el ensayo del actor.`;
+        2. Copia desde la primera palabra hasta la última de la escena.
+        3. Formato estricto JSON: {"obra":"Título", "personajes":["P1", "P2"], "guion":[{"p":"PERSONAJE", "t":"texto exacto", "a":"acotacion"}]}`;
 
         let chunkData;
-        for (const modelName of availableModels) {
+        for (const modelName of modelsToTry) {
            try {
               const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json", temperature: 0.0 } });
               const res = await model.generateContent([{ text: scenePrompt }, { fileData: { mimeType: 'application/pdf', fileUri: currentFileUri } }]);
               const t = res.response.text();
               chunkData = JSON.parse(t.substring(t.indexOf('{'), t.lastIndexOf('}') + 1));
-              break; // Si triunfa, sale del bucle de modelos
-           } catch (e) {
-              await wait(2000); // Reintenta con otro modelo si falla
-           }
+              break;
+           } catch (e) { await wait(2000); }
         }
         
-        if(!chunkData) throw new Error("Fallo al procesar la escena tras varios intentos");
+        if(!chunkData) throw new Error(`Fallo al extraer la escena "${sceneList[i]}" tras varios intentos con la IA.`);
 
         const updatedPersonajes = [...currentScript.personajes];
         chunkData.personajes?.forEach((p: string) => {
@@ -117,7 +140,10 @@ export const useGemini = () => {
       }
       setStatusText("Completado");
       setLoading(false);
-    } catch (err: any) { setError(err.message); setLoading(false); }
+    } catch (err: any) { 
+      setError(err.message); 
+      setLoading(false); 
+    }
   };
 
   return { analyzeInStages, loading, error, scriptData, setScriptData, statusText, currentChunkIndex, totalChunks: chunks.length, clearCheckpoint };
