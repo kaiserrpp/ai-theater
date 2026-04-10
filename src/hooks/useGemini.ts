@@ -1,5 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as pdfjsLib from 'pdfjs-dist';
 import { useEffect, useState } from 'react';
+
+// Configuramos el "trabajador" de PDF.js usando un CDN para evitar problemas de empaquetado en Vercel
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 export interface Dialogue { p: string; t: string; a: string; }
 export interface ScriptData { obra: string; personajes: string[]; guion: Dialogue[]; }
@@ -36,39 +40,42 @@ export const useGemini = () => {
     fetchModels();
   }, []);
 
-  const uploadToGemini = async (localUri: string, mimeType: string) => {
-    const fileResp = await fetch(localUri);
-    const blob = await fileResp.blob();
-    const uploadResp = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Header-Content-Type': mimeType, 'Content-Type': mimeType },
-      body: blob
-    });
-    const data = await uploadResp.json();
-    return data.file.uri;
+  // --- NUEVA MAGIA: EXTRACCIÓN DE TEXTO 100% LOCAL ---
+  const extractTextLocally = async (fileUri: string) => {
+    try {
+      setStatusText("Leyendo el PDF localmente en tu dispositivo...");
+      const loadingTask = pdfjsLib.getDocument(fileUri);
+      const pdf = await loadingTask.promise;
+      
+      let fullText = '';
+      setStatusText(`Extrayendo texto de ${pdf.numPages} páginas...`);
+      
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        // Unimos el texto de la página
+        const pageText = textContent.items.map((item: any) => item.str).join(' ');
+        fullText += pageText + '\n\n';
+      }
+      
+      return fullText;
+    } catch (err: any) {
+      throw new Error(`Fallo al leer el PDF localmente: ${err.message}`);
+    }
   };
 
-  // --- FUNCIÓN RECUPERADA: BUCLE MULTI-MODELO ANTIFALLOS ---
-  const tryAllModels = async (prompt: string, fileUri?: string, requireJson: boolean = false) => {
+  const tryAllModels = async (prompt: string, requireJson: boolean = true) => {
     let lastErr = "";
     for (const modelName of availableModels) {
       try {
-        const config: any = {};
+        const config: any = { maxOutputTokens: 8192 };
         if (requireJson) config.responseMimeType = "application/json";
 
         const model = genAI.getGenerativeModel({ model: modelName, generationConfig: config });
-        
-        const payload: any[] = [{ text: prompt }];
-        if (fileUri) {
-          payload.push({ fileData: { mimeType: 'application/pdf', fileUri } });
-        }
-
-        const result = await model.generateContent(payload);
+        const result = await model.generateContent(prompt);
         return result.response.text();
       } catch (err: any) {
         lastErr = err.message;
-        console.warn(`Falló ${modelName}:`, lastErr);
-        // Si hay alta demanda (503) o cuota (429), esperamos un poco antes de saltar al siguiente
         if (lastErr.includes("429") || lastErr.includes("503")) {
           await wait(3000);
         } else {
@@ -76,22 +83,17 @@ export const useGemini = () => {
         }
       }
     }
-    throw new Error(`Agotados todos los modelos. Último error: ${lastErr}`);
+    throw new Error(`Agotados modelos. Último error: ${lastErr}`);
   };
 
-  const analyzeInStages = async (localUri: string, mimeType: string) => {
+  const analyzeInStages = async (localUri: string) => {
     setLoading(true);
     setError(null);
     setScriptData(null);
     
     try {
-      // 1. OBTENER EL TEXTO PURO (Ahora protegido por el bucle de modelos)
-      setStatusText("Extrayendo texto íntegro del PDF...");
-      const fileUri = await uploadToGemini(localUri, mimeType);
-      await wait(5000); // Digestión de cortesía
-
-      const textPrompt = "Devuelve el texto completo de este PDF, tal cual, sin resúmenes. Si es muy largo, haz lo mejor que puedas.";
-      const fullText = await tryAllModels(textPrompt, fileUri, false);
+      // 1. OBTENER EL TEXTO LOCALMENTE (¡Adiós Google File API!)
+      const fullText = await extractTextLocally(localUri);
 
       // 2. TROCEAR POR ESCENAS
       setStatusText("Troceando el guion por escenas...");
@@ -100,38 +102,46 @@ export const useGemini = () => {
       setChunks(rawChunks);
       
       if (rawChunks.length === 0) {
-          throw new Error("No se pudo extraer texto o detectar escenas en el documento.");
+          throw new Error("No se detectaron 'ESCENAS' o 'ACTOS'. El PDF podría ser una imagen escaneada sin texto.");
       }
 
       let finalGuion: Dialogue[] = [];
       let finalPersonajes = new Set<string>();
       let obraTitle = "Obra Procesada";
 
-      // 3. PROCESAR CADA TROZO (También protegido por el bucle de modelos)
+      // 3. PROCESAR CADA TROZO 
       for (let i = 0; i < rawChunks.length; i++) {
         setCurrentChunkIndex(i);
         setStatusText(`Analizando Escena ${i + 1} de ${rawChunks.length}...`);
         
         const prompt = `Extrae diálogos de esta escena en JSON. 
-        Formato: {"obra": "titulo", "personajes": ["P1"], "guion": [{"p":"PERSONAJE", "t":"texto", "a":"acotacion"}]}`;
+        Formato: {"obra": "titulo", "personajes": ["P1"], "guion": [{"p":"PERSONAJE", "t":"texto", "a":"acotacion"}]}
+        
+        TEXTO DE LA ESCENA:
+        ${rawChunks[i]}`;
         
         try {
-          // Llama a la función antibalas
-          const chunkText = await tryAllModels(prompt + "\n\nTEXTO:\n" + rawChunks[i], undefined, true);
+          const chunkText = await tryAllModels(prompt, true);
           
           const start = chunkText.indexOf('{');
           const end = chunkText.lastIndexOf('}') + 1;
           const chunkData = JSON.parse(chunkText.substring(start, end));
 
-          if (i === 0) obraTitle = chunkData.obra;
-          chunkData.personajes.forEach((p: string) => finalPersonajes.add(p));
-          finalGuion = [...finalGuion, ...chunkData.guion];
+          if (i === 0) obraTitle = chunkData.obra || obraTitle;
+          chunkData.personajes?.forEach((p: string) => finalPersonajes.add(p));
           
-          const partialData = { obra: obraTitle, personajes: Array.from(finalPersonajes), guion: finalGuion };
-          setScriptData(partialData);
+          if (chunkData.guion && Array.isArray(chunkData.guion)) {
+             finalGuion = [...finalGuion, ...chunkData.guion];
+          }
+          
+          // GUARDAR PROGRESO (Checkpoint en vivo)
+          setScriptData({ 
+            obra: obraTitle, 
+            personajes: Array.from(finalPersonajes), 
+            guion: finalGuion 
+          });
           
         } catch (e: any) {
-          // Si falla un trozo por completo, lo logueamos y seguimos con el siguiente para no tirar la obra entera
           console.error(`Fallo total en la escena ${i+1}:`, e.message);
           setStatusText(`Saltando escena ${i+1} por error...`);
           await wait(2000);
@@ -142,10 +152,11 @@ export const useGemini = () => {
       setLoading(false);
 
     } catch (err: any) {
-      setError(`Fallo en el procesamiento: ${err.message}`);
+      setError(`${err.message}`);
       setLoading(false);
     }
   };
 
+  // Solo exponemos lo necesario
   return { analyzeInStages, loading, error, scriptData, setScriptData, statusText, currentChunkIndex, totalChunks: chunks.length };
 };
