@@ -14,25 +14,47 @@ export const useGemini = () => {
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
   const [statusText, setStatusText] = useState<string>("");
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
   
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [chunks, setChunks] = useState<string[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(-1);
 
+  // 1. OBTENCIÓN DINÁMICA DE MODELOS CON CHIVATOS DE ERROR
   useEffect(() => {
     const fetchModels = async () => {
-      if (!API_KEY) return;
+      if (!API_KEY) {
+        setError("Error crítico: No hay API_KEY configurada en el proyecto.");
+        return;
+      }
+      
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
         const data = await response.json();
-        if (response.ok && data.models) {
-          const utiles = data.models
-            .filter((m: any) => m.supportedGenerationMethods.includes('generateContent') && m.name.includes('gemini-1.5'))
-            .map((m: any) => m.name.replace('models/', ''));
-          setAvailableModels(utiles);
+        
+        // Si Google devuelve un status de error (ej. 403 Forbidden, 400 Bad Request)
+        if (!response.ok) {
+          throw new Error(data.error?.message || `Error HTTP del servidor: ${response.status}`);
         }
-      } catch (err) {}
+
+        if (data.models) {
+          // Filtramos solo los que soportan generación de contenido (sin forzar nombres 1.5)
+          const utiles = data.models
+            .filter((m: any) => m.supportedGenerationMethods.includes('generateContent'))
+            .map((m: any) => m.name.replace('models/', ''));
+          
+          if (utiles.length === 0) {
+            setError("Google respondió correctamente, pero NO devolvió modelos que soporten generación de texto.");
+          } else {
+            setAvailableModels(utiles);
+          }
+        } else {
+           setError("Google respondió, pero el JSON no contenía la lista de modelos.");
+        }
+      } catch (err: any) {
+        setError(`Excepción al obtener modelos: ${err.message}`);
+      }
     };
+    
     fetchModels();
   }, []);
 
@@ -79,6 +101,7 @@ export const useGemini = () => {
 
   const tryAllModels = async (prompt: string, fileUri: string, requireJson: boolean = true) => {
     let lastErr = "";
+    
     for (const modelName of availableModels) {
       try {
         const config: any = { maxOutputTokens: 8192 };
@@ -92,21 +115,27 @@ export const useGemini = () => {
         return result.response.text();
       } catch (err: any) {
         lastErr = err.message;
+        console.warn(`[${modelName}] falló: ${lastErr}`);
         if (lastErr.includes("429") || lastErr.includes("503")) await wait(4000);
         else await wait(1500);
       }
     }
-    throw new Error(`Agotados modelos. Último error: ${lastErr}`);
+    throw new Error(`Agotados los ${availableModels.length} modelos. Último error: ${lastErr}`);
   };
 
   const analyzeInStages = async (localUri: string, mimeType: string) => {
     setLoading(true); setError(null); setScriptData(null);
     
+    // BLOQUEO DE SEGURIDAD
+    if (availableModels.length === 0) {
+        setError("No se puede iniciar el análisis: Google no ha devuelto modelos válidos.");
+        setLoading(false);
+        return;
+    }
+
     try {
-      // 1. SUBIR A GOOGLE
       const fileUri = await uploadAndWaitForActive(localUri, mimeType);
 
-      // 2. CREAR ÍNDICE DE ESCENAS (Pide muy poco texto, no se corta)
       setStatusText("Analizando estructura del documento...");
       const indexPrompt = `Analiza este documento y extrae un índice secuencial de todas las escenas, actos o partes. 
       Devuelve ÚNICAMENTE un array JSON válido de strings. Ejemplo: ["Acto 1 - Escena 1", "Acto 1 - Escena 2", "Acto 2"]. No devuelvas nada más que el array JSON.`;
@@ -127,7 +156,6 @@ export const useGemini = () => {
       let finalPersonajes = new Set<string>();
       let obraTitle = "Obra Procesada";
 
-      // 3. PROCESAR CADA ESCENA DEL ÍNDICE POR SEPARADO
       for (let i = 0; i < escenas.length; i++) {
         setCurrentChunkIndex(i);
         setStatusText(`Extrayendo: ${escenas[i]} (${i + 1}/${escenas.length})...`);
@@ -149,7 +177,6 @@ export const useGemini = () => {
              finalGuion = [...finalGuion, ...chunkData.guion];
           }
           
-          // GUARDAR PROGRESO (UI se actualiza en vivo)
           setScriptData({ 
             obra: obraTitle, 
             personajes: Array.from(finalPersonajes), 
