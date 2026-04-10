@@ -1,7 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Dialogue } from '../hooks/useGemini';
-import { useRehearsal } from '../hooks/useRehearsal';
 
 interface Props {
   guion: Dialogue[];
@@ -9,88 +8,147 @@ interface Props {
   onExit: () => void;
 }
 
-export const RehearsalView = ({ guion, myRoles, onExit }: Props) => {
-  const { 
-    currentDialogue, currentIndex, totalLines, 
-    isFinished, isUserTurn, startRehearsal, stopRehearsal, nextLine 
-  } = useRehearsal(guion, myRoles);
+export const RehearsalView: React.FC<Props> = ({ guion, myRoles, onExit }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Arrancamos el ensayo en cuanto se monta la vista
-  useEffect(() => {
-    startRehearsal();
-    return () => stopRehearsal(); // Cleanup al salir
-  }, []);
+  // Funciones para encontrar el nombre de la escena actual
+  const getCurrentSceneName = () => {
+    for (let i = currentIndex; i >= 0; i--) {
+      if (guion[i]?.p === 'ESCENA_SISTEMA') return guion[i].t;
+    }
+    return "Inicio de Obra";
+  };
 
-  if (isFinished) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.title}>¡Ensayo Finalizado! 🎬</Text>
-        <TouchableOpacity style={styles.buttonMain} onPress={onExit}>
-          <Text style={styles.buttonText}>Volver al menú</Text>
-        </TouchableOpacity>
-      </View>
-    );
+  // Navegación a Escena Siguiente
+  const nextScene = () => {
+    for (let i = currentIndex + 1; i < guion.length; i++) {
+      if (guion[i].p === 'ESCENA_SISTEMA') {
+        setCurrentIndex(i + 1); // Saltamos al primer diálogo de la escena
+        return;
+      }
+    }
+  };
+
+  // Navegación a Escena Anterior
+  const prevScene = () => {
+    let foundCurrent = false;
+    for (let i = currentIndex - 1; i >= 0; i--) {
+      if (guion[i].p === 'ESCENA_SISTEMA') {
+        if (!foundCurrent) {
+          foundCurrent = true; // Ignoramos el marcador de la escena actual
+        } else {
+          setCurrentIndex(i + 1); // Saltamos al primer diálogo de la anterior
+          return;
+        }
+      }
+    }
+    setCurrentIndex(0); // Si no hay más atrás, vamos al inicio absoluto
+  };
+
+  const advanceLine = () => {
+    if (currentIndex < guion.length) setCurrentIndex(currentIndex + 1);
+  };
+
+  const currentLine = guion[currentIndex];
+  
+  // Si el marcador actual es de sistema, saltamos automáticamente
+  if (currentLine?.p === 'ESCENA_SISTEMA') {
+    setTimeout(() => setCurrentIndex(currentIndex + 1), 50);
+    return null; 
   }
+
+  const isMyTurn = currentLine && myRoles.includes(currentLine.p);
+  const isFinished = currentIndex >= guion.length;
 
   return (
     <View style={styles.container}>
-      {/* Barra superior de progreso */}
+      
+      {/* BARRA SUPERIOR DE NAVEGACIÓN */}
       <View style={styles.header}>
-        <Text style={styles.progressText}>
-          Línea {currentIndex + 1} de {totalLines}
-        </Text>
-        <TouchableOpacity onPress={onExit} style={styles.exitButton}>
-          <Text style={styles.exitText}>Salir</Text>
+        <TouchableOpacity style={styles.headerBtn} onPress={onExit}>
+          <Text style={styles.headerBtnText}>⬅ Volver</Text>
         </TouchableOpacity>
+        
+        <View style={styles.sceneControl}>
+          <TouchableOpacity onPress={prevScene} style={styles.arrowBtn}><Text style={styles.arrow}>⏮</Text></TouchableOpacity>
+          <Text style={styles.sceneTitle} numberOfLines={1}>{getCurrentSceneName()}</Text>
+          <TouchableOpacity onPress={nextScene} style={styles.arrowBtn}><Text style={styles.arrow}>⏭</Text></TouchableOpacity>
+        </View>
       </View>
 
-      {/* Tarjeta del diálogo actual */}
-      <ScrollView contentContainerStyle={styles.dialogueCard}>
-        <Text style={[styles.characterName, isUserTurn ? styles.userColor : styles.aiColor]}>
-          {currentDialogue.p}
-        </Text>
-        
-        {currentDialogue.a ? (
-          <Text style={styles.acotacion}>({currentDialogue.a})</Text>
-        ) : null}
-        
-        <Text style={styles.dialogueText}>{currentDialogue.t}</Text>
-      </ScrollView>
-
-      {/* Controles inferiores */}
-      <View style={styles.footer}>
-        {isUserTurn ? (
-          <TouchableOpacity style={[styles.buttonMain, styles.userAction]} onPress={nextLine}>
-            <Text style={styles.buttonText}>Ya he dicho mi línea 🎤</Text>
-          </TouchableOpacity>
+      {/* ÁREA DE ENSAYO */}
+      <ScrollView contentContainerStyle={styles.scrollArea}>
+        {isFinished ? (
+          <View style={styles.finishedBox}>
+            <Text style={styles.finishedTitle}>Has llegado al final de las líneas extraídas.</Text>
+            <Text style={styles.finishedSub}>Si la IA sigue extrayendo la obra de fondo, en breve aparecerán más diálogos aquí. Puedes pulsar "Volver" para comprobar el progreso.</Text>
+            <TouchableOpacity style={styles.btnAdvance} onPress={onExit}>
+              <Text style={styles.btnText}>Volver al Menú</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <View style={[styles.buttonMain, styles.aiAction]}>
-            <Text style={styles.aiSpeakingText}>El compañero está hablando... 🔊</Text>
+          <View style={styles.dialogueBox}>
+            <Text style={[styles.characterName, isMyTurn && styles.myTurnName]}>
+              {currentLine.p} {isMyTurn ? "(¡TE TOCA!)" : ""}
+            </Text>
+            
+            {currentLine.a ? <Text style={styles.acotacion}>[{currentLine.a}]</Text> : null}
+            
+            {isMyTurn ? (
+              <View style={styles.myTurnBox}>
+                <Text style={styles.myTurnHint}>Recita tu línea y pulsa continuar:</Text>
+                <Text style={styles.dialogueTextHidden}>{currentLine.t}</Text>
+              </View>
+            ) : (
+              <Text style={styles.dialogueText}>{currentLine.t}</Text>
+            )}
           </View>
         )}
-      </View>
+      </ScrollView>
+
+      {/* BOTÓN DE AVANCE INFERIOR */}
+      {!isFinished && (
+        <View style={styles.footer}>
+          <TouchableOpacity 
+            style={[styles.btnAdvance, isMyTurn && styles.btnAdvanceMe]} 
+            onPress={advanceLine}
+          >
+            <Text style={styles.btnText}>{isMyTurn ? 'He dicho mi línea (Siguiente)' : 'Siguiente línea'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, width: '100%' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  progressText: { fontSize: 16, fontWeight: '600', color: '#666' },
-  exitButton: { padding: 8, backgroundColor: '#ffebee', borderRadius: 8 },
-  exitText: { color: '#c62828', fontWeight: 'bold' },
-  dialogueCard: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  characterName: { fontSize: 28, fontWeight: '900', marginBottom: 10, textAlign: 'center' },
-  userColor: { color: '#2e7d32' }, // Verde para ti
-  aiColor: { color: '#007AFF' }, // Azul para el compañero
-  acotacion: { fontSize: 16, fontStyle: 'italic', color: '#888', marginBottom: 15, textAlign: 'center' },
-  dialogueText: { fontSize: 24, lineHeight: 34, color: '#333', textAlign: 'center' },
-  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 30, color: '#222' },
-  footer: { width: '100%', paddingVertical: 20 },
-  buttonMain: { paddingVertical: 18, borderRadius: 12, alignItems: 'center', width: '100%' },
-  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  userAction: { backgroundColor: '#4caf50', shadowColor: '#4caf50', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 5 },
-  aiAction: { backgroundColor: '#e3f2fd' },
-  aiSpeakingText: { color: '#007AFF', fontSize: 18, fontWeight: 'bold' }
+  container: { flex: 1, backgroundColor: '#f9f9f9' },
+  header: { 
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
+    backgroundColor: '#fff', paddingTop: 50, paddingBottom: 15, paddingHorizontal: 15,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, elevation: 3, zIndex: 10
+  },
+  headerBtn: { padding: 8 },
+  headerBtnText: { color: '#007AFF', fontWeight: 'bold', fontSize: 16 },
+  sceneControl: { flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'center' },
+  sceneTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', maxWidth: 120, textAlign: 'center', marginHorizontal: 10 },
+  arrowBtn: { paddingHorizontal: 15, paddingVertical: 5, backgroundColor: '#f0f0f0', borderRadius: 8 },
+  arrow: { fontSize: 16 },
+  scrollArea: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  dialogueBox: { backgroundColor: '#fff', padding: 30, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
+  characterName: { fontSize: 22, fontWeight: '900', color: '#444', marginBottom: 10, textAlign: 'center' },
+  myTurnName: { color: '#d32f2f' },
+  acotacion: { fontStyle: 'italic', color: '#666', marginBottom: 15, textAlign: 'center', fontSize: 16 },
+  dialogueText: { fontSize: 24, color: '#111', lineHeight: 34, textAlign: 'center' },
+  myTurnBox: { backgroundColor: '#ffebee', padding: 20, borderRadius: 12, marginTop: 10, borderWidth: 1, borderColor: '#ffcdd2' },
+  myTurnHint: { color: '#c62828', fontWeight: 'bold', textAlign: 'center', marginBottom: 10 },
+  dialogueTextHidden: { fontSize: 20, color: '#d32f2f', textAlign: 'center', opacity: 0.5 },
+  footer: { padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#eee' },
+  btnAdvance: { backgroundColor: '#007AFF', padding: 20, borderRadius: 15, alignItems: 'center' },
+  btnAdvanceMe: { backgroundColor: '#d32f2f' },
+  btnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  finishedBox: { alignItems: 'center', padding: 20 },
+  finishedTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 10, textAlign: 'center' },
+  finishedSub: { color: '#666', textAlign: 'center', marginBottom: 30, lineHeight: 22 }
 });
