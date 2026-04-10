@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 
 export interface Dialogue { p: string; t: string; a: string; }
@@ -6,6 +7,7 @@ export interface ScriptData { obra: string; personajes: string[]; guion: Dialogu
 
 const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
 const genAI = new GoogleGenerativeAI(API_KEY);
+const STORAGE_KEY = '@pending_job';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -21,154 +23,121 @@ export const useGemini = () => {
 
   useEffect(() => {
     const fetchModels = async () => {
-      if (!API_KEY) {
-        setError("Error crítico: No hay API_KEY configurada."); return;
-      }
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error?.message || `Error HTTP: ${response.status}`);
-
-        if (data.models) {
+        if (response.ok && data.models) {
           const utiles = data.models
             .filter((m: any) => m.supportedGenerationMethods.includes('generateContent'))
             .map((m: any) => m.name.replace('models/', ''));
-          
-          if (utiles.length === 0) setError("Google NO devolvió modelos válidos.");
-          else setAvailableModels(utiles);
+          setAvailableModels(utiles);
         }
-      } catch (err: any) {
-        setError(`Excepción: ${err.message}`);
-      }
+      } catch (err) {}
     };
     fetchModels();
   }, []);
 
-  const uploadAndWaitForActive = async (localUri: string, mimeType: string) => {
+  // Función para guardar el progreso actual en el disco
+  const saveCheckpoint = async (data: ScriptData, fileUri: string, index: number, totalChunks: string[]) => {
     try {
-      setStatusText("Empaquetando PDF...");
-      const fileResp = await fetch(localUri);
-      const blob = await fileResp.blob();
-
-      setStatusText("Enviando PDF a Google...");
-      const uploadResp = await fetch(
-        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`,
-        { method: 'POST', headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Header-Content-Type': mimeType, 'Content-Type': mimeType }, body: blob }
-      );
-
-      const uploadData = await uploadResp.json();
-      if (!uploadResp.ok) throw new Error(uploadData.error?.message || "Error al subir");
-
-      const fileUri = uploadData.file.uri;
-      const fileName = uploadData.file.name;
-
-      setStatusText("Google procesando el guion...");
-      let isReady = false;
-      let attempts = 0;
-      
-      while (!isReady && attempts < 20) { 
-        await wait(3000);
-        attempts++;
-        setStatusText(`Google procesando guion... (Comprobación ${attempts})`);
-        const checkResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${API_KEY}`);
-        const checkData = await checkResp.json();
-        if (checkData.state === "ACTIVE") isReady = true;
-        else if (checkData.state === "FAILED") throw new Error("Google falló al procesar el PDF.");
-      }
-
-      if (!isReady) throw new Error("Tiempo de espera agotado en Google.");
-      return fileUri;
-    } catch (e: any) {
-      throw new Error(`${e.message}`);
-    }
+      const checkpoint = JSON.stringify({ data, fileUri, index, totalChunks, timestamp: Date.now() });
+      await AsyncStorage.setItem(STORAGE_KEY, checkpoint);
+    } catch (e) { console.error("Error guardando checkpoint", e); }
   };
 
-  const tryAllModels = async (prompt: string, fileUri: string, requireJson: boolean = true) => {
-    let lastErr = "";
+  // Función para limpiar el progreso (cuando termina o el usuario cancela)
+  const clearCheckpoint = async () => {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  };
+
+  const uploadAndWaitForActive = async (localUri: string, mimeType: string) => {
+    const fileResp = await fetch(localUri);
+    const blob = await fileResp.blob();
+    const uploadResp = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`, {
+      method: 'POST', headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Header-Content-Type': mimeType, 'Content-Type': mimeType },
+      body: blob
+    });
+    const uploadData = await uploadResp.json();
+    const fileUri = uploadData.file.uri;
+    const fileName = uploadData.file.name;
+
+    let isReady = false;
+    while (!isReady) { 
+      await wait(3000);
+      const checkResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${API_KEY}`);
+      const checkData = await checkResp.json();
+      if (checkData.state === "ACTIVE") isReady = true;
+    }
+    return fileUri;
+  };
+
+  const tryAllModels = async (prompt: string, fileUri: string) => {
     for (const modelName of availableModels) {
       try {
-        // TEMPERATURA 0.1: Le quitamos la creatividad para que copie exactamente lo que pone.
-        const config: any = { maxOutputTokens: 8192, temperature: 0.1 };
-        if (requireJson) config.responseMimeType = "application/json";
-        
-        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: config });
+        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json", temperature: 0.1 } });
         const result = await model.generateContent([{ text: prompt }, { fileData: { mimeType: 'application/pdf', fileUri } }]);
         return result.response.text();
-      } catch (err: any) {
-        lastErr = err.message;
-        if (lastErr.includes("429") || lastErr.includes("503")) await wait(4000);
-        else await wait(1500);
-      }
+      } catch (err) { await wait(2000); }
     }
-    throw new Error(`Agotados los modelos. Último error: ${lastErr}`);
+    throw new Error("Fallo en modelos");
   };
 
-  const analyzeInStages = async (localUri: string, mimeType: string) => {
-    setLoading(true); setError(null); setScriptData(null);
-    if (availableModels.length === 0) {
-        setError("No hay modelos de Google válidos."); setLoading(false); return;
-    }
+  const analyzeInStages = async (localUri: string | null, resumeData?: any) => {
+    setLoading(true); setError(null);
+    let currentFileUri = resumeData?.fileUri || "";
+    let startAt = resumeData?.index + 1 || 0;
+    let sceneList = resumeData?.totalChunks || [];
+    let currentScript = resumeData?.data || { obra: "Procesando...", personajes: [], guion: [] };
 
     try {
-      const fileUri = await uploadAndWaitForActive(localUri, mimeType);
-
-      setStatusText("Analizando estructura del documento...");
-      const indexPrompt = `Analiza este documento y extrae un índice secuencial de todas las escenas. 
-      Devuelve ÚNICAMENTE un array JSON válido de strings. Ejemplo: ["Acto 1 - Escena 1", "Escena 2"]. No devuelvas nada más.`;
-      
-      const indexText = await tryAllModels(indexPrompt, fileUri, true);
-      const startIdx = indexText.indexOf('[');
-      const endIdx = indexText.lastIndexOf(']') + 1;
-      const escenas = JSON.parse(indexText.substring(startIdx, endIdx));
-      setChunks(escenas);
-      
-      if (!Array.isArray(escenas) || escenas.length === 0) throw new Error("No se detectaron escenas.");
-
-      let finalGuion: Dialogue[] = [];
-      let finalPersonajes = new Set<string>();
-      let obraTitle = "Obra Procesada";
-
-      for (let i = 0; i < escenas.length; i++) {
-        setCurrentChunkIndex(i);
-        setStatusText(`Extrayendo: ${escenas[i]} (${i + 1}/${escenas.length})...`);
-        
-        // PROMPT ANTI-PEREZA
-        const scenePrompt = `Busca en el documento la parte EXACTA correspondiente a "${escenas[i]}".
-        Transcribe TODOS Y CADA UNO de los diálogos de esa parte. 
-        REGLA DE ORO: NO resumas. NO omitas ni una sola línea. Copia el texto palabra por palabra desde que empieza la escena hasta que termina.
-        Devuelve SOLO JSON estricto: {"obra": "titulo", "personajes": ["P1"], "guion": [{"p":"PERSONAJE", "t":"texto exacto", "a":"acotacion"}]}`;
-        
-        try {
-          const chunkText = await tryAllModels(scenePrompt, fileUri, true);
-          const start = chunkText.indexOf('{');
-          const end = chunkText.lastIndexOf('}') + 1;
-          const chunkData = JSON.parse(chunkText.substring(start, end));
-
-          if (i === 0 && chunkData.obra) obraTitle = chunkData.obra;
-          chunkData.personajes?.forEach((p: string) => finalPersonajes.add(p));
-          
-          if (chunkData.guion && Array.isArray(chunkData.guion)) {
-             const sceneMarker: Dialogue = { p: 'ESCENA_SISTEMA', t: escenas[i], a: '' };
-             finalGuion = [...finalGuion, sceneMarker, ...chunkData.guion];
-          }
-          
-          setScriptData({ obra: obraTitle, personajes: Array.from(finalPersonajes), guion: finalGuion });
-          
-        } catch (e: any) {
-          console.warn(`Error en ${escenas[i]}:`, e.message);
-          setStatusText(`Saltando "${escenas[i]}"...`);
-          await wait(2000);
-        }
+      // Si no es reanudación, hay que subir el archivo y crear el índice
+      if (!resumeData && localUri) {
+        currentFileUri = await uploadAndWaitForActive(localUri, 'application/pdf');
+        setStatusText("Creando índice de escenas...");
+        const indexPrompt = `Devuelve un array JSON de las escenas: ["Escena 1", ...]`;
+        const indexText = await tryAllModels(indexPrompt, currentFileUri);
+        sceneList = JSON.parse(indexText.substring(indexText.indexOf('['), indexText.lastIndexOf(']') + 1));
+        setChunks(sceneList);
+      } else {
+        setChunks(sceneList);
+        setScriptData(currentScript);
       }
 
-      setStatusText("¡Proceso completado!");
-      setLoading(false);
+      for (let i = startAt; i < sceneList.length; i++) {
+        setCurrentChunkIndex(i);
+        setStatusText(`Extrayendo: ${sceneList[i]}`);
+        
+        const scenePrompt = `Extrae diálogos íntegros de "${sceneList[i]}" en JSON: {"obra":"t", "personajes":["P1"], "guion":[{"p":"P", "t":"t", "a":"a"}]}`;
+        try {
+          const chunkText = await tryAllModels(scenePrompt, currentFileUri);
+          const chunkData = JSON.parse(chunkText.substring(chunkText.indexOf('{'), chunkText.lastIndexOf('}') + 1));
 
+          if (i === 0) currentScript.obra = chunkData.obra || currentScript.obra;
+          chunkData.personajes?.forEach((p: string) => {
+            if (!currentScript.personajes.includes(p.trim().toUpperCase())) {
+                currentScript.personajes.push(p.trim().toUpperCase());
+            }
+          });
+          
+          const sceneMarker: Dialogue = { p: 'ESCENA_SISTEMA', t: sceneList[i], a: '' };
+          currentScript.guion = [...currentScript.guion, sceneMarker, ...(chunkData.guion || [])];
+          
+          setScriptData({ ...currentScript });
+
+          // CHECKPOINT: Guardamos después de cada escena exitosa
+          await saveCheckpoint(currentScript, currentFileUri, i, sceneList);
+
+        } catch (e) { console.warn("Error en escena", i); }
+      }
+
+      setStatusText("¡Obra completada!");
+      await clearCheckpoint(); // Al terminar, borramos el temporal
+      setLoading(false);
     } catch (err: any) {
-      setError(`${err.message}`);
+      setError(err.message);
       setLoading(false);
     }
   };
 
-  return { analyzeInStages, loading, error, scriptData, setScriptData, statusText, currentChunkIndex, totalChunks: chunks.length };
+  return { analyzeInStages, loading, error, scriptData, setScriptData, statusText, currentChunkIndex, totalChunks: chunks.length, clearCheckpoint };
 };
