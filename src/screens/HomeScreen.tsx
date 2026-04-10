@@ -1,15 +1,13 @@
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Animated, Easing,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Animated, Easing,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
@@ -18,17 +16,15 @@ import { useGemini } from '../hooks/useGemini';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 
 export const HomeScreen = () => {
-  // Traemos 'error' y 'setError' (si lo tenemos disponible) para mostrar mensajes
-  const { analyzePdf, loading, error, scriptData, setScriptData } = useGemini();
+  const { analyzeScript, loading, error, scriptData, setScriptData } = useGemini();
   const { savedScripts, saveScript, deleteScript } = useLibrary();
 
   const [fileName, setFileName] = useState<string | null>(null);
-  const [localError, setLocalError] = useState<string | null>(null); // Error para fallos locales
+  const [localError, setLocalError] = useState<string | null>(null);
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [isRehearsing, setIsRehearsing] = useState<boolean>(false);
   const [isFromLibrary, setIsFromLibrary] = useState<boolean>(false);
 
-  // Auto-guardado al recibir datos de la IA
   useEffect(() => {
     if (scriptData && !isFromLibrary && fileName && !loading) {
       saveScript(fileName, scriptData);
@@ -36,8 +32,8 @@ export const HomeScreen = () => {
     }
   }, [scriptData, loading, isFromLibrary, fileName]);
 
-  // Animación de carga
   const progressAnim = useRef(new Animated.Value(0)).current;
+  
   useEffect(() => {
     if (loading) {
       setLocalError(null);
@@ -59,41 +55,22 @@ export const HomeScreen = () => {
   const handlePickDocument = async () => {
     try {
       setLocalError(null);
-      const result = await DocumentPicker.getDocumentAsync({ type: "application/pdf", copyToCacheDirectory: true });
+      const result = await DocumentPicker.getDocumentAsync({ 
+        type: "application/pdf", 
+        copyToCacheDirectory: true 
+      });
       
       if (!result.canceled) {
         const file = result.assets[0];
-        
-        // Verificación de tamaño (Gemini tiene límites en Base64 inline)
-        if (file.size && file.size > 15 * 1024 * 1024) {
-            setLocalError("El PDF es demasiado grande (máx 15MB).");
-            return;
-        }
-
         setFileName(file.name);
         setIsFromLibrary(false);
         
-        let base64Data = '';
-        try {
-            if (Platform.OS === 'web') {
-              const res = await fetch(file.uri);
-              const blob = await res.blob();
-              base64Data = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-                reader.onerror = () => reject("Error al leer el archivo en el navegador");
-                reader.readAsDataURL(blob);
-              });
-            } else {
-              base64Data = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
-            }
-            analyzePdf(base64Data);
-        } catch (fErr) {
-            setLocalError("No se pudo procesar el archivo. ¿Es un PDF válido?");
-        }
+        // Magia limpia: Le pasamos directamente la ruta local a Gemini
+        // Sin conversiones a texto que revienten la memoria RAM
+        analyzeScript(file.uri, 'application/pdf');
       }
     } catch (err) { 
-        setLocalError("Ocurrió un error al abrir el selector de archivos.");
+        setLocalError("Error abriendo el selector de archivos.");
     }
   };
 
@@ -101,7 +78,6 @@ export const HomeScreen = () => {
     setScriptData(null); setFileName(null); setMyRoles([]); setIsRehearsing(false); setIsFromLibrary(false); setLocalError(null);
   };
 
-  // UI de Ensayo
   if (isRehearsing && scriptData) {
     return (
       <ScreenWrapper>
@@ -110,13 +86,11 @@ export const HomeScreen = () => {
     );
   }
 
-  // UI Principal
   return (
     <ScreenWrapper>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Teatro IA 🎭</Text>
         
-        {/* BLOQUE DE ERROR RECUPERADO */}
         {(error || localError) && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>⚠️ {error || localError}</Text>
@@ -129,13 +103,13 @@ export const HomeScreen = () => {
             <View style={styles.progressBarBackground}>
               <Animated.View style={[styles.progressBarFill, { width: progressAnim.interpolate({inputRange: [0, 100], outputRange: ['0%', '100%']}) }]} />
             </View>
-            <Text style={styles.loadingMsg}>Gemini está analizando "{fileName}"...</Text>
-            <Text style={styles.loadingSubMsg}>Esto puede tardar hasta 30 segundos en guiones largos.</Text>
+            <Text style={styles.loadingMsg}>Subiendo y analizando "{fileName}"...</Text>
+            <Text style={styles.loadingSubMsg}>Esto puede tardar unos segundos</Text>
           </View>
         ) : !scriptData ? (
           <View style={styles.section}>
             <TouchableOpacity style={styles.btnMain} onPress={handlePickDocument}>
-              <Text style={styles.btnText}>📄 Subir Guión Nuevo (PDF)</Text>
+              <Text style={styles.btnText}>📄 Subir Guión (PDF)</Text>
             </TouchableOpacity>
 
             {savedScripts.length > 0 && (
@@ -187,25 +161,21 @@ const styles = StyleSheet.create({
   btnMain: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center', shadowOpacity: 0.2, elevation: 4 },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
   btnBack: { marginTop: 20, padding: 10, alignItems: 'center' },
-  
   errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20, width: '100%', borderWidth: 1, borderColor: '#ffcdd2' },
   errorText: { color: '#c62828', fontSize: 14, textAlign: 'center', fontWeight: '500' },
-  
   loadingContainer: { width: '100%', alignItems: 'center', marginTop: 40 },
   progressBarBackground: { width: '100%', height: 10, backgroundColor: '#eee', borderRadius: 5, marginTop: 20, overflow: 'hidden' },
   progressBarFill: { height: '100%', backgroundColor: '#007AFF' },
   loadingMsg: { marginTop: 15, color: '#333', fontWeight: '600', textAlign: 'center' },
-  loadingSubMsg: { marginTop: 5, color: '#888', fontSize: 12, textAlign: 'center' },
-  
+  loadingSubMsg: { marginTop: 5, color: '#777', fontSize: 12, textAlign: 'center' },
   lib: { marginTop: 40, width: '100%' },
   libTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 15, color: '#333' },
   card: { flexDirection: 'row', backgroundColor: '#fff', padding: 15, borderRadius: 12, marginBottom: 10, alignItems: 'center', shadowOpacity: 0.1, elevation: 2, borderWidth: 1, borderColor: '#f0f0f0' },
   cardT: { fontWeight: 'bold', fontSize: 16, color: '#111' },
   cardD: { fontSize: 12, color: '#999', marginTop: 2 },
   deleteBtn: { padding: 10, marginLeft: 10 },
-  
   resultTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 5, color: '#111', textAlign: 'center' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 30, justifyContent: 'center', marginTop: 10 },
-  tag: { paddingVertical: 10, paddingHorizontal: 15, backgroundColor: '#f0f7ff', borderRadius: 20, borderSize: 1, borderColor: '#d0e5ff' },
-  tagS: { backgroundColor: '#e8f5e9', borderColor: '#c8e6c9' }
+  tag: { paddingVertical: 10, paddingHorizontal: 15, backgroundColor: '#f0f7ff', borderRadius: 20 },
+  tagS: { backgroundColor: '#e8f5e9' }
 });

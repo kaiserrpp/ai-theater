@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 export interface Dialogue { p: string; t: string; a: string; }
 export interface ScriptData { obra: string; personajes: string[]; guion: Dialogue[]; }
 
-// Intentamos leer la clave de las variables de entorno de Expo
 const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
 const genAI = new GoogleGenerativeAI(API_KEY);
 
@@ -16,104 +15,112 @@ export const useGemini = () => {
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
 
-  // --- DESCUBRIMIENTO DINÁMICO CON DIAGNÓSTICO ---
+  // 1. Descubrimiento de modelos
   useEffect(() => {
     const fetchModels = async () => {
-      // 1. Verificación previa de la clave
-      if (!API_KEY) {
-        setError("Error Local: La variable EXPO_PUBLIC_API_KEY está vacía. Revisa los Secrets en Vercel.");
-        return;
-      }
-
+      if (!API_KEY) return;
       try {
-        console.log("🔍 Intentando conectar con Google API...");
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
-        
-        // Capturamos el JSON de la respuesta sea cual sea
         const data = await response.json();
-
         if (response.ok && data.models) {
-          // Filtrado de modelos que soportan generación de contenido
           const utiles = data.models
             .filter((m: any) => m.supportedGenerationMethods.includes('generateContent'))
             .map((m: any) => m.name.replace('models/', ''));
-          
-          if (utiles.length > 0) {
-            setAvailableModels(utiles);
-            console.log("✅ Modelos vivos de Google:", utiles);
-          } else {
-            setError("Google devolvió una lista, pero ningún modelo es compatible con 'generateContent'.");
-          }
-        } else {
-          // Si Google responde con un error (ej. API Key inválida)
-          const googleError = data.error ? `[${data.error.code}] ${data.error.message}` : "Respuesta sin campo 'models'";
-          setError(`Error de Google API: ${googleError}`);
+          setAvailableModels(utiles);
         }
-      } catch (err: any) {
-        // Error de red o excepción de JavaScript
-        setError(`Excepción en fetchModels: ${err.message || 'Error desconocido'}`);
-      }
+      } catch (err) {} // Silencioso para no ensuciar la pantalla si tarda
     };
-
     fetchModels();
   }, []);
 
-  const analyzePdf = async (base64String: string) => {
+  // 2. Función para subir archivos pesados sin usar memoria local
+  const uploadToGemini = async (localUri: string, mimeType: string) => {
+    try {
+      // Obtenemos el archivo puro desde el móvil (sin Base64)
+      const fileResp = await fetch(localUri);
+      const blob = await fileResp.blob();
+
+      // Lo subimos directamente al servidor de archivos de Google
+      const uploadResp = await fetch(
+        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Goog-Upload-Protocol': 'raw',
+            'X-Goog-Upload-Header-Content-Type': mimeType,
+            'Content-Type': mimeType
+          },
+          body: blob
+        }
+      );
+
+      const data = await uploadResp.json();
+      if (!uploadResp.ok) {
+        throw new Error(data.error?.message || "Error en el servidor de subida");
+      }
+      return data.file.uri; // Este es el enlace interno que usará la IA
+    } catch (e: any) {
+      throw new Error(`Fallo al subir el archivo: ${e.message}`);
+    }
+  };
+
+  // 3. El análisis
+  const analyzeScript = async (localUri: string, mimeType: string) => {
     setLoading(true);
     setError(null);
     setScriptData(null);
 
     if (availableModels.length === 0) {
-      setError("No hay modelos disponibles para procesar el guion. Revisa el error superior.");
+      setError("Esperando conexión con Google...");
       setLoading(false);
       return;
     }
 
-    const promptText = `Extract script data from this PDF into JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
+    try {
+      console.log("⬆️ Subiendo PDF de forma optimizada a Google...");
+      const geminiFileUri = await uploadToGemini(localUri, mimeType);
+      console.log("✅ PDF Subido. URI interna:", geminiFileUri);
 
-    let triedModels: string[] = [];
-    let lastError = "";
+      const promptText = `Extract script data from this document into strict JSON: {"obra": "string", "personajes": ["string"], "guion": [{"p": "string", "t": "string", "a": "string"}]}. Respond ONLY with valid JSON.`;
 
-    // Bucle sobre la lista oficial descubierta
-    for (const modelName of availableModels) {
-      triedModels.push(modelName);
-      try {
-        console.log(`🚀 Probando modelo: ${modelName}`);
-        const model = genAI.getGenerativeModel({ 
-          model: modelName,
-          generationConfig: { responseMimeType: "application/json" }
-        });
+      let lastError = "";
+      
+      // Intentamos con los modelos disponibles
+      for (const modelName of availableModels) {
+        try {
+          console.log(`🚀 Procesando texto con: ${modelName}`);
+          const model = genAI.getGenerativeModel({ 
+            model: modelName,
+            generationConfig: { responseMimeType: "application/json" }
+          });
 
-        const result = await model.generateContent([
-          { text: promptText },
-          { inlineData: { data: base64String, mimeType: "application/pdf" } }
-        ]);
+          // AHORA PASAMOS LA URI DEL ARCHIVO, NO EL ARCHIVO ENTERO
+          const result = await model.generateContent([
+            { text: promptText },
+            { fileData: { mimeType, fileUri: geminiFileUri } }
+          ]);
 
-        const response = await result.response;
-        const text = response.text();
-        
-        // Limpiamos el JSON por si acaso
-        const start = text.indexOf('{');
-        const end = text.lastIndexOf('}') + 1;
-        const cleanJson = text.substring(start, end);
-        
-        setScriptData(JSON.parse(cleanJson));
-        setLoading(false);
-        return; 
+          const response = await result.response;
+          const text = response.text();
+          
+          const start = text.indexOf('{');
+          const end = text.lastIndexOf('}') + 1;
+          setScriptData(JSON.parse(text.substring(start, end)));
+          setLoading(false);
+          return; // ¡ÉXITO!
 
-      } catch (err: any) {
-        lastError = err.message || "Error sin mensaje";
-        console.warn(`❌ ${modelName} falló:`, lastError);
-
-        if (lastError.includes("429")) {
-          await wait(3000); // Pausa si hay saturación
+        } catch (err: any) {
+          lastError = err.message;
+          if (lastError.includes("429")) await wait(2500);
         }
       }
+      setError(`Agotados modelos disponibles. Último error: ${lastError}`);
+    } catch (err: any) {
+      setError(`Error general: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
-
-    setError(`Agotados modelos (${triedModels.join(', ')}). Último fallo: ${lastError}`);
-    setLoading(false);
   };
 
-  return { analyzePdf, loading, error, scriptData, setScriptData };
+  return { analyzeScript, loading, error, scriptData, setScriptData };
 };
