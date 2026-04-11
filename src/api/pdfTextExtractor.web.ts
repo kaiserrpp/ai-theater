@@ -25,11 +25,26 @@ interface PdfTextItem {
 
 interface PdfJsPage {
   getTextContent: () => Promise<{ items: unknown[] }>;
+  streamTextContent: (params?: {
+    includeMarkedContent?: boolean;
+    disableNormalization?: boolean;
+  }) => {
+    getReader: () => {
+      read: () => Promise<{ done?: boolean; value?: PdfJsTextContentChunk }>;
+      releaseLock?: () => void;
+    };
+  };
 }
 
 interface PdfJsDocument {
   numPages: number;
   getPage: (pageNumber: number) => Promise<PdfJsPage>;
+}
+
+interface PdfJsTextContentChunk {
+  items: unknown[];
+  styles?: Record<string, unknown>;
+  lang?: string | null;
 }
 
 interface PdfJsModule {
@@ -276,6 +291,52 @@ const loadPdfJsModule = () => {
   });
 };
 
+const readPageTextContent = async (page: PdfJsPage, pageIndex: number) => {
+  pushTrace(`extractor: streamTextContent:${pageIndex}:start`);
+
+  const stream = page.streamTextContent({
+    includeMarkedContent: false,
+    disableNormalization: false,
+  });
+  const reader = stream.getReader();
+  const textContent: PdfJsTextContentChunk = {
+    items: [],
+    styles: Object.create(null),
+    lang: null,
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      if (!value) {
+        continue;
+      }
+
+      if (!textContent.lang && value.lang) {
+        textContent.lang = value.lang;
+      }
+
+      if (value.styles) {
+        Object.assign(textContent.styles ?? {}, value.styles);
+      }
+
+      if (Array.isArray(value.items)) {
+        textContent.items.push(...value.items);
+        pushTrace(`extractor: streamTextContent:${pageIndex}:chunk-items:${value.items.length}`);
+      }
+    }
+
+    pushTrace(`extractor: streamTextContent:${pageIndex}:done:${textContent.items.length}`);
+    return textContent;
+  } finally {
+    reader.releaseLock?.();
+  }
+};
+
 export const extractPdfLines = async (
   localUri: string,
   callbacks?: PdfExtractionCallbacks
@@ -362,7 +423,7 @@ export const extractPdfLines = async (
 
     let textContent: { items: unknown[] };
     try {
-      textContent = await page.getTextContent();
+      textContent = await readPageTextContent(page, pageIndex);
       pushTrace(`extractor: getTextContent:${pageIndex}:items:${textContent.items.length}`);
     } catch (error) {
       throw buildStageError(`extraer texto de la pagina ${pageIndex}`, error);
