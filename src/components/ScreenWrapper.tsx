@@ -1,7 +1,7 @@
 import React from 'react';
-import { ImageBackground, Platform, SafeAreaView, StyleSheet, View } from 'react-native';
+import { Image, Platform, SafeAreaView, StyleSheet, View } from 'react-native';
 
-const stageFrame = require('../../assets/images/stage-frame.png');
+const stageFrame = require('../../assets/images/stage-frame-white.jpg');
 
 export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
   return (
@@ -9,7 +9,9 @@ export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
       {Platform.OS === 'web' ? (
         <View pointerEvents="none" style={styles.webBackdrop}>
           <View style={styles.backdropBase} />
-          <ImageBackground source={stageFrame} style={styles.webBackdropFill} imageStyle={styles.webBackdropImage} />
+          <View style={styles.webBackdropFrameWrap}>
+            <Image source={stageFrame} style={styles.webBackdropImage} />
+          </View>
         </View>
       ) : null}
       <View style={styles.container}>
@@ -22,7 +24,7 @@ export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Platform.OS === 'web' ? '#120205' : '#fff',
+    backgroundColor: '#fff',
     paddingTop: Platform.OS === 'android' ? 25 : 0,
   },
   container: {
@@ -38,13 +40,17 @@ const styles = StyleSheet.create({
   },
   backdropBase: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#140303',
+    backgroundColor: '#fff',
   },
-  webBackdropFill: {
-    ...StyleSheet.absoluteFillObject,
+  webBackdropFrameWrap: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
   },
   webBackdropImage: {
-    resizeMode: 'stretch',
-    opacity: 0.96,
+    width: '96%',
+    maxWidth: 780,
+    aspectRatio: 1536 / 2752,
+    resizeMode: 'contain',
   },
 });
