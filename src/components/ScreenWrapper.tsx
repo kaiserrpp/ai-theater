@@ -1,15 +1,17 @@
 import React from 'react';
-import { SafeAreaView, StyleSheet, Platform, View } from 'react-native';
+import { ImageBackground, Platform, SafeAreaView, StyleSheet, View } from 'react-native';
+
+const theaterBackdrop = require('../../assets/images/theater-curtain.jpg');
 
 export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
   return (
     <SafeAreaView style={styles.safeArea}>
       {Platform.OS === 'web' ? (
         <View pointerEvents="none" style={styles.webBackdrop}>
-          <View style={[styles.backdropOrb, styles.backdropOrbTop]} />
-          <View style={[styles.backdropOrb, styles.backdropOrbMiddle]} />
-          <View style={[styles.backdropOrb, styles.backdropOrbBottom]} />
-          <View style={styles.backdropPanel} />
+          <ImageBackground source={theaterBackdrop} style={styles.webBackdropFill} imageStyle={styles.webBackdropImage}>
+            <View style={styles.backdropTint} />
+            <View style={styles.backdropPanel} />
+          </ImageBackground>
         </View>
       ) : null}
       <View style={styles.container}>
@@ -22,7 +24,7 @@ export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Platform.OS === 'web' ? '#f4efe5' : '#fff',
+    backgroundColor: Platform.OS === 'web' ? '#140303' : '#fff',
     paddingTop: Platform.OS === 'android' ? 25 : 0,
   },
   container: {
@@ -35,33 +37,16 @@ const styles = StyleSheet.create({
   },
   webBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
   },
-  backdropOrb: {
-    position: 'absolute',
-    borderRadius: 999,
-    opacity: 0.45,
+  webBackdropFill: {
+    ...StyleSheet.absoluteFillObject,
   },
-  backdropOrbTop: {
-    width: 320,
-    height: 320,
-    top: -110,
-    right: -60,
-    backgroundColor: '#ffd6a5',
+  webBackdropImage: {
+    resizeMode: 'cover',
   },
-  backdropOrbMiddle: {
-    width: 260,
-    height: 260,
-    top: '32%',
-    left: -100,
-    backgroundColor: '#b9d8c2',
-  },
-  backdropOrbBottom: {
-    width: 360,
-    height: 360,
-    bottom: -170,
-    right: '12%',
-    backgroundColor: '#f7b7b2',
+  backdropTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(18, 2, 2, 0.48)',
   },
   backdropPanel: {
     position: 'absolute',
@@ -70,8 +55,8 @@ const styles = StyleSheet.create({
     left: 24,
     right: 24,
     borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.68)',
+    backgroundColor: 'rgba(255, 250, 246, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
+    borderColor: 'rgba(255,255,255,0.38)',
   },
 });
