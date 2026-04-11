@@ -2,7 +2,7 @@ import * as Speech from 'expo-speech';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Dialogue } from '../types/script';
-import { filterScriptByScenes, isSceneMarker } from '../utils/scriptScenes';
+import { filterScriptByScenes, isSceneMarker, isSongCue } from '../utils/scriptScenes';
 
 interface Props {
   guion: Dialogue[];
@@ -32,7 +32,7 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
   useEffect(() => {
     Speech.stop();
 
-    if (isFinished || !currentLine || isSceneMarker(currentLine) || isMyTurn) {
+    if (isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine) || isMyTurn) {
       return () => {
         void Speech.stop();
       };
@@ -65,6 +65,33 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
         </TouchableOpacity>
         <TouchableOpacity onPress={handleExit} style={styles.exitButton}>
           <Text>Salir</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (isSongCue(currentLine)) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleExit}>
+            <Text style={styles.blue}>Cerrar ensayo</Text>
+          </TouchableOpacity>
+          <Text style={styles.sceneName}>Cancion dentro de la escena</Text>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.center}>
+          <View style={styles.songBox}>
+            <Text style={styles.songBadge}>Cancion</Text>
+            <Text style={styles.songTitle}>{currentLine.songTitle || 'Cancion'}</Text>
+            {currentLine.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
+            <Text style={styles.songText}>{currentLine.t}</Text>
+            <Text style={styles.songHint}>La voz se pausa aqui para que podais seguir la letra manualmente.</Text>
+          </View>
+        </ScrollView>
+
+        <TouchableOpacity style={[styles.footer, styles.songFooter]} onPress={advanceLine}>
+          <Text style={styles.btnText}>Continuar tras la cancion</Text>
         </TouchableOpacity>
       </View>
     );
@@ -126,6 +153,43 @@ const styles = StyleSheet.create({
   finishedBox: { alignItems: 'center' },
   finishedTitle: { fontSize: 20, fontWeight: 'bold' },
   box: { padding: 30, borderRadius: 20, backgroundColor: '#f8f9fa', alignItems: 'center' },
+  songBox: {
+    padding: 28,
+    borderRadius: 20,
+    backgroundColor: '#fff7e8',
+    borderWidth: 1,
+    borderColor: '#f1d18a',
+    width: '100%',
+  },
+  songBadge: {
+    alignSelf: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#f0b84a',
+    color: '#5f3a00',
+    fontWeight: '700',
+  },
+  songTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 14,
+    color: '#5f3a00',
+  },
+  songText: {
+    fontSize: 22,
+    textAlign: 'center',
+    lineHeight: 34,
+    color: '#4d3b16',
+  },
+  songHint: {
+    marginTop: 20,
+    textAlign: 'center',
+    color: '#7a6332',
+    fontSize: 14,
+  },
   myBox: { backgroundColor: '#fff0f0', borderWidth: 2, borderColor: 'red' },
   name: { fontSize: 22, fontWeight: '900', marginBottom: 10 },
   myName: { color: 'red' },
@@ -135,6 +199,7 @@ const styles = StyleSheet.create({
   myTurnHint: { marginTop: 20, fontSize: 14, color: '#d32f2f', fontWeight: 'bold' },
   footer: { backgroundColor: '#007AFF', padding: 25, alignItems: 'center' },
   footerActive: { backgroundColor: 'red' },
+  songFooter: { backgroundColor: '#d98a00' },
   btnNext: { backgroundColor: '#007AFF', padding: 20, borderRadius: 15, width: '100%', alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
   btnBack: { backgroundColor: '#333', padding: 15, borderRadius: 10, marginTop: 20 },

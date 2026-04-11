@@ -1,6 +1,8 @@
-import { Dialogue, SCENE_SYSTEM_SPEAKER } from '../types/script';
+import { Dialogue, SCENE_SYSTEM_SPEAKER, SONG_SYSTEM_SPEAKER } from '../types/script';
 
 export const isSceneMarker = (line?: Dialogue | null) => line?.p === SCENE_SYSTEM_SPEAKER;
+export const isSongCue = (line?: Dialogue | null) => line?.p === SONG_SYSTEM_SPEAKER || line?.k === 'song';
+export const isSystemCue = (line?: Dialogue | null) => isSceneMarker(line) || isSongCue(line);
 
 export const getSceneTitles = (guion: Dialogue[]) =>
   guion.filter((line) => isSceneMarker(line)).map((line) => line.t);

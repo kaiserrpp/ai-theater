@@ -1,10 +1,12 @@
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { VersionBadge } from '../components/VersionBadge';
 import { useGemini } from '../hooks/useGemini';
+import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
+import { normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
 
 export const HomeScreen = () => {
@@ -25,6 +27,21 @@ export const HomeScreen = () => {
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [isRehearsing, setIsRehearsing] = useState(false);
   const [selectedScenes, setSelectedScenes] = useState<string[]>([]);
+  const [mergeSource, setMergeSource] = useState<string | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<string | null>(null);
+
+  const {
+    isReady: areRoleMergesReady,
+    mergeEntries,
+    mergeMap,
+    mergeSourceCandidates,
+    mergedScriptData,
+    mergeCharacter,
+    removeMerge,
+    clearMerges,
+  } = useScriptRoleMerges(scriptData);
+
+  const displayScriptData = mergedScriptData ?? scriptData;
 
   const progressText = useMemo(() => {
     if (!loading) {
@@ -38,13 +55,38 @@ export const HomeScreen = () => {
     return statusText;
   }, [currentChunkIndex, loading, statusText, totalChunks]);
 
+  const mergeTargetCandidates = useMemo(() => {
+    if (!displayScriptData || !mergeSource) {
+      return [];
+    }
+
+    const currentAlias = normalizeRoleSelection([mergeSource], mergeMap)[0] ?? mergeSource;
+    return displayScriptData.personajes.filter((character) => character !== currentAlias);
+  }, [displayScriptData, mergeMap, mergeSource]);
+
+  useEffect(() => {
+    setMyRoles((previousRoles) => normalizeRoleSelection(previousRoles, mergeMap));
+  }, [mergeMap]);
+
+  useEffect(() => {
+    if (mergeSource && !mergeSourceCandidates.includes(mergeSource)) {
+      setMergeSource(null);
+    }
+  }, [mergeSource, mergeSourceCandidates]);
+
+  useEffect(() => {
+    if (mergeTarget && !mergeTargetCandidates.includes(mergeTarget)) {
+      setMergeTarget(null);
+    }
+  }, [mergeTarget, mergeTargetCandidates]);
+
   const startRehearsal = (mode: 'ALL' | 'MINE') => {
-    if (!scriptData) {
+    if (!displayScriptData) {
       return;
     }
 
-    const allScenes = getSceneTitles(scriptData.guion);
-    setSelectedScenes(mode === 'ALL' ? allScenes : getScenesForRoles(scriptData.guion, myRoles));
+    const allScenes = getSceneTitles(displayScriptData.guion);
+    setSelectedScenes(mode === 'ALL' ? allScenes : getScenesForRoles(displayScriptData.guion, myRoles));
     setIsRehearsing(true);
   };
 
@@ -52,18 +94,30 @@ export const HomeScreen = () => {
     setMyRoles([]);
     setSelectedScenes([]);
     setIsRehearsing(false);
+    setMergeSource(null);
+    setMergeTarget(null);
     resetScript();
+  };
+
+  const handleMergeCharacters = () => {
+    if (!mergeSource || !mergeTarget) {
+      return;
+    }
+
+    mergeCharacter(mergeSource, mergeTarget);
+    setMergeSource(null);
+    setMergeTarget(null);
   };
 
   const resumeSceneNumber = pendingJob
     ? Math.min(pendingJob.index + 2, pendingJob.totalChunks.length)
     : null;
 
-  if (isRehearsing && scriptData) {
+  if (isRehearsing && displayScriptData) {
     return (
       <ScreenWrapper>
         <RehearsalView
-          guion={scriptData.guion}
+          guion={displayScriptData.guion}
           myRoles={myRoles}
           filterScenes={selectedScenes}
           onExit={() => setIsRehearsing(false)}
@@ -97,14 +151,14 @@ export const HomeScreen = () => {
           </View>
         )}
 
-        {loading || scriptData ? (
+        {loading || displayScriptData ? (
           <View style={styles.section}>
             {loading && <Text style={styles.status}>{progressText}</Text>}
-            <Text style={styles.obraTitle}>{scriptData?.obra}</Text>
+            <Text style={styles.obraTitle}>{displayScriptData?.obra}</Text>
 
             <Text style={styles.label}>Personajes detectados (elige el tuyo):</Text>
             <View style={styles.tags}>
-              {scriptData?.personajes.map((character) => (
+              {displayScriptData?.personajes.map((character) => (
                 <TouchableOpacity
                   key={character}
                   style={[styles.tag, myRoles.includes(character) && styles.tagSelected]}
@@ -122,6 +176,88 @@ export const HomeScreen = () => {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {!loading && scriptData && (
+              <View style={styles.mergePanel}>
+                <Text style={styles.mergeTitle}>Fusionar personajes duplicados</Text>
+                <Text style={styles.mergeHint}>
+                  Une alias o variantes del mismo personaje. Se guardará solo para esta obra.
+                </Text>
+
+                {!areRoleMergesReady ? (
+                  <Text style={styles.mergeLoading}>Cargando fusiones guardadas...</Text>
+                ) : (
+                  <>
+                    <Text style={styles.mergeStep}>1. Elige el nombre a corregir</Text>
+                    <View style={styles.tags}>
+                      {mergeSourceCandidates.map((character) => (
+                        <TouchableOpacity
+                          key={`source-${character}`}
+                          style={[styles.tag, mergeSource === character && styles.tagSelected]}
+                          onPress={() => {
+                            setMergeSource(character);
+                            setMergeTarget(null);
+                          }}
+                        >
+                          <Text style={[styles.tagText, mergeSource === character && styles.tagTextSelected]}>
+                            {character}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {mergeSource ? (
+                      <>
+                        <Text style={styles.mergeStep}>2. Elige el personaje correcto</Text>
+                        <View style={styles.tags}>
+                          {mergeTargetCandidates.map((character) => (
+                            <TouchableOpacity
+                              key={`target-${character}`}
+                              style={[styles.tag, mergeTarget === character && styles.tagSelected]}
+                              onPress={() => setMergeTarget(character)}
+                            >
+                              <Text style={[styles.tagText, mergeTarget === character && styles.tagTextSelected]}>
+                                {character}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+
+                        <TouchableOpacity
+                          style={[styles.btnMenu, styles.mergeAction, !mergeTarget && styles.buttonDisabled]}
+                          onPress={handleMergeCharacters}
+                          disabled={!mergeTarget}
+                        >
+                          <Text style={styles.btnText}>Fusionar {mergeSource} en {mergeTarget ?? '...'}</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
+
+                    {mergeEntries.length > 0 ? (
+                      <>
+                        <Text style={styles.mergeStep}>Fusiones activas</Text>
+                        <View style={styles.mergeList}>
+                          {mergeEntries.map(({ sourceCharacter, targetCharacter }) => (
+                            <TouchableOpacity
+                              key={`${sourceCharacter}-${targetCharacter}`}
+                              style={styles.mergeChip}
+                              onPress={() => removeMerge(sourceCharacter)}
+                            >
+                              <Text style={styles.mergeChipText}>
+                                {sourceCharacter} → {targetCharacter} · quitar
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                        <TouchableOpacity onPress={clearMerges} style={styles.clearMergeButton}>
+                          <Text style={styles.clearMergeText}>Quitar todas las fusiones</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </View>
+            )}
 
             <View style={styles.menu}>
               <TouchableOpacity
@@ -154,7 +290,7 @@ export const HomeScreen = () => {
               if (!result.canceled) {
                 setMyRoles([]);
                 setSelectedScenes([]);
-                await analyzeInStages(result.assets[0].uri);
+                await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
               }
             }}
           >
@@ -189,6 +325,29 @@ const styles = StyleSheet.create({
   obraTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
   label: { color: '#666', marginBottom: 10, textAlign: 'center' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 30 },
+  mergePanel: {
+    marginBottom: 30,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e4e8ee',
+  },
+  mergeTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
+  mergeHint: { color: '#5f6b7a', textAlign: 'center', marginBottom: 16, lineHeight: 20 },
+  mergeLoading: { textAlign: 'center', color: '#5f6b7a' },
+  mergeStep: { fontWeight: '600', marginBottom: 10, textAlign: 'center' },
+  mergeAction: { marginTop: -8, marginBottom: 20 },
+  mergeList: { gap: 10 },
+  mergeChip: {
+    backgroundColor: '#eef5ff',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mergeChipText: { color: '#215a9a', textAlign: 'center', fontWeight: '600' },
+  clearMergeButton: { marginTop: 14, alignSelf: 'center' },
+  clearMergeText: { color: '#c62828', fontWeight: '600' },
   tag: { padding: 10, backgroundColor: '#f0f7ff', borderRadius: 15, borderWidth: 1, borderColor: '#d0e3ff' },
   tagSelected: { backgroundColor: '#e8f5e9', borderColor: '#a5d6a7' },
   tagText: { color: '#007AFF' },

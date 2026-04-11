@@ -11,6 +11,23 @@ import type { PendingAnalysisJob, ScriptData } from '../types/script';
 
 export type { Dialogue, PendingAnalysisJob, ScriptData } from '../types/script';
 
+const getFriendlyAnalysisError = (message: string) => {
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes('api key') ||
+    normalizedMessage.includes('api_key') ||
+    normalizedMessage.includes('expired') ||
+    normalizedMessage.includes('caduc')
+  ) {
+    return Platform.OS === 'web'
+      ? 'La clave de Google no es valida o ha caducado.'
+      : 'En iPhone seguimos usando Gemini y la clave de Google no es valida o ha caducado. Para probar el parser local, usa la version web.';
+  }
+
+  return message;
+};
+
 export const useGemini = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +83,7 @@ export const useGemini = () => {
   }, [loadPendingJob]);
 
   const analyzeInStages = useCallback(
-    async (localUri: string | null, resumeData?: PendingAnalysisJob | null) => {
+    async (localUri: string | null, resumeData?: PendingAnalysisJob | null, documentName?: string | null) => {
       setLoading(true);
       setError(null);
       setStatusText('');
@@ -79,9 +96,12 @@ export const useGemini = () => {
           await clearCheckpoint();
 
           const finalScript = await analyzeScriptLocally(localUri, {
-            onStatusChange: setStatusText,
-            onPagesReady: setSceneTitles,
-            onPageStart: (index) => setCurrentChunkIndex(index),
+            callbacks: {
+              onStatusChange: setStatusText,
+              onPagesReady: setSceneTitles,
+              onPageStart: (index) => setCurrentChunkIndex(index),
+            },
+            documentName,
           });
 
           setScriptData(finalScript);
@@ -107,7 +127,7 @@ export const useGemini = () => {
         await clearCheckpoint();
       } catch (analysisError) {
         const message = analysisError instanceof Error ? analysisError.message : 'Error desconocido.';
-        setError(`Error de lectura: ${message}`);
+        setError(`Error de lectura: ${getFriendlyAnalysisError(message)}`);
       } finally {
         setLoading(false);
       }

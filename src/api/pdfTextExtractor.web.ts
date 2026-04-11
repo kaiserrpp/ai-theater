@@ -1,9 +1,12 @@
-import * as pdfjs from 'pdfjs-dist';
 import type { ExtractedPdfLine, PdfExtractionCallbacks } from './pdfTextExtractor';
 
-const PDFJS_WORKER_URL = 'https://unpkg.com/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs';
+const PDFJS_LOADER_MODULE_URL = '/pdfjs/loader.mjs';
+const PDFJS_WORKER_URL = '/pdfjs/pdf.worker.min.mjs';
+const PDFJS_STANDARD_FONT_URL = '/pdfjs/standard_fonts/';
 const LINE_VERTICAL_TOLERANCE = 4;
 const PAGE_EDGE_LINE_COUNT = 2;
+const PDFJS_LOADER_SCRIPT_ID = 'teatro-pdfjs-loader';
+const PDFJS_LOAD_TIMEOUT_MS = 15000;
 
 interface PositionedTextItem {
   text: string;
@@ -16,6 +19,36 @@ interface PdfTextItem {
   str: string;
   transform: number[];
   width?: number;
+}
+
+interface PdfJsPage {
+  getTextContent: () => Promise<{ items: unknown[] }>;
+}
+
+interface PdfJsDocument {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<PdfJsPage>;
+}
+
+interface PdfJsModule {
+  GlobalWorkerOptions: {
+    workerSrc?: string;
+    workerPort?: Worker;
+  };
+  getDocument: (options: {
+    data: ArrayBuffer;
+    useSystemFonts?: boolean;
+    standardFontDataUrl?: string;
+  }) => {
+    promise: Promise<PdfJsDocument>;
+  };
+}
+
+declare global {
+  interface Window {
+    __teatroPdfJsModule?: PdfJsModule;
+    __teatroPdfJsPromise?: Promise<PdfJsModule>;
+  }
 }
 
 const runCallback = async (callback?: () => void | Promise<void>) => {
@@ -89,19 +122,104 @@ const isPdfTextItem = (item: unknown): item is PdfTextItem => {
   return 'str' in item && 'transform' in item;
 };
 
+const withAbsoluteBrowserUrl = (path: string) => {
+  if (typeof window === 'undefined') {
+    return path;
+  }
+
+  return new URL(path, window.location.origin).toString();
+};
+
+const loadPdfJsModule = () => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return Promise.reject(new Error('PDF.js solo puede cargarse en navegador.'));
+  }
+
+  if (window.__teatroPdfJsModule) {
+    return Promise.resolve(window.__teatroPdfJsModule);
+  }
+
+  if (window.__teatroPdfJsPromise) {
+    return window.__teatroPdfJsPromise;
+  }
+
+  window.__teatroPdfJsPromise = new Promise<PdfJsModule>((resolve, reject) => {
+    const existingScript = document.getElementById(PDFJS_LOADER_SCRIPT_ID) as HTMLScriptElement | null;
+    const startedAt = Date.now();
+    let settled = false;
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      callback();
+    };
+
+    const waitForModule = () => {
+      if (window.__teatroPdfJsModule) {
+        finish(() => resolve(window.__teatroPdfJsModule as PdfJsModule));
+        return;
+      }
+
+      if (Date.now() - startedAt >= PDFJS_LOAD_TIMEOUT_MS) {
+        finish(() =>
+          reject(new Error('La carga del motor PDF ha tardado demasiado. Recarga la pagina e intentalo de nuevo.'))
+        );
+        return;
+      }
+
+      window.setTimeout(waitForModule, 50);
+    };
+
+    const handleResolve = () => waitForModule();
+
+    const handleReject = () => finish(() => reject(new Error('No se pudo cargar el motor PDF local.')));
+
+    if (existingScript) {
+      existingScript.addEventListener('load', handleResolve, { once: true });
+      existingScript.addEventListener('error', handleReject, { once: true });
+      waitForModule();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = PDFJS_LOADER_SCRIPT_ID;
+    script.type = 'module';
+    script.src = withAbsoluteBrowserUrl(PDFJS_LOADER_MODULE_URL);
+    script.addEventListener('load', handleResolve, { once: true });
+    script.addEventListener('error', handleReject, { once: true });
+    document.head.appendChild(script);
+    waitForModule();
+  });
+
+  return window.__teatroPdfJsPromise.catch((error) => {
+    window.__teatroPdfJsPromise = undefined;
+    throw error;
+  });
+};
+
 export const extractPdfLines = async (
   localUri: string,
   callbacks?: PdfExtractionCallbacks
 ): Promise<ExtractedPdfLine[]> => {
-  await runCallback(() => callbacks?.onStatusChange?.('Leyendo PDF localmente...'));
+  await runCallback(() => callbacks?.onStatusChange?.('Cargando motor PDF...'));
 
+  const pdfjs = await loadPdfJsModule();
   if (!pdfjs.GlobalWorkerOptions.workerSrc && !pdfjs.GlobalWorkerOptions.workerPort) {
-    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    pdfjs.GlobalWorkerOptions.workerSrc = withAbsoluteBrowserUrl(PDFJS_WORKER_URL);
   }
 
+  await runCallback(() => callbacks?.onStatusChange?.('Abriendo archivo seleccionado...'));
   const response = await fetch(localUri);
   const pdfData = await response.arrayBuffer();
-  const loadingTask = pdfjs.getDocument({ data: pdfData, useSystemFonts: true });
+  await runCallback(() => callbacks?.onStatusChange?.('Preparando paginas del PDF...'));
+  const loadingTask = pdfjs.getDocument({
+    data: pdfData,
+    useSystemFonts: true,
+    standardFontDataUrl: withAbsoluteBrowserUrl(PDFJS_STANDARD_FONT_URL),
+  });
   const pdfDocument = await loadingTask.promise;
   const totalPages = pdfDocument.numPages;
 
