@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { useCallback, useEffect, useState } from 'react';
+import { analyzeScriptLocally } from '../api/localScriptAnalyzer';
 import {
   analyzeScriptInStages as runScriptAnalysis,
   fetchAvailableGeminiModels,
@@ -49,7 +51,12 @@ export const useGemini = () => {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const [models] = await Promise.all([fetchAvailableGeminiModels(), loadPendingJob()]);
+      const storedJob = await loadPendingJob();
+      if (Platform.OS === 'web' && !storedJob) {
+        return;
+      }
+
+      const models = await fetchAvailableGeminiModels();
       if (models.length > 0) {
         setAvailableModels(models);
       }
@@ -68,6 +75,19 @@ export const useGemini = () => {
       setScriptData(resumeData?.data ?? null);
 
       try {
+        if (Platform.OS === 'web' && localUri && !resumeData) {
+          await clearCheckpoint();
+
+          const finalScript = await analyzeScriptLocally(localUri, {
+            onStatusChange: setStatusText,
+            onPagesReady: setSceneTitles,
+            onPageStart: (index) => setCurrentChunkIndex(index),
+          });
+
+          setScriptData(finalScript);
+          return;
+        }
+
         const finalScript = await runScriptAnalysis({
           localUri,
           resumeJob: resumeData,
