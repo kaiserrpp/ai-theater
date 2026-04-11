@@ -1,3 +1,4 @@
+import * as pdfjs from 'pdfjs-dist';
 import type { ExtractedPdfLine, PdfExtractionCallbacks } from './pdfTextExtractor';
 
 const PDFJS_WORKER_URL = 'https://unpkg.com/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs';
@@ -94,7 +95,6 @@ export const extractPdfLines = async (
 ): Promise<ExtractedPdfLine[]> => {
   await runCallback(() => callbacks?.onStatusChange?.('Leyendo PDF localmente...'));
 
-  const pdfjs = await import('pdfjs-dist');
   if (!pdfjs.GlobalWorkerOptions.workerSrc && !pdfjs.GlobalWorkerOptions.workerPort) {
     pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
   }
