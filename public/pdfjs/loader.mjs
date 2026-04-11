@@ -112,11 +112,18 @@ const setLoaderError = (error) => {
     const loaderUrl = new URL(import.meta.url);
     const version = loaderUrl.searchParams.get('v');
     const pdfModuleUrl = new URL('./pdf.min.mjs', loaderUrl);
+    const workerModuleUrl = new URL('./pdf.worker.min.mjs', loaderUrl);
     if (version) {
       pdfModuleUrl.searchParams.set('v', version);
+      workerModuleUrl.searchParams.set('v', version);
     }
 
-    const pdfjs = await import(pdfModuleUrl.href);
+    const [pdfjs, pdfjsWorker] = await Promise.all([
+      import(pdfModuleUrl.href),
+      import(workerModuleUrl.href),
+    ]);
+
+    globalThis.pdfjsWorker = pdfjsWorker;
     globalThis.__teatroPdfJsLoaderError = undefined;
     globalThis.__teatroPdfJsModule = pdfjs;
   } catch (error) {
