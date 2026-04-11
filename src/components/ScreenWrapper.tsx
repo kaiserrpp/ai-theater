@@ -2,11 +2,13 @@ import React from 'react';
 import { Image, Platform, SafeAreaView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 const stageFrame = require('../../assets/images/stage-frame-white.jpg');
+const stageFrameMobile = require('../../assets/images/stage-frame-mobile.jpg');
 const STAGE_FRAME_ASPECT_RATIO = 1536 / 2752;
 
 export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
   const { width } = useWindowDimensions();
   const isCompactWeb = Platform.OS === 'web' && width <= 480;
+  const backdropSource = isCompactWeb ? stageFrameMobile : stageFrame;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -15,7 +17,8 @@ export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
           <View style={styles.backdropBase} />
           <View style={styles.webBackdropFrameWrap}>
             <Image
-              source={stageFrame}
+              source={backdropSource}
+              resizeMode={isCompactWeb ? 'cover' : 'contain'}
               style={[styles.webBackdropImage, isCompactWeb && styles.webBackdropImageCompact]}
             />
           </View>
@@ -64,9 +67,12 @@ const styles = StyleSheet.create({
     resizeMode: 'contain',
   },
   webBackdropImageCompact: {
-    width: undefined,
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
     maxWidth: undefined,
-    height: '106%',
-    transform: [{ scale: 1.08 }],
+    maxHeight: undefined,
+    aspectRatio: undefined,
+    transform: [{ scale: 1.02 }],
   },
 });
