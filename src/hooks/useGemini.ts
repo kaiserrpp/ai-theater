@@ -1,160 +1,127 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  analyzeScriptInStages as runScriptAnalysis,
+  fetchAvailableGeminiModels,
+} from '../api/geminiScriptAnalyzer';
+import { PENDING_ANALYSIS_STORAGE_KEY } from '../store/storageKeys';
+import type { PendingAnalysisJob, ScriptData } from '../types/script';
 
-export interface Dialogue { p: string; t: string; a: string; }
-export interface ScriptData { obra: string; personajes: string[]; guion: Dialogue[]; }
-
-const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
-const genAI = new GoogleGenerativeAI(API_KEY);
-const STORAGE_KEY = '@pending_job';
-
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// FUNCIÓN AUXILIAR PARA LIMPIAR JSON DE IA
-const cleanJSON = (text: string) => {
-  // Elimina bloques de código Markdown como ```json o ```
-  let clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-  // Busca el primer '{' o '[' y el último '}' o ']'
-  const startBrace = clean.indexOf('{');
-  const startBracket = clean.indexOf('[');
-  const endBrace = clean.lastIndexOf('}') + 1;
-  const endBracket = clean.lastIndexOf(']') + 1;
-
-  let start = -1;
-  let end = -1;
-
-  if (startBrace !== -1 && (startBracket === -1 || startBrace < startBracket)) {
-    start = startBrace;
-    end = endBrace;
-  } else {
-    start = startBracket;
-    end = endBracket;
-  }
-
-  if (start === -1 || end === 0) return clean;
-  return clean.substring(start, end);
-};
+export type { Dialogue, PendingAnalysisJob, ScriptData } from '../types/script';
 
 export const useGemini = () => {
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptData | null>(null);
-  const [statusText, setStatusText] = useState<string>("");
+  const [statusText, setStatusText] = useState('');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [chunks, setChunks] = useState<string[]>([]);
-  const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(-1);
+  const [sceneTitles, setSceneTitles] = useState<string[]>([]);
+  const [currentChunkIndex, setCurrentChunkIndex] = useState(-1);
+  const [pendingJob, setPendingJob] = useState<PendingAnalysisJob | null>(null);
 
-  useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
-        const data = await response.json();
-        if (response.ok && data.models) {
-          const utiles = data.models.filter((m: any) => m.supportedGenerationMethods.includes('generateContent')).map((m: any) => m.name.replace('models/', ''));
-          setAvailableModels(utiles);
-        }
-      } catch (err) {}
-    };
-    fetchModels();
+  const loadPendingJob = useCallback(async () => {
+    try {
+      const storedValue = await AsyncStorage.getItem(PENDING_ANALYSIS_STORAGE_KEY);
+      if (!storedValue) {
+        setPendingJob(null);
+        return null;
+      }
+
+      const parsedJob = JSON.parse(storedValue) as PendingAnalysisJob;
+      setPendingJob(parsedJob);
+      return parsedJob;
+    } catch (loadError) {
+      console.warn('No se pudo cargar el checkpoint pendiente.', loadError);
+      setPendingJob(null);
+      return null;
+    }
   }, []);
 
-  const clearCheckpoint = async () => { await AsyncStorage.removeItem(STORAGE_KEY); };
+  const persistCheckpoint = useCallback(async (job: PendingAnalysisJob) => {
+    await AsyncStorage.setItem(PENDING_ANALYSIS_STORAGE_KEY, JSON.stringify(job));
+    setPendingJob(job);
+  }, []);
 
-  const analyzeInStages = async (localUri: string | null, resumeData?: any) => {
-    setLoading(true); setError(null);
-    let currentFileUri = resumeData?.fileUri || "";
-    let startAt = resumeData ? resumeData.index + 1 : 0;
-    let sceneList = resumeData?.totalChunks || [];
-    let currentScript: ScriptData = resumeData?.data || { obra: "Procesando...", personajes: [], guion: [] };
+  const clearCheckpoint = useCallback(async () => {
+    await AsyncStorage.removeItem(PENDING_ANALYSIS_STORAGE_KEY);
+    setPendingJob(null);
+  }, []);
 
-    const modelsToTry = availableModels.length > 0 ? availableModels : ['gemini-1.5-flash', 'gemini-1.5-pro'];
-
-    try {
-      if (!resumeData && localUri) {
-        setStatusText("Subiendo PDF...");
-        const fileResp = await fetch(localUri);
-        const blob = await fileResp.blob();
-        const uploadResp = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${API_KEY}`, {
-          method: 'POST', headers: { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-Header-Content-Type': 'application/pdf' }, body: blob
-        });
-        const uploadData = await uploadResp.json();
-        if (!uploadResp.ok) throw new Error("Error de subida.");
-        
-        currentFileUri = uploadData.file.uri;
-        const fileName = uploadData.file.name;
-
-        setStatusText("Esperando a Google...");
-        let active = false;
-        while(!active) {
-          await wait(3000);
-          const c = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${API_KEY}`);
-          const d = await c.json();
-          if (d.state === "ACTIVE") active = true;
-          else if (d.state === "FAILED") throw new Error("Archivo fallido en Google.");
-        }
-
-        setStatusText("Mapeando escenas...");
-        let indexText = "";
-        for (const m of modelsToTry) {
-           try {
-             const model = genAI.getGenerativeModel({ model: m });
-             const res = await model.generateContent([
-                { text: 'Devuelve un array JSON de strings con los nombres de las escenas de este PDF. SOLO el array, sin texto extra.' }, 
-                { fileData: { mimeType: 'application/pdf', fileUri: currentFileUri } }
-             ]);
-             indexText = res.response.text();
-             if (indexText) break;
-           } catch(e) { await wait(2000); }
-        }
-        
-        sceneList = JSON.parse(cleanJSON(indexText));
+  useEffect(() => {
+    const bootstrap = async () => {
+      const [models] = await Promise.all([fetchAvailableGeminiModels(), loadPendingJob()]);
+      if (models.length > 0) {
+        setAvailableModels(models);
       }
+    };
 
-      setChunks(sceneList);
-      setScriptData({...currentScript});
+    void bootstrap();
+  }, [loadPendingJob]);
 
-      for (let i = startAt; i < sceneList.length; i++) {
-        setCurrentChunkIndex(i);
-        setStatusText(`Escena ${i + 1} de ${sceneList.length}...`);
-        
-        const scenePrompt = `Transcribe íntegro y literal el texto de la escena "${sceneList[i]}". JSON: {"obra":"t", "personajes":["P1"], "guion":[{"p":"P", "t":"t", "a":"a"}]}`;
+  const analyzeInStages = useCallback(
+    async (localUri: string | null, resumeData?: PendingAnalysisJob | null) => {
+      setLoading(true);
+      setError(null);
+      setStatusText('');
+      setSceneTitles(resumeData?.totalChunks ?? []);
+      setCurrentChunkIndex(resumeData?.index ?? -1);
+      setScriptData(resumeData?.data ?? null);
 
-        let chunkData;
-        for (const modelName of modelsToTry) {
-           try {
-              const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json", temperature: 0.1 } });
-              const res = await model.generateContent([{ text: scenePrompt }, { fileData: { mimeType: 'application/pdf', fileUri: currentFileUri } }]);
-              const t = res.response.text();
-              chunkData = JSON.parse(cleanJSON(t));
-              break;
-           } catch (e) { await wait(2000); }
-        }
-        
-        if(!chunkData) throw new Error("Error al procesar escena.");
-
-        const updatedPersonajes = [...currentScript.personajes];
-        chunkData.personajes?.forEach((p: string) => {
-          const up = p.trim().toUpperCase();
-          if (!updatedPersonajes.includes(up)) updatedPersonajes.push(up);
+      try {
+        const finalScript = await runScriptAnalysis({
+          localUri,
+          resumeJob: resumeData,
+          preferredModels: availableModels,
+          callbacks: {
+            onStatusChange: setStatusText,
+            onScenesReady: setSceneTitles,
+            onSceneStart: (index) => setCurrentChunkIndex(index),
+            onSceneComplete: async (updatedScript, checkpoint) => {
+              setScriptData({ ...updatedScript });
+              await persistCheckpoint(checkpoint);
+            },
+          },
         });
 
-        currentScript = {
-          obra: i === 0 ? chunkData.obra || currentScript.obra : currentScript.obra,
-          personajes: updatedPersonajes.sort(),
-          guion: [...currentScript.guion, { p: 'ESCENA_SISTEMA', t: sceneList[i], a: '' }, ...(chunkData.guion || [])]
-        };
-
-        setScriptData({...currentScript});
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ data: currentScript, fileUri: currentFileUri, index: i, totalChunks: sceneList }));
+        setScriptData(finalScript);
+        await clearCheckpoint();
+      } catch (analysisError) {
+        const message = analysisError instanceof Error ? analysisError.message : 'Error desconocido.';
+        setError(`Error de lectura: ${message}`);
+      } finally {
+        setLoading(false);
       }
-      setStatusText("Completado");
-      setLoading(false);
-    } catch (err: any) { 
-      setError(`Error de lectura: ${err.message}`); 
-      setLoading(false); 
+    },
+    [availableModels, clearCheckpoint, persistCheckpoint]
+  );
+
+  const resumePendingJob = useCallback(async () => {
+    if (!pendingJob) {
+      return;
     }
-  };
 
-  return { analyzeInStages, loading, error, scriptData, setScriptData, statusText, currentChunkIndex, totalChunks: chunks.length, clearCheckpoint };
+    await analyzeInStages(null, pendingJob);
+  }, [analyzeInStages, pendingJob]);
+
+  const resetScript = useCallback(() => {
+    setScriptData(null);
+    setError(null);
+    setStatusText('');
+    setSceneTitles([]);
+    setCurrentChunkIndex(-1);
+  }, []);
+
+  return {
+    analyzeInStages,
+    loading,
+    error,
+    scriptData,
+    statusText,
+    currentChunkIndex,
+    totalChunks: sceneTitles.length,
+    pendingJob,
+    resumePendingJob,
+    discardPendingJob: clearCheckpoint,
+    resetScript,
+  };
 };

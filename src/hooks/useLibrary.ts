@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { ScriptData } from './useGemini';
+import { SCRIPT_LIBRARY_STORAGE_KEY } from '../store/storageKeys';
+import { ScriptData } from '../types/script';
 
 export interface SavedScript {
   id: string;
@@ -9,12 +10,11 @@ export interface SavedScript {
   date: string;
 }
 
-const STORAGE_KEY = '@teatro_ia_library';
+const STORAGE_KEY = SCRIPT_LIBRARY_STORAGE_KEY;
 
 export const useLibrary = () => {
   const [savedScripts, setSavedScripts] = useState<SavedScript[]>([]);
 
-  // Cargar biblioteca al iniciar
   useEffect(() => {
     const loadLibrary = async () => {
       try {
@@ -22,14 +22,14 @@ export const useLibrary = () => {
         if (jsonValue != null) {
           setSavedScripts(JSON.parse(jsonValue));
         }
-      } catch (e) {
-        console.error("Error cargando biblioteca", e);
+      } catch (error) {
+        console.error('Error cargando biblioteca', error);
       }
     };
-    loadLibrary();
+
+    void loadLibrary();
   }, []);
 
-  // Guardar guión nuevo
   const saveScript = async (fileName: string, data: ScriptData) => {
     try {
       const newScript: SavedScript = {
@@ -38,25 +38,24 @@ export const useLibrary = () => {
         data,
         date: new Date().toLocaleDateString(),
       };
-      
-      const filteredScripts = savedScripts.filter(s => s.fileName !== fileName);
+
+      const filteredScripts = savedScripts.filter((script) => script.fileName !== fileName);
       const updatedScripts = [newScript, ...filteredScripts];
-      
+
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedScripts));
       setSavedScripts(updatedScripts);
-    } catch (e) {
-      console.error("Error guardando", e);
+    } catch (error) {
+      console.error('Error guardando', error);
     }
   };
 
-  // Borrar guión
   const deleteScript = async (id: string) => {
     try {
-      const updatedScripts = savedScripts.filter(script => script.id !== id);
+      const updatedScripts = savedScripts.filter((script) => script.id !== id);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedScripts));
       setSavedScripts(updatedScripts);
-    } catch (e) {
-      console.error("Error borrando", e);
+    } catch (error) {
+      console.error('Error borrando', error);
     }
   };
 
