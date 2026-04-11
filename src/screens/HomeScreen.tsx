@@ -35,6 +35,7 @@ export const HomeScreen = () => {
   const [lastRehearsalMode, setLastRehearsalMode] = useState<RehearsalMode | null>(null);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
+  const [isRolePanelVisible, setIsRolePanelVisible] = useState(false);
   const [isMergePanelVisible, setIsMergePanelVisible] = useState(false);
 
   const {
@@ -139,6 +140,7 @@ export const HomeScreen = () => {
     setIsRehearsing(false);
     setMergeSource(null);
     setMergeTarget(null);
+    setIsRolePanelVisible(false);
     setIsMergePanelVisible(false);
   };
 
@@ -166,6 +168,7 @@ export const HomeScreen = () => {
     setIsRehearsing(false);
     setMergeSource(null);
     setMergeTarget(null);
+    setIsRolePanelVisible(false);
     setIsMergePanelVisible(false);
     loadSavedScript(savedScript.data);
   };
@@ -178,8 +181,11 @@ export const HomeScreen = () => {
     lastRehearsalMode === 'ALL'
       ? 'obra completa'
       : lastRehearsalMode === 'MINE'
-        ? 'solo mis escenas'
+        ? 'mis escenas'
         : null;
+
+  const selectedRolesSummary =
+    myRoles.length > 0 ? myRoles.join(', ') : 'Todavia no has elegido personaje';
 
   if (isRehearsing && displayScriptData) {
     return (
@@ -245,141 +251,160 @@ export const HomeScreen = () => {
               </View>
             )}
 
-            <Text style={styles.label}>Personajes detectados (elige el tuyo):</Text>
-            <View style={styles.tags}>
-              {displayScriptData?.personajes.map((character) => (
+            <View style={styles.actionStack}>
+              <View style={styles.roleWrapper}>
                 <TouchableOpacity
-                  key={character}
-                  style={[styles.tag, myRoles.includes(character) && styles.tagSelected]}
-                  onPress={() =>
-                    setMyRoles((previousRoles) =>
-                      previousRoles.includes(character)
-                        ? previousRoles.filter((role) => role !== character)
-                        : [...previousRoles, character]
-                    )
-                  }
-                >
-                  <Text style={[styles.tagText, myRoles.includes(character) && styles.tagTextSelected]}>
-                    {myRoles.includes(character) ? `OK ${character}` : character}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {!loading && scriptData && (
-              <View style={styles.mergeWrapper}>
-                <TouchableOpacity
-                  style={[styles.btnMenu, styles.mergeToggleButton]}
-                  onPress={() => setIsMergePanelVisible((previousValue) => !previousValue)}
+                  style={[styles.btnMenu, styles.roleToggleButton]}
+                  onPress={() => setIsRolePanelVisible((previousValue) => !previousValue)}
                 >
                   <Text style={styles.btnText}>
-                    {isMergePanelVisible ? 'Ocultar fusiones' : 'Fusionar personajes'}
-                    {mergeEntries.length > 0 ? ` (${mergeEntries.length})` : ''}
+                    {isRolePanelVisible ? 'Ocultar seleccion de personajes' : 'Seleccion de personajes'}
+                    {myRoles.length > 0 ? ` (${myRoles.length})` : ''}
                   </Text>
                 </TouchableOpacity>
+                <Text style={styles.selectionPreview}>{selectedRolesSummary}</Text>
 
-                {isMergePanelVisible ? (
-                  <View style={styles.mergePanel}>
-                    <Text style={styles.mergeTitle}>Fusionar personajes duplicados</Text>
-                    <Text style={styles.mergeHint}>
-                      Une alias o variantes del mismo personaje. Se guardara solo para esta obra.
-                    </Text>
-
-                    {!areRoleMergesReady ? (
-                      <Text style={styles.mergeLoading}>Cargando fusiones guardadas...</Text>
-                    ) : (
-                      <>
-                        <Text style={styles.mergeStep}>1. Elige el nombre a corregir</Text>
-                        <View style={styles.tags}>
-                          {mergeSourceCandidates.map((character) => (
-                            <TouchableOpacity
-                              key={`source-${character}`}
-                              style={[styles.tag, mergeSource === character && styles.tagSelected]}
-                              onPress={() => {
-                                setMergeSource(character);
-                                setMergeTarget(null);
-                              }}
-                            >
-                              <Text style={[styles.tagText, mergeSource === character && styles.tagTextSelected]}>
-                                {character}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-
-                        {mergeSource ? (
-                          <>
-                            <Text style={styles.mergeStep}>2. Elige el personaje correcto</Text>
-                            <View style={styles.tags}>
-                              {mergeTargetCandidates.map((character) => (
-                                <TouchableOpacity
-                                  key={`target-${character}`}
-                                  style={[styles.tag, mergeTarget === character && styles.tagSelected]}
-                                  onPress={() => setMergeTarget(character)}
-                                >
-                                  <Text style={[styles.tagText, mergeTarget === character && styles.tagTextSelected]}>
-                                    {character}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-
-                            <TouchableOpacity
-                              style={[styles.btnMenu, styles.mergeAction, !mergeTarget && styles.buttonDisabled]}
-                              onPress={handleMergeCharacters}
-                              disabled={!mergeTarget}
-                            >
-                              <Text style={styles.btnText}>Fusionar {mergeSource} en {mergeTarget ?? '...'}</Text>
-                            </TouchableOpacity>
-                          </>
-                        ) : null}
-
-                        {mergeEntries.length > 0 ? (
-                          <>
-                            <Text style={styles.mergeStep}>Fusiones activas</Text>
-                            <View style={styles.mergeList}>
-                              {mergeEntries.map(({ sourceCharacter, targetCharacter }) => (
-                                <TouchableOpacity
-                                  key={`${sourceCharacter}-${targetCharacter}`}
-                                  style={styles.mergeChip}
-                                  onPress={() => removeMerge(sourceCharacter)}
-                                >
-                                  <Text style={styles.mergeChipText}>
-                                    {sourceCharacter}
-                                    {' -> '}
-                                    {targetCharacter}
-                                    {' · quitar'}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                            <TouchableOpacity onPress={clearMerges} style={styles.clearMergeButton}>
-                              <Text style={styles.clearMergeText}>Quitar todas las fusiones</Text>
-                            </TouchableOpacity>
-                          </>
-                        ) : null}
-                      </>
-                    )}
+                {isRolePanelVisible ? (
+                  <View style={styles.rolePanel}>
+                    <Text style={styles.label}>Personajes detectados (elige el tuyo):</Text>
+                    <View style={styles.tags}>
+                      {displayScriptData?.personajes.map((character) => (
+                        <TouchableOpacity
+                          key={character}
+                          style={[styles.tag, myRoles.includes(character) && styles.tagSelected]}
+                          onPress={() =>
+                            setMyRoles((previousRoles) =>
+                              previousRoles.includes(character)
+                                ? previousRoles.filter((role) => role !== character)
+                                : [...previousRoles, character]
+                            )
+                          }
+                        >
+                          <Text style={[styles.tagText, myRoles.includes(character) && styles.tagTextSelected]}>
+                            {myRoles.includes(character) ? `OK ${character}` : character}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
                 ) : null}
               </View>
-            )}
 
-            <View style={styles.menu}>
-              <TouchableOpacity
-                style={[styles.btnMenu, myRoles.length === 0 && styles.buttonDisabled]}
-                onPress={() => startRehearsal('ALL')}
-                disabled={myRoles.length === 0}
-              >
-                <Text style={styles.btnText}>Ensayar obra completa</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnMenu, styles.btnSecondary, myRoles.length === 0 && styles.buttonDisabled]}
-                onPress={() => startRehearsal('MINE')}
-                disabled={myRoles.length === 0}
-              >
-                <Text style={styles.btnText}>Solo mis escenas</Text>
-              </TouchableOpacity>
+              <View style={styles.menu}>
+                <TouchableOpacity
+                  style={[styles.btnMenu, myRoles.length === 0 && styles.buttonDisabled]}
+                  onPress={() => startRehearsal('ALL')}
+                  disabled={myRoles.length === 0}
+                >
+                  <Text style={styles.btnText}>Ensayar obra completa</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btnMenu, styles.btnSecondary, myRoles.length === 0 && styles.buttonDisabled]}
+                  onPress={() => startRehearsal('MINE')}
+                  disabled={myRoles.length === 0}
+                >
+                  <Text style={styles.btnText}>Ensayar mis escenas</Text>
+                </TouchableOpacity>
+              </View>
+
+              {!loading && scriptData && (
+                <View style={styles.mergeWrapper}>
+                  <TouchableOpacity
+                    style={[styles.btnMenu, styles.mergeToggleButton]}
+                    onPress={() => setIsMergePanelVisible((previousValue) => !previousValue)}
+                  >
+                    <Text style={styles.btnText}>
+                      {isMergePanelVisible ? 'Ocultar fusion de personajes' : 'Fusion de personajes'}
+                      {mergeEntries.length > 0 ? ` (${mergeEntries.length})` : ''}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {isMergePanelVisible ? (
+                    <View style={styles.mergePanel}>
+                      <Text style={styles.mergeTitle}>Fusionar personajes duplicados</Text>
+                      <Text style={styles.mergeHint}>
+                        Une alias o variantes del mismo personaje. Se guardara solo para esta obra.
+                      </Text>
+
+                      {!areRoleMergesReady ? (
+                        <Text style={styles.mergeLoading}>Cargando fusiones guardadas...</Text>
+                      ) : (
+                        <>
+                          <Text style={styles.mergeStep}>1. Elige el nombre a corregir</Text>
+                          <View style={styles.tags}>
+                            {mergeSourceCandidates.map((character) => (
+                              <TouchableOpacity
+                                key={`source-${character}`}
+                                style={[styles.tag, mergeSource === character && styles.tagSelected]}
+                                onPress={() => {
+                                  setMergeSource(character);
+                                  setMergeTarget(null);
+                                }}
+                              >
+                                <Text style={[styles.tagText, mergeSource === character && styles.tagTextSelected]}>
+                                  {character}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+
+                          {mergeSource ? (
+                            <>
+                              <Text style={styles.mergeStep}>2. Elige el personaje correcto</Text>
+                              <View style={styles.tags}>
+                                {mergeTargetCandidates.map((character) => (
+                                  <TouchableOpacity
+                                    key={`target-${character}`}
+                                    style={[styles.tag, mergeTarget === character && styles.tagSelected]}
+                                    onPress={() => setMergeTarget(character)}
+                                  >
+                                    <Text style={[styles.tagText, mergeTarget === character && styles.tagTextSelected]}>
+                                      {character}
+                                    </Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+
+                              <TouchableOpacity
+                                style={[styles.btnMenu, styles.mergeAction, !mergeTarget && styles.buttonDisabled]}
+                                onPress={handleMergeCharacters}
+                                disabled={!mergeTarget}
+                              >
+                                <Text style={styles.btnText}>Fusionar {mergeSource} en {mergeTarget ?? '...'}</Text>
+                              </TouchableOpacity>
+                            </>
+                          ) : null}
+
+                          {mergeEntries.length > 0 ? (
+                            <>
+                              <Text style={styles.mergeStep}>Fusiones activas</Text>
+                              <View style={styles.mergeList}>
+                                {mergeEntries.map(({ sourceCharacter, targetCharacter }) => (
+                                  <TouchableOpacity
+                                    key={`${sourceCharacter}-${targetCharacter}`}
+                                    style={styles.mergeChip}
+                                    onPress={() => removeMerge(sourceCharacter)}
+                                  >
+                                    <Text style={styles.mergeChipText}>
+                                      {sourceCharacter}
+                                      {' -> '}
+                                      {targetCharacter}
+                                      {' · quitar'}
+                                    </Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                              <TouchableOpacity onPress={clearMerges} style={styles.clearMergeButton}>
+                                <Text style={styles.clearMergeText}>Quitar todas las fusiones</Text>
+                              </TouchableOpacity>
+                            </>
+                          ) : null}
+                        </>
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+              )}
             </View>
 
             {!loading && (
@@ -451,7 +476,7 @@ export const HomeScreen = () => {
 
 const styles = StyleSheet.create({
   container: { padding: 20, alignItems: 'center' },
-  title: { fontSize: 30, fontWeight: 'bold', marginBottom: 20 },
+  title: { fontSize: 34, fontWeight: '800', marginBottom: 20, color: '#1b2530' },
   errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20, width: '100%' },
   errorText: {
     color: '#c62828',
@@ -461,12 +486,14 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   resumeBox: {
-    backgroundColor: '#e8f5e9',
+    backgroundColor: 'rgba(232, 245, 233, 0.95)',
     padding: 20,
-    borderRadius: 15,
+    borderRadius: 18,
     width: '100%',
     alignItems: 'center',
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#cde8d0',
   },
   resumeTitle: { fontWeight: 'bold', marginBottom: 10 },
   btnResume: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 10, width: '100%', alignItems: 'center' },
@@ -475,69 +502,92 @@ const styles = StyleSheet.create({
   homeContent: { width: '100%', gap: 24 },
   section: { width: '100%' },
   status: { color: '#007AFF', textAlign: 'center', marginBottom: 10, fontWeight: 'bold' },
-  obraTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
+  obraTitle: { fontSize: 24, fontWeight: '800', textAlign: 'center', marginBottom: 20, color: '#1b2530' },
   summaryCard: {
     marginBottom: 20,
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: '#eef7ff',
+    padding: 18,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.82)',
     borderWidth: 1,
-    borderColor: '#d4e7ff',
+    borderColor: 'rgba(214, 231, 255, 0.9)',
   },
-  summaryTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
+  summaryTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 10, color: '#1d2733' },
   summaryText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
-  label: { color: '#666', marginBottom: 10, textAlign: 'center' },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 30 },
-  mergeWrapper: { marginBottom: 30 },
-  mergeToggleButton: { marginBottom: 12 },
+  actionStack: { gap: 14 },
+  roleWrapper: { gap: 10 },
+  roleToggleButton: { backgroundColor: '#184e77' },
+  selectionPreview: {
+    textAlign: 'center',
+    color: '#3d5366',
+    lineHeight: 20,
+    paddingHorizontal: 8,
+  },
+  rolePanel: {
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderWidth: 1,
+    borderColor: '#dbe8f5',
+  },
+  label: { color: '#4f6274', marginBottom: 10, textAlign: 'center', fontWeight: '600' },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 8 },
+  mergeWrapper: { gap: 12 },
+  mergeToggleButton: { backgroundColor: '#7c4d2d' },
   mergePanel: {
     padding: 16,
-    borderRadius: 16,
-    backgroundColor: '#f8f9fa',
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.88)',
     borderWidth: 1,
-    borderColor: '#e4e8ee',
+    borderColor: '#eadcc8',
   },
-  mergeTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
-  mergeHint: { color: '#5f6b7a', textAlign: 'center', marginBottom: 16, lineHeight: 20 },
+  mergeTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 8, color: '#432818' },
+  mergeHint: { color: '#6b5b49', textAlign: 'center', marginBottom: 16, lineHeight: 20 },
   mergeLoading: { textAlign: 'center', color: '#5f6b7a' },
-  mergeStep: { fontWeight: '600', marginBottom: 10, textAlign: 'center' },
-  mergeAction: { marginTop: -8, marginBottom: 20 },
+  mergeStep: { fontWeight: '600', marginBottom: 10, textAlign: 'center', color: '#3b4147' },
+  mergeAction: { marginTop: 4, marginBottom: 8, backgroundColor: '#9c6644' },
   mergeList: { gap: 10 },
   mergeChip: {
-    backgroundColor: '#eef5ff',
+    backgroundColor: '#fff4e8',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  mergeChipText: { color: '#215a9a', textAlign: 'center', fontWeight: '600' },
+  mergeChipText: { color: '#7c4d2d', textAlign: 'center', fontWeight: '600' },
   clearMergeButton: { marginTop: 14, alignSelf: 'center' },
   clearMergeText: { color: '#c62828', fontWeight: '600' },
-  tag: { padding: 10, backgroundColor: '#f0f7ff', borderRadius: 15, borderWidth: 1, borderColor: '#d0e3ff' },
+  tag: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#f0f7ff',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#d0e3ff',
+  },
   tagSelected: { backgroundColor: '#e8f5e9', borderColor: '#a5d6a7' },
   tagText: { color: '#007AFF' },
   tagTextSelected: { color: '#1b5e20', fontWeight: '600' },
   menu: { gap: 12 },
-  btnMenu: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center' },
-  btnSecondary: { backgroundColor: '#34C759' },
-  btnMain: { backgroundColor: '#007AFF', padding: 20, borderRadius: 15, alignItems: 'center' },
+  btnMenu: { backgroundColor: '#007AFF', padding: 18, borderRadius: 14, alignItems: 'center' },
+  btnSecondary: { backgroundColor: '#2b9348' },
+  btnMain: { backgroundColor: '#007AFF', padding: 20, borderRadius: 18, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   btnBack: { marginTop: 25, alignSelf: 'center' },
-  btnBackText: { color: '#007AFF', fontWeight: '600' },
+  btnBackText: { color: '#184e77', fontWeight: '700' },
   buttonDisabled: { opacity: 0.5 },
   librarySection: {
     width: '100%',
     padding: 18,
-    borderRadius: 18,
-    backgroundColor: '#f8f9fa',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.84)',
     borderWidth: 1,
     borderColor: '#eceff3',
   },
-  libraryTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 6 },
+  libraryTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 6, color: '#1d2733' },
   libraryHint: { textAlign: 'center', color: '#5f6b7a', marginBottom: 18, lineHeight: 20 },
   libraryList: { gap: 14 },
   libraryCard: {
     borderRadius: 16,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 1,
     borderColor: '#e4e8ee',
     padding: 16,
