@@ -1,8 +1,10 @@
 import type { ExtractedPdfLine, PdfExtractionCallbacks } from './pdfTextExtractor';
+import packageInfo from '../../package.json';
 
 const PDFJS_LOADER_MODULE_URL = '/pdfjs/loader.mjs';
 const PDFJS_WORKER_URL = '/pdfjs/pdf.worker.min.mjs';
 const PDFJS_STANDARD_FONT_URL = '/pdfjs/standard_fonts/';
+const PDFJS_ASSET_VERSION = packageInfo.version;
 const LINE_VERTICAL_TOLERANCE = 4;
 const PAGE_EDGE_LINE_COUNT = 2;
 const PDFJS_LOADER_SCRIPT_ID = 'teatro-pdfjs-loader';
@@ -48,6 +50,7 @@ declare global {
   interface Window {
     __teatroPdfJsModule?: PdfJsModule;
     __teatroPdfJsPromise?: Promise<PdfJsModule>;
+    __teatroPdfJsLoaderError?: string;
   }
 }
 
@@ -130,6 +133,12 @@ const withAbsoluteBrowserUrl = (path: string) => {
   return new URL(path, window.location.origin).toString();
 };
 
+const withVersionedBrowserUrl = (path: string) => {
+  const url = new URL(withAbsoluteBrowserUrl(path));
+  url.searchParams.set('v', PDFJS_ASSET_VERSION);
+  return url.toString();
+};
+
 const loadPdfJsModule = () => {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return Promise.reject(new Error('PDF.js solo puede cargarse en navegador.'));
@@ -147,6 +156,7 @@ const loadPdfJsModule = () => {
     const existingScript = document.getElementById(PDFJS_LOADER_SCRIPT_ID) as HTMLScriptElement | null;
     const startedAt = Date.now();
     let settled = false;
+    window.__teatroPdfJsLoaderError = undefined;
 
     const finish = (callback: () => void) => {
       if (settled) {
@@ -160,6 +170,11 @@ const loadPdfJsModule = () => {
     const waitForModule = () => {
       if (window.__teatroPdfJsModule) {
         finish(() => resolve(window.__teatroPdfJsModule as PdfJsModule));
+        return;
+      }
+
+      if (window.__teatroPdfJsLoaderError) {
+        finish(() => reject(new Error(window.__teatroPdfJsLoaderError)));
         return;
       }
 
@@ -187,7 +202,7 @@ const loadPdfJsModule = () => {
     const script = document.createElement('script');
     script.id = PDFJS_LOADER_SCRIPT_ID;
     script.type = 'module';
-    script.src = withAbsoluteBrowserUrl(PDFJS_LOADER_MODULE_URL);
+    script.src = withVersionedBrowserUrl(PDFJS_LOADER_MODULE_URL);
     script.addEventListener('load', handleResolve, { once: true });
     script.addEventListener('error', handleReject, { once: true });
     document.head.appendChild(script);
@@ -208,7 +223,7 @@ export const extractPdfLines = async (
 
   const pdfjs = await loadPdfJsModule();
   if (!pdfjs.GlobalWorkerOptions.workerSrc && !pdfjs.GlobalWorkerOptions.workerPort) {
-    pdfjs.GlobalWorkerOptions.workerSrc = withAbsoluteBrowserUrl(PDFJS_WORKER_URL);
+    pdfjs.GlobalWorkerOptions.workerSrc = withVersionedBrowserUrl(PDFJS_WORKER_URL);
   }
 
   await runCallback(() => callbacks?.onStatusChange?.('Abriendo archivo seleccionado...'));
