@@ -51,6 +51,7 @@ declare global {
     __teatroPdfJsModule?: PdfJsModule;
     __teatroPdfJsPromise?: Promise<PdfJsModule>;
     __teatroPdfJsLoaderError?: string;
+    __teatroPdfJsTrace?: string[];
   }
 }
 
@@ -58,6 +59,46 @@ const runCallback = async (callback?: () => void | Promise<void>) => {
   if (callback) {
     await callback();
   }
+};
+
+const pushTrace = (message: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.__teatroPdfJsTrace ||= [];
+  window.__teatroPdfJsTrace.push(message);
+
+  if (window.__teatroPdfJsTrace.length > 60) {
+    window.__teatroPdfJsTrace.shift();
+  }
+};
+
+const formatErrorDetails = (error: unknown) => {
+  if (error instanceof Error) {
+    return [error.name ? `${error.name}: ${error.message}` : error.message, error.stack ?? '']
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  return String(error);
+};
+
+const buildStageError = (stage: string, error: unknown) => {
+  const trace =
+    typeof window !== 'undefined' && Array.isArray(window.__teatroPdfJsTrace)
+      ? window.__teatroPdfJsTrace.join('\n')
+      : '';
+
+  return new Error(
+    [
+      `Fallo en fase: ${stage}`,
+      formatErrorDetails(error),
+      trace ? `trace:\n${trace}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  );
 };
 
 const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
@@ -145,10 +186,12 @@ const loadPdfJsModule = () => {
   }
 
   if (window.__teatroPdfJsModule) {
+    pushTrace('extractor: loadPdfJsModule:cached-module');
     return Promise.resolve(window.__teatroPdfJsModule);
   }
 
   if (window.__teatroPdfJsPromise) {
+    pushTrace('extractor: loadPdfJsModule:cached-promise');
     return window.__teatroPdfJsPromise;
   }
 
@@ -157,6 +200,7 @@ const loadPdfJsModule = () => {
     const startedAt = Date.now();
     let settled = false;
     window.__teatroPdfJsLoaderError = undefined;
+    pushTrace('extractor: loadPdfJsModule:start');
 
     const finish = (callback: () => void) => {
       if (settled) {
@@ -169,16 +213,19 @@ const loadPdfJsModule = () => {
 
     const waitForModule = () => {
       if (window.__teatroPdfJsModule) {
+        pushTrace('extractor: loadPdfJsModule:module-ready');
         finish(() => resolve(window.__teatroPdfJsModule as PdfJsModule));
         return;
       }
 
       if (window.__teatroPdfJsLoaderError) {
+        pushTrace(`extractor: loadPdfJsModule:loader-error:${window.__teatroPdfJsLoaderError}`);
         finish(() => reject(new Error(window.__teatroPdfJsLoaderError)));
         return;
       }
 
       if (Date.now() - startedAt >= PDFJS_LOAD_TIMEOUT_MS) {
+        pushTrace('extractor: loadPdfJsModule:timeout');
         finish(() =>
           reject(new Error('La carga del motor PDF ha tardado demasiado. Recarga la pagina e intentalo de nuevo.'))
         );
@@ -188,7 +235,10 @@ const loadPdfJsModule = () => {
       window.setTimeout(waitForModule, 50);
     };
 
-    const handleResolve = () => waitForModule();
+    const handleResolve = () => {
+      pushTrace('extractor: loadPdfJsModule:script-load');
+      waitForModule();
+    };
 
     const handleReject = () =>
       finish(() =>
@@ -206,8 +256,16 @@ const loadPdfJsModule = () => {
     script.id = PDFJS_LOADER_SCRIPT_ID;
     script.type = 'module';
     script.src = withVersionedBrowserUrl(PDFJS_LOADER_MODULE_URL);
+    pushTrace(`extractor: loadPdfJsModule:script-src:${script.src}`);
     script.addEventListener('load', handleResolve, { once: true });
-    script.addEventListener('error', handleReject, { once: true });
+    script.addEventListener(
+      'error',
+      () => {
+        pushTrace('extractor: loadPdfJsModule:script-error');
+        handleReject();
+      },
+      { once: true }
+    );
     document.head.appendChild(script);
     waitForModule();
   });
@@ -222,23 +280,66 @@ export const extractPdfLines = async (
   localUri: string,
   callbacks?: PdfExtractionCallbacks
 ): Promise<ExtractedPdfLine[]> => {
-  await runCallback(() => callbacks?.onStatusChange?.('Cargando motor PDF...'));
+  const setStatus = async (message: string) => {
+    pushTrace(`status: ${message}`);
+    await runCallback(() => callbacks?.onStatusChange?.(message));
+  };
 
-  const pdfjs = await loadPdfJsModule();
-  if (!pdfjs.GlobalWorkerOptions.workerSrc && !pdfjs.GlobalWorkerOptions.workerPort) {
-    pdfjs.GlobalWorkerOptions.workerSrc = withVersionedBrowserUrl(PDFJS_WORKER_URL);
+  if (typeof window !== 'undefined') {
+    window.__teatroPdfJsTrace = [];
   }
 
-  await runCallback(() => callbacks?.onStatusChange?.('Abriendo archivo seleccionado...'));
-  const response = await fetch(localUri);
-  const pdfData = await response.arrayBuffer();
-  await runCallback(() => callbacks?.onStatusChange?.('Preparando paginas del PDF...'));
-  const loadingTask = pdfjs.getDocument({
-    data: pdfData,
-    useSystemFonts: true,
-    standardFontDataUrl: withAbsoluteBrowserUrl(PDFJS_STANDARD_FONT_URL),
-  });
-  const pdfDocument = await loadingTask.promise;
+  await setStatus('Cargando motor PDF...');
+
+  let pdfjs: PdfJsModule;
+  try {
+    pdfjs = await loadPdfJsModule();
+  } catch (error) {
+    throw buildStageError('cargar motor PDF', error);
+  }
+
+  if (!pdfjs.GlobalWorkerOptions.workerSrc && !pdfjs.GlobalWorkerOptions.workerPort) {
+    pdfjs.GlobalWorkerOptions.workerSrc = withVersionedBrowserUrl(PDFJS_WORKER_URL);
+    pushTrace(`extractor: workerSrc:${pdfjs.GlobalWorkerOptions.workerSrc}`);
+  }
+
+  await setStatus('Abriendo archivo seleccionado...');
+  let response: Response;
+  try {
+    response = await fetch(localUri);
+    pushTrace(`extractor: fetch-pdf:status:${response.status}`);
+  } catch (error) {
+    throw buildStageError('descargar el PDF seleccionado', error);
+  }
+
+  let pdfData: ArrayBuffer;
+  try {
+    pdfData = await response.arrayBuffer();
+    pushTrace(`extractor: pdf-bytes:${pdfData.byteLength}`);
+  } catch (error) {
+    throw buildStageError('leer bytes del PDF', error);
+  }
+
+  await setStatus('Preparando paginas del PDF...');
+  let loadingTask: ReturnType<PdfJsModule['getDocument']>;
+  try {
+    loadingTask = pdfjs.getDocument({
+      data: pdfData,
+      useSystemFonts: true,
+      standardFontDataUrl: withAbsoluteBrowserUrl(PDFJS_STANDARD_FONT_URL),
+    });
+    pushTrace('extractor: getDocument:created');
+  } catch (error) {
+    throw buildStageError('crear la tarea getDocument', error);
+  }
+
+  let pdfDocument: PdfJsDocument;
+  try {
+    pdfDocument = await loadingTask.promise;
+    pushTrace(`extractor: document-ready:pages:${pdfDocument.numPages}`);
+  } catch (error) {
+    throw buildStageError('abrir el PDF con PDF.js', error);
+  }
   const totalPages = pdfDocument.numPages;
 
   await runCallback(() =>
@@ -249,10 +350,23 @@ export const extractPdfLines = async (
 
   for (let pageIndex = 1; pageIndex <= totalPages; pageIndex += 1) {
     await runCallback(() => callbacks?.onPageStart?.(pageIndex - 1, totalPages));
-    await runCallback(() => callbacks?.onStatusChange?.(`Extrayendo texto de la pagina ${pageIndex}/${totalPages}...`));
+    await setStatus(`Extrayendo texto de la pagina ${pageIndex}/${totalPages}...`);
 
-    const page = await pdfDocument.getPage(pageIndex);
-    const textContent = await page.getTextContent();
+    let page: PdfJsPage;
+    try {
+      page = await pdfDocument.getPage(pageIndex);
+      pushTrace(`extractor: getPage:${pageIndex}:ok`);
+    } catch (error) {
+      throw buildStageError(`cargar la pagina ${pageIndex}`, error);
+    }
+
+    let textContent: { items: unknown[] };
+    try {
+      textContent = await page.getTextContent();
+      pushTrace(`extractor: getTextContent:${pageIndex}:items:${textContent.items.length}`);
+    } catch (error) {
+      throw buildStageError(`extraer texto de la pagina ${pageIndex}`, error);
+    }
 
     const textItems = textContent.items.reduce<PositionedTextItem[]>((accumulator, item) => {
       if (!isPdfTextItem(item)) {
@@ -273,6 +387,7 @@ export const extractPdfLines = async (
       return accumulator;
     }, []);
 
+    pushTrace(`extractor: page:${pageIndex}:text-items:${textItems.length}`);
     linesByPage.push(groupItemsIntoLines(textItems));
   }
 

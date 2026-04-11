@@ -1,4 +1,15 @@
+const pushTrace = (message) => {
+  globalThis.__teatroPdfJsTrace ||= [];
+  globalThis.__teatroPdfJsTrace.push(message);
+
+  if (globalThis.__teatroPdfJsTrace.length > 40) {
+    globalThis.__teatroPdfJsTrace.shift();
+  }
+};
+
 const installPolyfills = () => {
+  pushTrace('loader: installPolyfills:start');
+
   if (typeof Promise.withResolvers !== 'function') {
     Promise.withResolvers = function withResolvers() {
       let resolve;
@@ -59,6 +70,8 @@ const installPolyfills = () => {
       return this.charAt(finalIndex);
     };
   }
+
+  pushTrace('loader: installPolyfills:done');
 };
 
 const collectFeatureFlags = () => ({
@@ -93,11 +106,13 @@ const setLoaderError = (error) => {
   const formattedError = formatError(error);
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
   const featureFlags = collectFeatureFlags();
+  const trace = Array.isArray(globalThis.__teatroPdfJsTrace) ? globalThis.__teatroPdfJsTrace.join('\n') : '';
   const details = [
     `${formattedError.name}: ${formattedError.message}`,
     formattedError.stack ? `stack:\n${formattedError.stack}` : '',
     `userAgent: ${userAgent}`,
     `features: ${JSON.stringify(featureFlags)}`,
+    trace ? `trace:\n${trace}` : '',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -110,6 +125,7 @@ const setLoaderError = (error) => {
     installPolyfills();
 
     const loaderUrl = new URL(import.meta.url);
+    pushTrace(`loader: importMeta:${loaderUrl.href}`);
     const version = loaderUrl.searchParams.get('v');
     const pdfModuleUrl = new URL('./pdf.min.mjs', loaderUrl);
     const workerModuleUrl = new URL('./pdf.worker.min.mjs', loaderUrl);
@@ -117,16 +133,23 @@ const setLoaderError = (error) => {
       pdfModuleUrl.searchParams.set('v', version);
       workerModuleUrl.searchParams.set('v', version);
     }
+    pushTrace(`loader: pdfModule:${pdfModuleUrl.href}`);
+    pushTrace(`loader: workerModule:${workerModuleUrl.href}`);
 
+    pushTrace('loader: imports:start');
     const [pdfjs, pdfjsWorker] = await Promise.all([
       import(pdfModuleUrl.href),
       import(workerModuleUrl.href),
     ]);
+    pushTrace('loader: imports:done');
 
     globalThis.pdfjsWorker = pdfjsWorker;
+    pushTrace('loader: fakeWorker:ready');
     globalThis.__teatroPdfJsLoaderError = undefined;
     globalThis.__teatroPdfJsModule = pdfjs;
+    pushTrace('loader: module:ready');
   } catch (error) {
+    pushTrace(`loader: error:${error instanceof Error ? error.message : String(error)}`);
     setLoaderError(error);
     console.error('No se pudo inicializar PDF.js', error);
   }
