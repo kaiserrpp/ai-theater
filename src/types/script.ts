@@ -25,11 +25,13 @@ export interface RehearsalCheckpoint {
   updatedAt: string;
 }
 
+export type RehearsalCheckpointMap = Partial<Record<RehearsalMode, RehearsalCheckpoint | null>>;
+
 export interface SavedScriptConfig {
   myRoles: string[];
   selectedScenes: string[];
   lastRehearsalMode: RehearsalMode | null;
-  rehearsalCheckpoint: RehearsalCheckpoint | null;
+  rehearsalCheckpoints: RehearsalCheckpointMap;
 }
 
 export interface SceneExtractionResult {

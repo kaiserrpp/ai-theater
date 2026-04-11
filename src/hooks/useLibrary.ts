@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SCRIPT_LIBRARY_STORAGE_KEY, SCRIPT_ROLE_MERGES_STORAGE_PREFIX } from '../store/storageKeys';
-import { SavedScriptConfig, ScriptData } from '../types/script';
+import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScriptConfig, ScriptData } from '../types/script';
 import { getScriptIdentity } from '../utils/scriptIdentity';
 
 export interface SavedScript {
@@ -14,11 +14,18 @@ export interface SavedScript {
 }
 
 const STORAGE_KEY = SCRIPT_LIBRARY_STORAGE_KEY;
+const REHEARSAL_MODES: RehearsalMode[] = ['ALL', 'MINE', 'SELECTED'];
+const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
+  ALL: null,
+  MINE: null,
+  SELECTED: null,
+});
+
 const DEFAULT_CONFIG: SavedScriptConfig = {
   myRoles: [],
   selectedScenes: [],
   lastRehearsalMode: null,
-  rehearsalCheckpoint: null,
+  rehearsalCheckpoints: createEmptyRehearsalCheckpoints(),
 };
 
 const sortScripts = (scripts: SavedScript[]) =>
@@ -35,6 +42,39 @@ const isValidScriptData = (value: unknown): value is ScriptData => {
     Array.isArray(candidate.personajes) &&
     Array.isArray(candidate.guion)
   );
+};
+
+const isValidCheckpoint = (value: unknown): value is RehearsalCheckpoint => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<RehearsalCheckpoint>;
+  return (
+    Array.isArray(candidate.sceneFilter) &&
+    typeof candidate.lineIndex === 'number' &&
+    typeof candidate.updatedAt === 'string'
+  );
+};
+
+const normalizeRehearsalCheckpoints = (
+  config: Partial<SavedScriptConfig> & { rehearsalCheckpoint?: unknown }
+): RehearsalCheckpointMap => {
+  const nextCheckpoints = createEmptyRehearsalCheckpoints();
+
+  if (config.rehearsalCheckpoints && typeof config.rehearsalCheckpoints === 'object') {
+    for (const mode of REHEARSAL_MODES) {
+      const checkpoint = config.rehearsalCheckpoints[mode];
+      nextCheckpoints[mode] = isValidCheckpoint(checkpoint) ? checkpoint : null;
+    }
+    return nextCheckpoints;
+  }
+
+  if (config.lastRehearsalMode && isValidCheckpoint(config.rehearsalCheckpoint)) {
+    nextCheckpoints[config.lastRehearsalMode] = config.rehearsalCheckpoint;
+  }
+
+  return nextCheckpoints;
 };
 
 const normalizeSavedScript = (value: unknown): SavedScript | null => {
@@ -60,6 +100,7 @@ const normalizeSavedScript = (value: unknown): SavedScript | null => {
     config: {
       ...DEFAULT_CONFIG,
       ...(candidate.config ?? {}),
+      rehearsalCheckpoints: normalizeRehearsalCheckpoints((candidate.config ?? {}) as Partial<SavedScriptConfig> & { rehearsalCheckpoint?: unknown }),
     },
   };
 };
@@ -114,6 +155,11 @@ export const useLibrary = () => {
             ...DEFAULT_CONFIG,
             ...(existingScript?.config ?? {}),
             ...(config ?? {}),
+            rehearsalCheckpoints: {
+              ...createEmptyRehearsalCheckpoints(),
+              ...(existingScript?.config.rehearsalCheckpoints ?? {}),
+              ...(config?.rehearsalCheckpoints ?? {}),
+            },
           },
         };
 
@@ -141,6 +187,11 @@ export const useLibrary = () => {
             ...DEFAULT_CONFIG,
             ...(existingScript?.config ?? {}),
             ...config,
+            rehearsalCheckpoints: {
+              ...createEmptyRehearsalCheckpoints(),
+              ...(existingScript?.config.rehearsalCheckpoints ?? {}),
+              ...(config.rehearsalCheckpoints ?? {}),
+            },
           },
         };
 

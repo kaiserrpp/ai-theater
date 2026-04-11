@@ -43,14 +43,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   webBackdropFrameWrap: {
-    width: '100%',
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'flex-start',
   },
   webBackdropImage: {
     width: '96%',
+    height: '100%',
     maxWidth: 780,
-    aspectRatio: 1536 / 2752,
+    maxHeight: '100%',
     resizeMode: 'contain',
   },
 });

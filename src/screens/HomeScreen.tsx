@@ -7,9 +7,15 @@ import { VersionBadge } from '../components/VersionBadge';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
-import { RehearsalCheckpoint, RehearsalMode } from '../types/script';
+import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode } from '../types/script';
 import { normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
+
+const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
+  ALL: null,
+  MINE: null,
+  SELECTED: null,
+});
 
 export const HomeScreen = () => {
   const {
@@ -33,9 +39,12 @@ export const HomeScreen = () => {
   const [isRehearsing, setIsRehearsing] = useState(false);
   const [selectedScenes, setSelectedScenes] = useState<string[]>([]);
   const [activeRehearsalScenes, setActiveRehearsalScenes] = useState<string[]>([]);
+  const [activeRehearsalMode, setActiveRehearsalMode] = useState<RehearsalMode | null>(null);
   const [rehearsalStartIndex, setRehearsalStartIndex] = useState(0);
   const [lastRehearsalMode, setLastRehearsalMode] = useState<RehearsalMode | null>(null);
-  const [rehearsalCheckpoint, setRehearsalCheckpoint] = useState<RehearsalCheckpoint | null>(null);
+  const [rehearsalCheckpoints, setRehearsalCheckpoints] = useState<RehearsalCheckpointMap>(
+    createEmptyRehearsalCheckpoints()
+  );
   const [mergeSource, setMergeSource] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [isRolePanelVisible, setIsRolePanelVisible] = useState(false);
@@ -83,16 +92,17 @@ export const HomeScreen = () => {
   }, [displayScriptData, mergeMap, mergeSource]);
 
   const getApplicableCheckpoint = useCallback(
-    (sceneFilter: string[]) => {
-      if (!rehearsalCheckpoint || rehearsalCheckpoint.lineIndex <= 0) {
+    (mode: RehearsalMode, sceneFilter: string[]) => {
+      const checkpoint = rehearsalCheckpoints[mode];
+      if (!checkpoint || checkpoint.lineIndex <= 0) {
         return null;
       }
 
-      return areSceneSelectionsEqual(rehearsalCheckpoint.sceneFilter, sceneFilter)
-        ? rehearsalCheckpoint
+      return areSceneSelectionsEqual(checkpoint.sceneFilter, sceneFilter)
+        ? checkpoint
         : null;
     },
-    [rehearsalCheckpoint]
+    [rehearsalCheckpoints]
   );
 
   const selectedScenesSummary = useMemo(() => {
@@ -136,8 +146,8 @@ export const HomeScreen = () => {
   }, [displayScriptData, pendingResumeScenes]);
 
   const pendingResumeCheckpoint = useMemo(
-    () => getApplicableCheckpoint(pendingResumeScenes),
-    [getApplicableCheckpoint, pendingResumeScenes]
+    () => (pendingResumeMode ? getApplicableCheckpoint(pendingResumeMode, pendingResumeScenes) : null),
+    [getApplicableCheckpoint, pendingResumeMode, pendingResumeScenes]
   );
 
   useEffect(() => {
@@ -182,14 +192,14 @@ export const HomeScreen = () => {
       myRoles,
       selectedScenes,
       lastRehearsalMode,
-      rehearsalCheckpoint,
+      rehearsalCheckpoints,
     });
   }, [
     currentScriptFileName,
     lastRehearsalMode,
     loading,
     myRoles,
-    rehearsalCheckpoint,
+    rehearsalCheckpoints,
     saveScript,
     scriptData,
     selectedScenes,
@@ -227,17 +237,23 @@ export const HomeScreen = () => {
       }
 
       const totalLines = filterScriptByScenes(displayScriptData.guion, scenesToRehearse).length;
-      setActiveRehearsalScenes(scenesToRehearse);
-      setRehearsalStartIndex(Math.max(0, Math.min(lineIndex, totalLines)));
-      setRehearsalCheckpoint(
-        lineIndex > 0
+      const safeLineIndex = Math.max(0, Math.min(lineIndex, totalLines));
+      const nextCheckpoint: RehearsalCheckpoint | null =
+        safeLineIndex > 0
           ? {
               sceneFilter: scenesToRehearse,
-              lineIndex,
+              lineIndex: safeLineIndex,
               updatedAt: new Date().toISOString(),
             }
-          : null
-      );
+          : null;
+
+      setActiveRehearsalMode(mode);
+      setActiveRehearsalScenes(scenesToRehearse);
+      setRehearsalStartIndex(safeLineIndex);
+      setRehearsalCheckpoints((previousCheckpoints) => ({
+        ...previousCheckpoints,
+        [mode]: nextCheckpoint,
+      }));
       setLastRehearsalMode(mode);
       setPendingResumeMode(null);
       setIsRehearsing(true);
@@ -252,7 +268,7 @@ export const HomeScreen = () => {
         return;
       }
 
-      const checkpoint = getApplicableCheckpoint(scenesToRehearse);
+      const checkpoint = getApplicableCheckpoint(mode, scenesToRehearse);
       if (checkpoint) {
         setPendingResumeMode(mode);
         return;
@@ -267,9 +283,10 @@ export const HomeScreen = () => {
     setMyRoles([]);
     setSelectedScenes([]);
     setActiveRehearsalScenes([]);
+    setActiveRehearsalMode(null);
     setRehearsalStartIndex(0);
     setLastRehearsalMode(null);
-    setRehearsalCheckpoint(null);
+    setRehearsalCheckpoints(createEmptyRehearsalCheckpoints());
     setIsRehearsing(false);
     setMergeSource(null);
     setMergeTarget(null);
@@ -300,8 +317,9 @@ export const HomeScreen = () => {
     setMyRoles(savedScript.config.myRoles);
     setSelectedScenes(savedScript.config.selectedScenes);
     setLastRehearsalMode(savedScript.config.lastRehearsalMode);
-    setRehearsalCheckpoint(savedScript.config.rehearsalCheckpoint);
+    setRehearsalCheckpoints(savedScript.config.rehearsalCheckpoints);
     setActiveRehearsalScenes([]);
+    setActiveRehearsalMode(null);
     setRehearsalStartIndex(0);
     setIsRehearsing(false);
     setMergeSource(null);
@@ -315,22 +333,28 @@ export const HomeScreen = () => {
 
   const handleRehearsalProgressChange = useCallback(
     (lineIndex: number, totalLines: number) => {
-      if (activeRehearsalScenes.length === 0) {
+      if (!activeRehearsalMode || activeRehearsalScenes.length === 0) {
         return;
       }
 
       if (lineIndex >= totalLines) {
-        setRehearsalCheckpoint(null);
+        setRehearsalCheckpoints((previousCheckpoints) => ({
+          ...previousCheckpoints,
+          [activeRehearsalMode]: null,
+        }));
         return;
       }
 
-      setRehearsalCheckpoint({
-        sceneFilter: activeRehearsalScenes,
-        lineIndex,
-        updatedAt: new Date().toISOString(),
-      });
+      setRehearsalCheckpoints((previousCheckpoints) => ({
+        ...previousCheckpoints,
+        [activeRehearsalMode]: {
+          sceneFilter: activeRehearsalScenes,
+          lineIndex,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
     },
-    [activeRehearsalScenes]
+    [activeRehearsalMode, activeRehearsalScenes]
   );
 
   const toggleSelectedScene = useCallback(
