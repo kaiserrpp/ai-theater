@@ -17,12 +17,19 @@ export interface ScriptData {
   guion: Dialogue[];
 }
 
-export type RehearsalMode = 'ALL' | 'MINE';
+export type RehearsalMode = 'ALL' | 'MINE' | 'SELECTED';
+
+export interface RehearsalCheckpoint {
+  sceneFilter: string[];
+  lineIndex: number;
+  updatedAt: string;
+}
 
 export interface SavedScriptConfig {
   myRoles: string[];
   selectedScenes: string[];
   lastRehearsalMode: RehearsalMode | null;
+  rehearsalCheckpoint: RehearsalCheckpoint | null;
 }
 
 export interface SceneExtractionResult {

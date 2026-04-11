@@ -43,3 +43,7 @@ export const filterScriptByScenes = (guion: Dialogue[], filterScenes: string[]) 
     return selectedScenes.has(currentScene);
   });
 };
+
+export const areSceneSelectionsEqual = (leftScenes: string[], rightScenes: string[]) =>
+  leftScenes.length === rightScenes.length &&
+  leftScenes.every((sceneTitle, index) => sceneTitle === rightScenes[index]);

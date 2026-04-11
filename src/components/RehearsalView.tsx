@@ -8,10 +8,19 @@ interface Props {
   guion: Dialogue[];
   myRoles: string[];
   filterScenes: string[];
+  initialIndex?: number;
+  onProgressChange?: (lineIndex: number, totalLines: number) => void;
   onExit: () => void;
 }
 
-export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, onExit }) => {
+export const RehearsalView: React.FC<Props> = ({
+  guion,
+  myRoles,
+  filterScenes,
+  initialIndex = 0,
+  onProgressChange,
+  onExit,
+}) => {
   const filteredGuion = useMemo(() => filterScriptByScenes(guion, filterScenes), [filterScenes, guion]);
   const [currentIndex, setCurrentIndex] = useState(0);
 
@@ -34,8 +43,13 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
   }, [filteredGuion.length]);
 
   useEffect(() => {
-    setCurrentIndex(0);
-  }, [filteredGuion]);
+    const safeInitialIndex = Math.max(0, Math.min(initialIndex, filteredGuion.length));
+    setCurrentIndex(safeInitialIndex);
+  }, [filteredGuion, initialIndex]);
+
+  useEffect(() => {
+    onProgressChange?.(Math.min(currentIndex, filteredGuion.length), filteredGuion.length);
+  }, [currentIndex, filteredGuion.length, onProgressChange]);
 
   useEffect(() => {
     Speech.stop();

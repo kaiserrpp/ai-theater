@@ -1,5 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
@@ -7,9 +7,9 @@ import { VersionBadge } from '../components/VersionBadge';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
-import { RehearsalMode } from '../types/script';
+import { RehearsalCheckpoint, RehearsalMode } from '../types/script';
 import { normalizeRoleSelection } from '../utils/scriptRoleMerges';
-import { getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
+import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
 
 export const HomeScreen = () => {
   const {
@@ -32,11 +32,16 @@ export const HomeScreen = () => {
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [isRehearsing, setIsRehearsing] = useState(false);
   const [selectedScenes, setSelectedScenes] = useState<string[]>([]);
+  const [activeRehearsalScenes, setActiveRehearsalScenes] = useState<string[]>([]);
+  const [rehearsalStartIndex, setRehearsalStartIndex] = useState(0);
   const [lastRehearsalMode, setLastRehearsalMode] = useState<RehearsalMode | null>(null);
+  const [rehearsalCheckpoint, setRehearsalCheckpoint] = useState<RehearsalCheckpoint | null>(null);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [isRolePanelVisible, setIsRolePanelVisible] = useState(false);
+  const [isScenePanelVisible, setIsScenePanelVisible] = useState(false);
   const [isMergePanelVisible, setIsMergePanelVisible] = useState(false);
+  const [pendingResumeMode, setPendingResumeMode] = useState<RehearsalMode | null>(null);
 
   const {
     isReady: areRoleMergesReady,
@@ -77,6 +82,64 @@ export const HomeScreen = () => {
     return displayScriptData.personajes.filter((character) => character !== currentAlias);
   }, [displayScriptData, mergeMap, mergeSource]);
 
+  const getApplicableCheckpoint = useCallback(
+    (sceneFilter: string[]) => {
+      if (!rehearsalCheckpoint || rehearsalCheckpoint.lineIndex <= 0) {
+        return null;
+      }
+
+      return areSceneSelectionsEqual(rehearsalCheckpoint.sceneFilter, sceneFilter)
+        ? rehearsalCheckpoint
+        : null;
+    },
+    [rehearsalCheckpoint]
+  );
+
+  const selectedScenesSummary = useMemo(() => {
+    if (selectedScenes.length === 0) {
+      return 'Todavia no has elegido escenas concretas';
+    }
+
+    if (selectedScenes.length === 1) {
+      return selectedScenes[0];
+    }
+
+    if (selectedScenes.length <= 3) {
+      return selectedScenes.join(', ');
+    }
+
+    return `${selectedScenes.length} escenas seleccionadas`;
+  }, [selectedScenes]);
+
+  const pendingResumeScenes = useMemo(() => {
+    if (!displayScriptData || !pendingResumeMode) {
+      return [];
+    }
+
+    if (pendingResumeMode === 'ALL') {
+      return getSceneTitles(displayScriptData.guion);
+    }
+
+    if (pendingResumeMode === 'MINE') {
+      return getScenesForRoles(displayScriptData.guion, myRoles);
+    }
+
+    return selectedScenes;
+  }, [displayScriptData, myRoles, pendingResumeMode, selectedScenes]);
+
+  const pendingResumeTotalLines = useMemo(() => {
+    if (!displayScriptData || pendingResumeScenes.length === 0) {
+      return 0;
+    }
+
+    return filterScriptByScenes(displayScriptData.guion, pendingResumeScenes).length;
+  }, [displayScriptData, pendingResumeScenes]);
+
+  const pendingResumeCheckpoint = useMemo(
+    () => getApplicableCheckpoint(pendingResumeScenes),
+    [getApplicableCheckpoint, pendingResumeScenes]
+  );
+
   useEffect(() => {
     setMyRoles((previousRoles) => normalizeRoleSelection(previousRoles, mergeMap));
   }, [mergeMap]);
@@ -90,6 +153,9 @@ export const HomeScreen = () => {
       previousRoles.filter((role) => displayScriptData.personajes.includes(role))
     );
     setSelectedScenes((previousScenes) =>
+      previousScenes.filter((sceneTitle) => currentSceneTitles.includes(sceneTitle))
+    );
+    setActiveRehearsalScenes((previousScenes) =>
       previousScenes.filter((sceneTitle) => currentSceneTitles.includes(sceneTitle))
     );
   }, [currentSceneTitles, displayScriptData]);
@@ -116,32 +182,101 @@ export const HomeScreen = () => {
       myRoles,
       selectedScenes,
       lastRehearsalMode,
+      rehearsalCheckpoint,
     });
-  }, [currentScriptFileName, lastRehearsalMode, loading, myRoles, saveScript, scriptData, selectedScenes]);
+  }, [
+    currentScriptFileName,
+    lastRehearsalMode,
+    loading,
+    myRoles,
+    rehearsalCheckpoint,
+    saveScript,
+    scriptData,
+    selectedScenes,
+  ]);
 
-  const startRehearsal = (mode: RehearsalMode) => {
-    if (!displayScriptData) {
-      return;
-    }
+  const getScenesForMode = useCallback(
+    (mode: RehearsalMode) => {
+      if (!displayScriptData) {
+        return [];
+      }
 
-    const allScenes = getSceneTitles(displayScriptData.guion);
-    const scenesToRehearse =
-      mode === 'ALL' ? allScenes : getScenesForRoles(displayScriptData.guion, myRoles);
+      if (mode === 'ALL') {
+        return getSceneTitles(displayScriptData.guion);
+      }
 
-    setSelectedScenes(scenesToRehearse);
-    setLastRehearsalMode(mode);
-    setIsRehearsing(true);
-  };
+      if (mode === 'MINE') {
+        return getScenesForRoles(displayScriptData.guion, myRoles);
+      }
+
+      return selectedScenes;
+    },
+    [displayScriptData, myRoles, selectedScenes]
+  );
+
+  const sortScenesByScriptOrder = useCallback(
+    (sceneTitles: string[]) => currentSceneTitles.filter((sceneTitle) => sceneTitles.includes(sceneTitle)),
+    [currentSceneTitles]
+  );
+
+  const launchRehearsal = useCallback(
+    (mode: RehearsalMode, lineIndex: number) => {
+      const scenesToRehearse = getScenesForMode(mode);
+      if (!displayScriptData || scenesToRehearse.length === 0) {
+        return;
+      }
+
+      const totalLines = filterScriptByScenes(displayScriptData.guion, scenesToRehearse).length;
+      setActiveRehearsalScenes(scenesToRehearse);
+      setRehearsalStartIndex(Math.max(0, Math.min(lineIndex, totalLines)));
+      setRehearsalCheckpoint(
+        lineIndex > 0
+          ? {
+              sceneFilter: scenesToRehearse,
+              lineIndex,
+              updatedAt: new Date().toISOString(),
+            }
+          : null
+      );
+      setLastRehearsalMode(mode);
+      setPendingResumeMode(null);
+      setIsRehearsing(true);
+    },
+    [displayScriptData, getScenesForMode]
+  );
+
+  const requestRehearsalStart = useCallback(
+    (mode: RehearsalMode) => {
+      const scenesToRehearse = getScenesForMode(mode);
+      if (!displayScriptData || scenesToRehearse.length === 0) {
+        return;
+      }
+
+      const checkpoint = getApplicableCheckpoint(scenesToRehearse);
+      if (checkpoint) {
+        setPendingResumeMode(mode);
+        return;
+      }
+
+      launchRehearsal(mode, 0);
+    },
+    [displayScriptData, getApplicableCheckpoint, getScenesForMode, launchRehearsal]
+  );
 
   const resetSelectionState = () => {
     setMyRoles([]);
     setSelectedScenes([]);
+    setActiveRehearsalScenes([]);
+    setRehearsalStartIndex(0);
     setLastRehearsalMode(null);
+    setRehearsalCheckpoint(null);
     setIsRehearsing(false);
     setMergeSource(null);
     setMergeTarget(null);
     setIsRolePanelVisible(false);
+    setIsScenePanelVisible(false);
     setIsMergePanelVisible(false);
+    setPendingResumeMode(null);
   };
 
   const handleResetScript = () => {
@@ -165,13 +300,51 @@ export const HomeScreen = () => {
     setMyRoles(savedScript.config.myRoles);
     setSelectedScenes(savedScript.config.selectedScenes);
     setLastRehearsalMode(savedScript.config.lastRehearsalMode);
+    setRehearsalCheckpoint(savedScript.config.rehearsalCheckpoint);
+    setActiveRehearsalScenes([]);
+    setRehearsalStartIndex(0);
     setIsRehearsing(false);
     setMergeSource(null);
     setMergeTarget(null);
     setIsRolePanelVisible(false);
+    setIsScenePanelVisible(false);
     setIsMergePanelVisible(false);
+    setPendingResumeMode(null);
     loadSavedScript(savedScript.data);
   };
+
+  const handleRehearsalProgressChange = useCallback(
+    (lineIndex: number, totalLines: number) => {
+      if (activeRehearsalScenes.length === 0) {
+        return;
+      }
+
+      if (lineIndex >= totalLines) {
+        setRehearsalCheckpoint(null);
+        return;
+      }
+
+      setRehearsalCheckpoint({
+        sceneFilter: activeRehearsalScenes,
+        lineIndex,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    [activeRehearsalScenes]
+  );
+
+  const toggleSelectedScene = useCallback(
+    (sceneTitle: string) => {
+      setSelectedScenes((previousScenes) => {
+        const nextScenes = previousScenes.includes(sceneTitle)
+          ? previousScenes.filter((currentScene) => currentScene !== sceneTitle)
+          : [...previousScenes, sceneTitle];
+
+        return sortScenesByScriptOrder(nextScenes);
+      });
+    },
+    [sortScenesByScriptOrder]
+  );
 
   const resumeSceneNumber = pendingJob
     ? Math.min(pendingJob.index + 2, pendingJob.totalChunks.length)
@@ -182,6 +355,8 @@ export const HomeScreen = () => {
       ? 'obra completa'
       : lastRehearsalMode === 'MINE'
         ? 'mis escenas'
+        : lastRehearsalMode === 'SELECTED'
+          ? 'escenas seleccionadas'
         : null;
 
   const selectedRolesSummary =
@@ -193,7 +368,9 @@ export const HomeScreen = () => {
         <RehearsalView
           guion={displayScriptData.guion}
           myRoles={myRoles}
-          filterScenes={selectedScenes}
+          filterScenes={activeRehearsalScenes}
+          initialIndex={rehearsalStartIndex}
+          onProgressChange={handleRehearsalProgressChange}
           onExit={() => setIsRehearsing(false)}
         />
       </ScreenWrapper>
@@ -290,22 +467,104 @@ export const HomeScreen = () => {
                 ) : null}
               </View>
 
+              <View style={styles.sceneWrapper}>
+                <TouchableOpacity
+                  style={[styles.btnMenu, styles.sceneToggleButton]}
+                  onPress={() => setIsScenePanelVisible((previousValue) => !previousValue)}
+                >
+                  <Text style={styles.btnText}>
+                    {isScenePanelVisible ? 'Ocultar seleccion de escenas' : 'Seleccion de escenas'}
+                    {selectedScenes.length > 0 ? ` (${selectedScenes.length})` : ''}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.selectionPreview}>{selectedScenesSummary}</Text>
+
+                {isScenePanelVisible ? (
+                  <View style={styles.scenePanel}>
+                    <Text style={styles.label}>Marca las escenas que quieres ensayar aparte:</Text>
+                    <View style={styles.sceneActions}>
+                      <TouchableOpacity
+                        style={styles.sceneActionButton}
+                        onPress={() => setSelectedScenes(currentSceneTitles)}
+                      >
+                        <Text style={styles.sceneActionText}>Seleccionar todas</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.sceneActionButton}
+                        onPress={() => setSelectedScenes([])}
+                      >
+                        <Text style={styles.sceneActionText}>Quitar todas</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.tags}>
+                      {currentSceneTitles.map((sceneTitle) => (
+                        <TouchableOpacity
+                          key={sceneTitle}
+                          style={[styles.tag, selectedScenes.includes(sceneTitle) && styles.tagSelected]}
+                          onPress={() => toggleSelectedScene(sceneTitle)}
+                        >
+                          <Text style={[styles.tagText, selectedScenes.includes(sceneTitle) && styles.tagTextSelected]}>
+                            {sceneTitle}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+
               <View style={styles.menu}>
                 <TouchableOpacity
                   style={[styles.btnMenu, myRoles.length === 0 && styles.buttonDisabled]}
-                  onPress={() => startRehearsal('ALL')}
+                  onPress={() => requestRehearsalStart('ALL')}
                   disabled={myRoles.length === 0}
                 >
                   <Text style={styles.btnText}>Ensayar obra completa</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.btnMenu, styles.btnSecondary, myRoles.length === 0 && styles.buttonDisabled]}
-                  onPress={() => startRehearsal('MINE')}
+                  onPress={() => requestRehearsalStart('MINE')}
                   disabled={myRoles.length === 0}
                 >
                   <Text style={styles.btnText}>Ensayar mis escenas</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btnMenu, styles.btnTertiary, selectedScenes.length === 0 && styles.buttonDisabled]}
+                  onPress={() => requestRehearsalStart('SELECTED')}
+                  disabled={selectedScenes.length === 0}
+                >
+                  <Text style={styles.btnText}>Ensayar escenas seleccionadas</Text>
+                </TouchableOpacity>
               </View>
+
+              {pendingResumeMode && pendingResumeCheckpoint && pendingResumeScenes.length > 0 ? (
+                <View style={styles.resumeChoiceCard}>
+                  <Text style={styles.resumeChoiceTitle}>Hay un ensayo a medias guardado</Text>
+                  <Text style={styles.resumeChoiceText}>
+                    Puedes retomar desde la linea {Math.min(pendingResumeCheckpoint.lineIndex, pendingResumeTotalLines)}
+                    {' '}de {pendingResumeTotalLines}.
+                  </Text>
+                  <View style={styles.resumeChoiceActions}>
+                    <TouchableOpacity
+                      style={[styles.resumeChoiceButton, styles.resumeChoicePrimary]}
+                      onPress={() =>
+                        launchRehearsal(
+                          pendingResumeMode,
+                          Math.min(pendingResumeCheckpoint.lineIndex, pendingResumeTotalLines)
+                        )
+                      }
+                    >
+                      <Text style={styles.resumeChoicePrimaryText}>Retomar donde lo deje</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.resumeChoiceButton, styles.resumeChoiceSecondary]}
+                      onPress={() => launchRehearsal(pendingResumeMode, 0)}
+                    >
+                      <Text style={styles.resumeChoiceSecondaryText}>Empezar desde 0</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
 
               {!loading && scriptData && (
                 <View style={styles.mergeWrapper}>
@@ -516,6 +775,8 @@ const styles = StyleSheet.create({
   actionStack: { gap: 14 },
   roleWrapper: { gap: 10 },
   roleToggleButton: { backgroundColor: '#184e77' },
+  sceneWrapper: { gap: 10 },
+  sceneToggleButton: { backgroundColor: '#5b3f8c' },
   selectionPreview: {
     textAlign: 'center',
     color: '#3d5366',
@@ -529,6 +790,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#dbe8f5',
   },
+  scenePanel: {
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderWidth: 1,
+    borderColor: '#ddd4f5',
+  },
+  sceneActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
+  sceneActionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#ede7fb',
+  },
+  sceneActionText: { color: '#5b3f8c', fontWeight: '700' },
   label: { color: '#4f6274', marginBottom: 10, textAlign: 'center', fontWeight: '600' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 8 },
   mergeWrapper: { gap: 12 },
@@ -569,11 +851,54 @@ const styles = StyleSheet.create({
   menu: { gap: 12 },
   btnMenu: { backgroundColor: '#007AFF', padding: 18, borderRadius: 14, alignItems: 'center' },
   btnSecondary: { backgroundColor: '#2b9348' },
+  btnTertiary: { backgroundColor: '#5b3f8c' },
   btnMain: { backgroundColor: '#007AFF', padding: 20, borderRadius: 18, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   btnBack: { marginTop: 25, alignSelf: 'center' },
   btnBackText: { color: '#184e77', fontWeight: '700' },
   buttonDisabled: { opacity: 0.5 },
+  resumeChoiceCard: {
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 1,
+    borderColor: '#d6ead8',
+    gap: 12,
+  },
+  resumeChoiceTitle: {
+    textAlign: 'center',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#204b2d',
+  },
+  resumeChoiceText: {
+    textAlign: 'center',
+    lineHeight: 20,
+    color: '#47604f',
+  },
+  resumeChoiceActions: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  resumeChoiceButton: {
+    flex: 1,
+    minWidth: 180,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  resumeChoicePrimary: {
+    backgroundColor: '#2b9348',
+    borderColor: '#2b9348',
+  },
+  resumeChoiceSecondary: {
+    backgroundColor: '#fff',
+    borderColor: '#c9d7cb',
+  },
+  resumeChoicePrimaryText: { color: '#fff', fontWeight: '700' },
+  resumeChoiceSecondaryText: { color: '#47604f', fontWeight: '700' },
   librarySection: {
     width: '100%',
     padding: 18,

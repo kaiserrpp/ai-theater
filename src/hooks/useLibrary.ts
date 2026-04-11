@@ -18,6 +18,7 @@ const DEFAULT_CONFIG: SavedScriptConfig = {
   myRoles: [],
   selectedScenes: [],
   lastRehearsalMode: null,
+  rehearsalCheckpoint: null,
 };
 
 const sortScripts = (scripts: SavedScript[]) =>
