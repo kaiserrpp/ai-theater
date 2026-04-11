@@ -203,7 +203,7 @@ export const HomeScreen = () => {
   return (
     <ScreenWrapper>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Teatro IA</Text>
+        <Text style={styles.title}>AI-Theatre</Text>
 
         {error && (
           <View style={styles.errorBox}>

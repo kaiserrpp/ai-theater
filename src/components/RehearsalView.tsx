@@ -16,6 +16,14 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const currentLine = filteredGuion[currentIndex];
+  const speakableLineText = useMemo(
+    () =>
+      currentLine?.t
+        ?.replace(/\([^)]*\)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() ?? '',
+    [currentLine]
+  );
   const isMyTurn = Boolean(currentLine && myRoles.includes(currentLine.p));
   const isFinished = currentIndex >= filteredGuion.length;
 
@@ -38,7 +46,14 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
       };
     }
 
-    Speech.speak(currentLine.t, {
+    if (!speakableLineText) {
+      setTimeout(advanceLine, 200);
+      return () => {
+        void Speech.stop();
+      };
+    }
+
+    Speech.speak(speakableLineText, {
       language: 'es-ES',
       onDone: () => {
         setTimeout(advanceLine, 500);
@@ -49,7 +64,7 @@ export const RehearsalView: React.FC<Props> = ({ guion, myRoles, filterScenes, o
     return () => {
       void Speech.stop();
     };
-  }, [advanceLine, currentLine, isFinished, isMyTurn]);
+  }, [advanceLine, currentLine, isFinished, isMyTurn, speakableLineText]);
 
   const handleExit = () => {
     Speech.stop();

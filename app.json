@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "TeatroIA",
+    "name": "AI-Theatre",
     "slug": "teatro-ia",
-    "version": "2026.04.047",
+    "version": "2026.04.048",
     "orientation": "portrait",
-    "icon": "./assets/images/ai-theatre.png",
+    "icon": "./assets/images/caras-teatro.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/images/splash-icon.png",
@@ -19,19 +19,19 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/ai-theatre.png",
-        "backgroundColor": "#4e0f54"
+        "foregroundImage": "./assets/images/caras-teatro.png",
+        "backgroundColor": "#5f0c14"
       }
     },
     "web": {
-      "favicon": "./assets/images/ai-theatre.png",
+      "favicon": "./assets/images/caras-teatro.png",
       "bundler": "metro",
       "pwa": {
         "display": "standalone",
         "orientation": "portrait",
-        "themeColor": "#007AFF",
+        "themeColor": "#5f0c14",
         "manifest": {
-          "short_name": "TeatroIA",
+          "short_name": "AI-Theatre",
           "start_url": "/"
         }
       }
