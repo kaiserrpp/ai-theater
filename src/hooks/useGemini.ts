@@ -143,6 +143,15 @@ export const useGemini = () => {
     await analyzeInStages(null, pendingJob);
   }, [analyzeInStages, pendingJob]);
 
+  const loadSavedScript = useCallback((savedScript: ScriptData) => {
+    setLoading(false);
+    setError(null);
+    setStatusText('');
+    setSceneTitles([]);
+    setCurrentChunkIndex(-1);
+    setScriptData(savedScript);
+  }, []);
+
   const resetScript = useCallback(() => {
     setScriptData(null);
     setError(null);
@@ -162,6 +171,7 @@ export const useGemini = () => {
     pendingJob,
     resumePendingJob,
     discardPendingJob: clearCheckpoint,
+    loadSavedScript,
     resetScript,
   };
 };

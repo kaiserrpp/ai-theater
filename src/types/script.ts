@@ -17,6 +17,14 @@ export interface ScriptData {
   guion: Dialogue[];
 }
 
+export type RehearsalMode = 'ALL' | 'MINE';
+
+export interface SavedScriptConfig {
+  myRoles: string[];
+  selectedScenes: string[];
+  lastRehearsalMode: RehearsalMode | null;
+}
+
 export interface SceneExtractionResult {
   obra?: string;
   personajes?: string[];

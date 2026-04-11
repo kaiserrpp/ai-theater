@@ -4,8 +4,10 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { VersionBadge } from '../components/VersionBadge';
+import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
+import { RehearsalMode } from '../types/script';
 import { normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
 
@@ -21,14 +23,19 @@ export const HomeScreen = () => {
     pendingJob,
     resumePendingJob,
     discardPendingJob,
+    loadSavedScript,
     resetScript,
   } = useGemini();
+  const { savedScripts, saveScript, deleteScript } = useLibrary();
 
+  const [currentScriptFileName, setCurrentScriptFileName] = useState<string | null>(null);
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [isRehearsing, setIsRehearsing] = useState(false);
   const [selectedScenes, setSelectedScenes] = useState<string[]>([]);
+  const [lastRehearsalMode, setLastRehearsalMode] = useState<RehearsalMode | null>(null);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
+  const [isMergePanelVisible, setIsMergePanelVisible] = useState(false);
 
   const {
     isReady: areRoleMergesReady,
@@ -55,6 +62,11 @@ export const HomeScreen = () => {
     return statusText;
   }, [currentChunkIndex, loading, statusText, totalChunks]);
 
+  const currentSceneTitles = useMemo(
+    () => (displayScriptData ? getSceneTitles(displayScriptData.guion) : []),
+    [displayScriptData]
+  );
+
   const mergeTargetCandidates = useMemo(() => {
     if (!displayScriptData || !mergeSource) {
       return [];
@@ -69,6 +81,19 @@ export const HomeScreen = () => {
   }, [mergeMap]);
 
   useEffect(() => {
+    if (!displayScriptData) {
+      return;
+    }
+
+    setMyRoles((previousRoles) =>
+      previousRoles.filter((role) => displayScriptData.personajes.includes(role))
+    );
+    setSelectedScenes((previousScenes) =>
+      previousScenes.filter((sceneTitle) => currentSceneTitles.includes(sceneTitle))
+    );
+  }, [currentSceneTitles, displayScriptData]);
+
+  useEffect(() => {
     if (mergeSource && !mergeSourceCandidates.includes(mergeSource)) {
       setMergeSource(null);
     }
@@ -80,22 +105,46 @@ export const HomeScreen = () => {
     }
   }, [mergeTarget, mergeTargetCandidates]);
 
-  const startRehearsal = (mode: 'ALL' | 'MINE') => {
+  useEffect(() => {
+    if (!scriptData || loading) {
+      return;
+    }
+
+    const fileName = currentScriptFileName ?? scriptData.obra;
+    void saveScript(fileName, scriptData, {
+      myRoles,
+      selectedScenes,
+      lastRehearsalMode,
+    });
+  }, [currentScriptFileName, lastRehearsalMode, loading, myRoles, saveScript, scriptData, selectedScenes]);
+
+  const startRehearsal = (mode: RehearsalMode) => {
     if (!displayScriptData) {
       return;
     }
 
     const allScenes = getSceneTitles(displayScriptData.guion);
-    setSelectedScenes(mode === 'ALL' ? allScenes : getScenesForRoles(displayScriptData.guion, myRoles));
+    const scenesToRehearse =
+      mode === 'ALL' ? allScenes : getScenesForRoles(displayScriptData.guion, myRoles);
+
+    setSelectedScenes(scenesToRehearse);
+    setLastRehearsalMode(mode);
     setIsRehearsing(true);
   };
 
-  const handleResetScript = () => {
+  const resetSelectionState = () => {
     setMyRoles([]);
     setSelectedScenes([]);
+    setLastRehearsalMode(null);
     setIsRehearsing(false);
     setMergeSource(null);
     setMergeTarget(null);
+    setIsMergePanelVisible(false);
+  };
+
+  const handleResetScript = () => {
+    resetSelectionState();
+    setCurrentScriptFileName(null);
     resetScript();
   };
 
@@ -109,9 +158,28 @@ export const HomeScreen = () => {
     setMergeTarget(null);
   };
 
+  const handleOpenSavedScript = (savedScript: SavedScript) => {
+    setCurrentScriptFileName(savedScript.fileName);
+    setMyRoles(savedScript.config.myRoles);
+    setSelectedScenes(savedScript.config.selectedScenes);
+    setLastRehearsalMode(savedScript.config.lastRehearsalMode);
+    setIsRehearsing(false);
+    setMergeSource(null);
+    setMergeTarget(null);
+    setIsMergePanelVisible(false);
+    loadSavedScript(savedScript.data);
+  };
+
   const resumeSceneNumber = pendingJob
     ? Math.min(pendingJob.index + 2, pendingJob.totalChunks.length)
     : null;
+
+  const lastRehearsalLabel =
+    lastRehearsalMode === 'ALL'
+      ? 'obra completa'
+      : lastRehearsalMode === 'MINE'
+        ? 'solo mis escenas'
+        : null;
 
   if (isRehearsing && displayScriptData) {
     return (
@@ -154,7 +222,28 @@ export const HomeScreen = () => {
         {loading || displayScriptData ? (
           <View style={styles.section}>
             {loading && <Text style={styles.status}>{progressText}</Text>}
-            <Text style={styles.obraTitle}>{displayScriptData?.obra}</Text>
+            <Text style={styles.obraTitle}>
+              {displayScriptData?.obra ?? currentScriptFileName ?? 'Analizando guion...'}
+            </Text>
+
+            {!!displayScriptData && (
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryTitle}>Configuracion guardada para esta obra</Text>
+                <Text style={styles.summaryText}>
+                  {myRoles.length > 0
+                    ? `${myRoles.length} personaje${myRoles.length === 1 ? '' : 's'} seleccionado${myRoles.length === 1 ? '' : 's'}`
+                    : 'Todavia no has elegido personaje'}
+                </Text>
+                <Text style={styles.summaryText}>
+                  {selectedScenes.length > 0
+                    ? `${selectedScenes.length} escena${selectedScenes.length === 1 ? '' : 's'} recordada${selectedScenes.length === 1 ? '' : 's'}`
+                    : 'Aun no has guardado una seleccion de escenas'}
+                </Text>
+                {lastRehearsalLabel ? (
+                  <Text style={styles.summaryText}>Ultimo modo usado: {lastRehearsalLabel}</Text>
+                ) : null}
+              </View>
+            )}
 
             <Text style={styles.label}>Personajes detectados (elige el tuyo):</Text>
             <View style={styles.tags}>
@@ -178,84 +267,101 @@ export const HomeScreen = () => {
             </View>
 
             {!loading && scriptData && (
-              <View style={styles.mergePanel}>
-                <Text style={styles.mergeTitle}>Fusionar personajes duplicados</Text>
-                <Text style={styles.mergeHint}>
-                  Une alias o variantes del mismo personaje. Se guardará solo para esta obra.
-                </Text>
+              <View style={styles.mergeWrapper}>
+                <TouchableOpacity
+                  style={[styles.btnMenu, styles.mergeToggleButton]}
+                  onPress={() => setIsMergePanelVisible((previousValue) => !previousValue)}
+                >
+                  <Text style={styles.btnText}>
+                    {isMergePanelVisible ? 'Ocultar fusiones' : 'Fusionar personajes'}
+                    {mergeEntries.length > 0 ? ` (${mergeEntries.length})` : ''}
+                  </Text>
+                </TouchableOpacity>
 
-                {!areRoleMergesReady ? (
-                  <Text style={styles.mergeLoading}>Cargando fusiones guardadas...</Text>
-                ) : (
-                  <>
-                    <Text style={styles.mergeStep}>1. Elige el nombre a corregir</Text>
-                    <View style={styles.tags}>
-                      {mergeSourceCandidates.map((character) => (
-                        <TouchableOpacity
-                          key={`source-${character}`}
-                          style={[styles.tag, mergeSource === character && styles.tagSelected]}
-                          onPress={() => {
-                            setMergeSource(character);
-                            setMergeTarget(null);
-                          }}
-                        >
-                          <Text style={[styles.tagText, mergeSource === character && styles.tagTextSelected]}>
-                            {character}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                {isMergePanelVisible ? (
+                  <View style={styles.mergePanel}>
+                    <Text style={styles.mergeTitle}>Fusionar personajes duplicados</Text>
+                    <Text style={styles.mergeHint}>
+                      Une alias o variantes del mismo personaje. Se guardara solo para esta obra.
+                    </Text>
 
-                    {mergeSource ? (
+                    {!areRoleMergesReady ? (
+                      <Text style={styles.mergeLoading}>Cargando fusiones guardadas...</Text>
+                    ) : (
                       <>
-                        <Text style={styles.mergeStep}>2. Elige el personaje correcto</Text>
+                        <Text style={styles.mergeStep}>1. Elige el nombre a corregir</Text>
                         <View style={styles.tags}>
-                          {mergeTargetCandidates.map((character) => (
+                          {mergeSourceCandidates.map((character) => (
                             <TouchableOpacity
-                              key={`target-${character}`}
-                              style={[styles.tag, mergeTarget === character && styles.tagSelected]}
-                              onPress={() => setMergeTarget(character)}
+                              key={`source-${character}`}
+                              style={[styles.tag, mergeSource === character && styles.tagSelected]}
+                              onPress={() => {
+                                setMergeSource(character);
+                                setMergeTarget(null);
+                              }}
                             >
-                              <Text style={[styles.tagText, mergeTarget === character && styles.tagTextSelected]}>
+                              <Text style={[styles.tagText, mergeSource === character && styles.tagTextSelected]}>
                                 {character}
                               </Text>
                             </TouchableOpacity>
                           ))}
                         </View>
 
-                        <TouchableOpacity
-                          style={[styles.btnMenu, styles.mergeAction, !mergeTarget && styles.buttonDisabled]}
-                          onPress={handleMergeCharacters}
-                          disabled={!mergeTarget}
-                        >
-                          <Text style={styles.btnText}>Fusionar {mergeSource} en {mergeTarget ?? '...'}</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : null}
+                        {mergeSource ? (
+                          <>
+                            <Text style={styles.mergeStep}>2. Elige el personaje correcto</Text>
+                            <View style={styles.tags}>
+                              {mergeTargetCandidates.map((character) => (
+                                <TouchableOpacity
+                                  key={`target-${character}`}
+                                  style={[styles.tag, mergeTarget === character && styles.tagSelected]}
+                                  onPress={() => setMergeTarget(character)}
+                                >
+                                  <Text style={[styles.tagText, mergeTarget === character && styles.tagTextSelected]}>
+                                    {character}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
 
-                    {mergeEntries.length > 0 ? (
-                      <>
-                        <Text style={styles.mergeStep}>Fusiones activas</Text>
-                        <View style={styles.mergeList}>
-                          {mergeEntries.map(({ sourceCharacter, targetCharacter }) => (
                             <TouchableOpacity
-                              key={`${sourceCharacter}-${targetCharacter}`}
-                              style={styles.mergeChip}
-                              onPress={() => removeMerge(sourceCharacter)}
+                              style={[styles.btnMenu, styles.mergeAction, !mergeTarget && styles.buttonDisabled]}
+                              onPress={handleMergeCharacters}
+                              disabled={!mergeTarget}
                             >
-                              <Text style={styles.mergeChipText}>
-                                {sourceCharacter} → {targetCharacter} · quitar
-                              </Text>
+                              <Text style={styles.btnText}>Fusionar {mergeSource} en {mergeTarget ?? '...'}</Text>
                             </TouchableOpacity>
-                          ))}
-                        </View>
-                        <TouchableOpacity onPress={clearMerges} style={styles.clearMergeButton}>
-                          <Text style={styles.clearMergeText}>Quitar todas las fusiones</Text>
-                        </TouchableOpacity>
+                          </>
+                        ) : null}
+
+                        {mergeEntries.length > 0 ? (
+                          <>
+                            <Text style={styles.mergeStep}>Fusiones activas</Text>
+                            <View style={styles.mergeList}>
+                              {mergeEntries.map(({ sourceCharacter, targetCharacter }) => (
+                                <TouchableOpacity
+                                  key={`${sourceCharacter}-${targetCharacter}`}
+                                  style={styles.mergeChip}
+                                  onPress={() => removeMerge(sourceCharacter)}
+                                >
+                                  <Text style={styles.mergeChipText}>
+                                    {sourceCharacter}
+                                    {' -> '}
+                                    {targetCharacter}
+                                    {' · quitar'}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                            <TouchableOpacity onPress={clearMerges} style={styles.clearMergeButton}>
+                              <Text style={styles.clearMergeText}>Quitar todas las fusiones</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : null}
                       </>
-                    ) : null}
-                  </>
-                )}
+                    )}
+                  </View>
+                ) : null}
               </View>
             )}
 
@@ -283,19 +389,59 @@ export const HomeScreen = () => {
             )}
           </View>
         ) : (
-          <TouchableOpacity
-            style={styles.btnMain}
-            onPress={async () => {
-              const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
-              if (!result.canceled) {
-                setMyRoles([]);
-                setSelectedScenes([]);
-                await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
-              }
-            }}
-          >
-            <Text style={styles.btnText}>Cargar PDF</Text>
-          </TouchableOpacity>
+          <View style={styles.homeContent}>
+            <TouchableOpacity
+              style={styles.btnMain}
+              onPress={async () => {
+                const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
+                if (!result.canceled) {
+                  resetSelectionState();
+                  setCurrentScriptFileName(result.assets[0].name ?? null);
+                  await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
+                }
+              }}
+            >
+              <Text style={styles.btnText}>Cargar PDF</Text>
+            </TouchableOpacity>
+
+            {savedScripts.length > 0 ? (
+              <View style={styles.librarySection}>
+                <Text style={styles.libraryTitle}>Obras guardadas</Text>
+                <Text style={styles.libraryHint}>Abre una obra y retomaras tu configuracion guardada.</Text>
+
+                <View style={styles.libraryList}>
+                  {savedScripts.map((savedScript) => (
+                    <View key={savedScript.id} style={styles.libraryCard}>
+                      <View style={styles.libraryCardBody}>
+                        <Text style={styles.libraryCardTitle}>{savedScript.data.obra}</Text>
+                        <Text style={styles.libraryCardMeta}>{savedScript.fileName}</Text>
+                        <Text style={styles.libraryCardMeta}>
+                          {savedScript.config.myRoles.length > 0
+                            ? `${savedScript.config.myRoles.length} personaje${savedScript.config.myRoles.length === 1 ? '' : 's'} seleccionado${savedScript.config.myRoles.length === 1 ? '' : 's'}`
+                            : 'Sin personaje elegido todavia'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.libraryActions}>
+                        <TouchableOpacity
+                          style={[styles.libraryButton, styles.libraryOpenButton]}
+                          onPress={() => handleOpenSavedScript(savedScript)}
+                        >
+                          <Text style={styles.libraryButtonText}>Abrir</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.libraryButton, styles.libraryDeleteButton]}
+                          onPress={() => void deleteScript(savedScript.id)}
+                        >
+                          <Text style={styles.libraryDeleteText}>Borrar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </View>
         )}
         <VersionBadge />
       </ScrollView>
@@ -326,13 +472,25 @@ const styles = StyleSheet.create({
   btnResume: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 10, width: '100%', alignItems: 'center' },
   discardButton: { marginTop: 10 },
   discardText: { color: '#c62828', fontWeight: '600' },
+  homeContent: { width: '100%', gap: 24 },
   section: { width: '100%' },
   status: { color: '#007AFF', textAlign: 'center', marginBottom: 10, fontWeight: 'bold' },
   obraTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
+  summaryCard: {
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#eef7ff',
+    borderWidth: 1,
+    borderColor: '#d4e7ff',
+  },
+  summaryTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
+  summaryText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
   label: { color: '#666', marginBottom: 10, textAlign: 'center' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 30 },
+  mergeWrapper: { marginBottom: 30 },
+  mergeToggleButton: { marginBottom: 12 },
   mergePanel: {
-    marginBottom: 30,
     padding: 16,
     borderRadius: 16,
     backgroundColor: '#f8f9fa',
@@ -361,9 +519,43 @@ const styles = StyleSheet.create({
   menu: { gap: 12 },
   btnMenu: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center' },
   btnSecondary: { backgroundColor: '#34C759' },
-  btnMain: { backgroundColor: '#007AFF', padding: 20, borderRadius: 15 },
+  btnMain: { backgroundColor: '#007AFF', padding: 20, borderRadius: 15, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   btnBack: { marginTop: 25, alignSelf: 'center' },
   btnBackText: { color: '#007AFF', fontWeight: '600' },
   buttonDisabled: { opacity: 0.5 },
+  librarySection: {
+    width: '100%',
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#eceff3',
+  },
+  libraryTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 6 },
+  libraryHint: { textAlign: 'center', color: '#5f6b7a', marginBottom: 18, lineHeight: 20 },
+  libraryList: { gap: 14 },
+  libraryCard: {
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e4e8ee',
+    padding: 16,
+    gap: 14,
+  },
+  libraryCardBody: { gap: 4 },
+  libraryCardTitle: { fontSize: 17, fontWeight: '700', color: '#1d2733' },
+  libraryCardMeta: { color: '#5f6b7a', lineHeight: 20 },
+  libraryActions: { flexDirection: 'row', gap: 10 },
+  libraryButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  libraryOpenButton: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  libraryDeleteButton: { backgroundColor: '#fff5f5', borderColor: '#f3c5c5' },
+  libraryButtonText: { color: '#fff', fontWeight: '700' },
+  libraryDeleteText: { color: '#c62828', fontWeight: '700' },
 });
