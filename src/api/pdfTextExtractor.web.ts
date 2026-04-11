@@ -190,7 +190,10 @@ const loadPdfJsModule = () => {
 
     const handleResolve = () => waitForModule();
 
-    const handleReject = () => finish(() => reject(new Error('No se pudo cargar el motor PDF local.')));
+    const handleReject = () =>
+      finish(() =>
+        reject(new Error(window.__teatroPdfJsLoaderError || 'No se pudo cargar el motor PDF local.'))
+      );
 
     if (existingScript) {
       existingScript.addEventListener('load', handleResolve, { once: true });

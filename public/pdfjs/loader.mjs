@@ -61,9 +61,48 @@ const installPolyfills = () => {
   }
 };
 
+const collectFeatureFlags = () => ({
+  promiseWithResolvers: typeof Promise.withResolvers === 'function',
+  urlParse: typeof URL.parse === 'function',
+  objectHasOwn: typeof Object.hasOwn === 'function',
+  arrayFindLast: typeof Array.prototype.findLast === 'function',
+  arrayAt: typeof Array.prototype.at === 'function',
+  stringAt: typeof String.prototype.at === 'function',
+  structuredClone: typeof structuredClone === 'function',
+  weakRef: typeof WeakRef === 'function',
+});
+
+const formatError = (error) => {
+  if (error instanceof Error) {
+    const stack = typeof error.stack === 'string' ? error.stack.split('\n').slice(0, 6).join('\n') : '';
+    return {
+      name: error.name || 'Error',
+      message: error.message || 'Sin mensaje',
+      stack,
+    };
+  }
+
+  return {
+    name: 'UnknownError',
+    message: String(error),
+    stack: '',
+  };
+};
+
 const setLoaderError = (error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  globalThis.__teatroPdfJsLoaderError = message;
+  const formattedError = formatError(error);
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
+  const featureFlags = collectFeatureFlags();
+  const details = [
+    `${formattedError.name}: ${formattedError.message}`,
+    formattedError.stack ? `stack:\n${formattedError.stack}` : '',
+    `userAgent: ${userAgent}`,
+    `features: ${JSON.stringify(featureFlags)}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  globalThis.__teatroPdfJsLoaderError = details;
 };
 
 (async () => {

@@ -307,7 +307,13 @@ const styles = StyleSheet.create({
   container: { padding: 20, alignItems: 'center' },
   title: { fontSize: 30, fontWeight: 'bold', marginBottom: 20 },
   errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20, width: '100%' },
-  errorText: { color: '#c62828', textAlign: 'center', fontWeight: 'bold' },
+  errorText: {
+    color: '#c62828',
+    textAlign: 'left',
+    fontWeight: '600',
+    fontSize: 12,
+    lineHeight: 18,
+  },
   resumeBox: {
     backgroundColor: '#e8f5e9',
     padding: 20,
