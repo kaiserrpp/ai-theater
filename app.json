@@ -2,7 +2,7 @@
   "expo": {
     "name": "AI-Theatre",
     "slug": "teatro-ia",
-    "version": "2026.04.051",
+    "version": "2026.04.052",
     "orientation": "portrait",
     "icon": "./assets/images/caras-teatro.png",
     "userInterfaceStyle": "light",

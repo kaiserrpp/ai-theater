@@ -362,6 +362,45 @@ export const HomeScreen = () => {
   const selectedRolesSummary =
     myRoles.length > 0 ? myRoles.join(', ') : 'Todavia no has elegido personaje';
 
+  const renderResumeChoiceForMode = (mode: RehearsalMode) => {
+    if (
+      pendingResumeMode !== mode ||
+      !pendingResumeCheckpoint ||
+      pendingResumeScenes.length === 0
+    ) {
+      return null;
+    }
+
+    return (
+      <View style={styles.resumeChoiceCard}>
+        <Text style={styles.resumeChoiceTitle}>Hay un ensayo a medias guardado</Text>
+        <Text style={styles.resumeChoiceText}>
+          Puedes retomar desde la linea {Math.min(pendingResumeCheckpoint.lineIndex, pendingResumeTotalLines)}
+          {' '}de {pendingResumeTotalLines}.
+        </Text>
+        <View style={styles.resumeChoiceActions}>
+          <TouchableOpacity
+            style={[styles.resumeChoiceButton, styles.resumeChoicePrimary]}
+            onPress={() =>
+              launchRehearsal(
+                pendingResumeMode,
+                Math.min(pendingResumeCheckpoint.lineIndex, pendingResumeTotalLines)
+              )
+            }
+          >
+            <Text style={styles.resumeChoicePrimaryText}>Retomar donde lo deje</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.resumeChoiceButton, styles.resumeChoiceSecondary]}
+            onPress={() => launchRehearsal(pendingResumeMode, 0)}
+          >
+            <Text style={styles.resumeChoiceSecondaryText}>Empezar desde 0</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   if (isRehearsing && displayScriptData) {
     return (
       <ScreenWrapper>
@@ -514,57 +553,37 @@ export const HomeScreen = () => {
               </View>
 
               <View style={styles.menu}>
-                <TouchableOpacity
-                  style={[styles.btnMenu, myRoles.length === 0 && styles.buttonDisabled]}
-                  onPress={() => requestRehearsalStart('ALL')}
-                  disabled={myRoles.length === 0}
-                >
-                  <Text style={styles.btnText}>Ensayar obra completa</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btnMenu, styles.btnSecondary, myRoles.length === 0 && styles.buttonDisabled]}
-                  onPress={() => requestRehearsalStart('MINE')}
-                  disabled={myRoles.length === 0}
-                >
-                  <Text style={styles.btnText}>Ensayar mis escenas</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btnMenu, styles.btnTertiary, selectedScenes.length === 0 && styles.buttonDisabled]}
-                  onPress={() => requestRehearsalStart('SELECTED')}
-                  disabled={selectedScenes.length === 0}
-                >
-                  <Text style={styles.btnText}>Ensayar escenas seleccionadas</Text>
-                </TouchableOpacity>
-              </View>
-
-              {pendingResumeMode && pendingResumeCheckpoint && pendingResumeScenes.length > 0 ? (
-                <View style={styles.resumeChoiceCard}>
-                  <Text style={styles.resumeChoiceTitle}>Hay un ensayo a medias guardado</Text>
-                  <Text style={styles.resumeChoiceText}>
-                    Puedes retomar desde la linea {Math.min(pendingResumeCheckpoint.lineIndex, pendingResumeTotalLines)}
-                    {' '}de {pendingResumeTotalLines}.
-                  </Text>
-                  <View style={styles.resumeChoiceActions}>
-                    <TouchableOpacity
-                      style={[styles.resumeChoiceButton, styles.resumeChoicePrimary]}
-                      onPress={() =>
-                        launchRehearsal(
-                          pendingResumeMode,
-                          Math.min(pendingResumeCheckpoint.lineIndex, pendingResumeTotalLines)
-                        )
-                      }
-                    >
-                      <Text style={styles.resumeChoicePrimaryText}>Retomar donde lo deje</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.resumeChoiceButton, styles.resumeChoiceSecondary]}
-                      onPress={() => launchRehearsal(pendingResumeMode, 0)}
-                    >
-                      <Text style={styles.resumeChoiceSecondaryText}>Empezar desde 0</Text>
-                    </TouchableOpacity>
-                  </View>
+                <View style={styles.menuOption}>
+                  <TouchableOpacity
+                    style={[styles.btnMenu, myRoles.length === 0 && styles.buttonDisabled]}
+                    onPress={() => requestRehearsalStart('ALL')}
+                    disabled={myRoles.length === 0}
+                  >
+                    <Text style={styles.btnText}>Ensayar obra completa</Text>
+                  </TouchableOpacity>
+                  {renderResumeChoiceForMode('ALL')}
                 </View>
-              ) : null}
+                <View style={styles.menuOption}>
+                  <TouchableOpacity
+                    style={[styles.btnMenu, styles.btnSecondary, myRoles.length === 0 && styles.buttonDisabled]}
+                    onPress={() => requestRehearsalStart('MINE')}
+                    disabled={myRoles.length === 0}
+                  >
+                    <Text style={styles.btnText}>Ensayar mis escenas</Text>
+                  </TouchableOpacity>
+                  {renderResumeChoiceForMode('MINE')}
+                </View>
+                <View style={styles.menuOption}>
+                  <TouchableOpacity
+                    style={[styles.btnMenu, styles.btnTertiary, selectedScenes.length === 0 && styles.buttonDisabled]}
+                    onPress={() => requestRehearsalStart('SELECTED')}
+                    disabled={selectedScenes.length === 0}
+                  >
+                    <Text style={styles.btnText}>Ensayar escenas seleccionadas</Text>
+                  </TouchableOpacity>
+                  {renderResumeChoiceForMode('SELECTED')}
+                </View>
+              </View>
 
               {!loading && scriptData && (
                 <View style={styles.mergeWrapper}>
@@ -849,6 +868,7 @@ const styles = StyleSheet.create({
   tagText: { color: '#007AFF' },
   tagTextSelected: { color: '#1b5e20', fontWeight: '600' },
   menu: { gap: 12 },
+  menuOption: { gap: 10 },
   btnMenu: { backgroundColor: '#007AFF', padding: 18, borderRadius: 14, alignItems: 'center' },
   btnSecondary: { backgroundColor: '#2b9348' },
   btnTertiary: { backgroundColor: '#5b3f8c' },
