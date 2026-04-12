@@ -1,4 +1,4 @@
-const { head, put } = require('@vercel/blob');
+const { head, list, put } = require('@vercel/blob');
 
 const MANIFEST_VERSION = 1;
 const EMPTY_SONGS = [];
@@ -58,15 +58,19 @@ const parseJsonBody = (request) => {
   return request.body || {};
 };
 
-const readManifest = async (shareId) => {
-  const blob = await head(buildManifestPath(shareId));
-  const response = await fetch(blob.url, { cache: 'no-store' });
+const readManifestFromUrl = async (url) => {
+  const response = await fetch(url, { cache: 'no-store' });
 
   if (!response.ok) {
     throw new Error('No se pudo descargar la obra compartida.');
   }
 
   return response.json();
+};
+
+const readManifest = async (shareId) => {
+  const blob = await head(buildManifestPath(shareId));
+  return readManifestFromUrl(blob.url);
 };
 
 const writeManifest = async (manifest) => {
@@ -78,11 +82,49 @@ const writeManifest = async (manifest) => {
   });
 };
 
+const buildManifestSummary = (manifest) => ({
+  shareId: manifest.shareId,
+  obra:
+    manifest?.scriptData && typeof manifest.scriptData.obra === 'string'
+      ? manifest.scriptData.obra
+      : manifest.fileName,
+  fileName: manifest.fileName,
+  mergeCount: Object.keys(normalizeMergeMap(manifest.mergeMap)).length,
+  songCount: normalizeSongs(manifest.songs).length,
+  createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : new Date().toISOString(),
+  updatedAt: typeof manifest.updatedAt === 'string' ? manifest.updatedAt : new Date().toISOString(),
+});
+
+const listSharedScriptSummaries = async () => {
+  const result = await list({
+    prefix: 'shared-scripts/',
+    limit: 200,
+  });
+
+  const manifestBlobs = result.blobs.filter((blob) => blob.pathname.endsWith('/manifest.json'));
+
+  const manifests = await Promise.all(
+    manifestBlobs.map(async (blob) => {
+      try {
+        return await readManifestFromUrl(blob.url);
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  return manifests
+    .filter(Boolean)
+    .map(buildManifestSummary)
+    .sort((leftManifest, rightManifest) => rightManifest.updatedAt.localeCompare(leftManifest.updatedAt));
+};
+
 module.exports = {
   MANIFEST_VERSION,
   buildShareUrl,
   createShareId,
   isValidScriptData,
+  listSharedScriptSummaries,
   normalizeMergeMap,
   normalizeSongs,
   parseJsonBody,

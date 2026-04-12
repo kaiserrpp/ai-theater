@@ -20,6 +20,16 @@ export interface SharedScriptManifest {
   updatedAt: string;
 }
 
+export interface SharedScriptListItem {
+  shareId: string;
+  obra: string;
+  fileName: string;
+  mergeCount: number;
+  songCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SharedScriptPublishInput {
   shareId?: string | null;
   fileName: string;

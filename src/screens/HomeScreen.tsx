@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import {
   buildSharedScriptUrl,
   copySharedScriptUrl,
+  fetchSharedScriptList,
   fetchSharedScript,
   getSharedScriptIdFromUrl,
   publishSharedScript,
@@ -17,7 +18,7 @@ import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
 import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode } from '../types/script';
-import { SharedScriptManifest } from '../types/sharedScript';
+import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles, isSongCue } from '../utils/scriptScenes';
 
@@ -64,6 +65,41 @@ const buildSongPlaceholders = (guion: SharedScriptManifest['scriptData']['guion'
     });
 };
 
+const buildSharedScriptSummaryFromManifest = (
+  manifest: SharedScriptManifest
+): SharedScriptListItem => ({
+  shareId: manifest.shareId,
+  obra: manifest.scriptData.obra,
+  fileName: manifest.fileName,
+  mergeCount: Object.keys(manifest.mergeMap).length,
+  songCount: manifest.songs.length,
+  createdAt: manifest.createdAt,
+  updatedAt: manifest.updatedAt,
+});
+
+const upsertSharedScriptSummary = (
+  previousScripts: SharedScriptListItem[],
+  nextScript: SharedScriptListItem
+) => {
+  const remainingScripts = previousScripts.filter((script) => script.shareId !== nextScript.shareId);
+  return [nextScript, ...remainingScripts].sort((leftScript, rightScript) =>
+    rightScript.updatedAt.localeCompare(leftScript.updatedAt)
+  );
+};
+
+const formatSharedScriptTimestamp = (value: string) => {
+  const timestamp = new Date(value);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return 'Actualizada recientemente';
+  }
+
+  return `Actualizada ${timestamp.toLocaleString('es-ES', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })}`;
+};
+
 export const HomeScreen = () => {
   const {
     analyzeInStages,
@@ -104,6 +140,9 @@ export const HomeScreen = () => {
   const [isSharingScript, setIsSharingScript] = useState(false);
   const [isLoadingSharedScript, setIsLoadingSharedScript] = useState(false);
   const [isHydratingSharedMergeMap, setIsHydratingSharedMergeMap] = useState(false);
+  const [sharedScriptsCatalog, setSharedScriptsCatalog] = useState<SharedScriptListItem[]>([]);
+  const [isLoadingSharedScriptsCatalog, setIsLoadingSharedScriptsCatalog] = useState(false);
+  const [sharedScriptsCatalogError, setSharedScriptsCatalogError] = useState<string | null>(null);
 
   const {
     isReady: areRoleMergesReady,
@@ -430,6 +469,9 @@ export const HomeScreen = () => {
       });
 
       setSharedScript(response.manifest);
+      setSharedScriptsCatalog((previousScripts) =>
+        upsertSharedScriptSummary(previousScripts, buildSharedScriptSummaryFromManifest(response.manifest))
+      );
       setSharedStatusText('Obra compartida lista para enviar.');
       setIsHydratingSharedMergeMap(false);
       replaceSharedScriptIdInUrl(response.manifest.shareId);
@@ -480,6 +522,28 @@ export const HomeScreen = () => {
     replaceSharedScriptIdInUrl(null);
     loadSavedScript(savedScript.data);
   };
+
+  const refreshSharedScriptsCatalog = useCallback(async () => {
+    setIsLoadingSharedScriptsCatalog(true);
+    setSharedScriptsCatalogError(null);
+
+    try {
+      const scripts = await fetchSharedScriptList();
+      setSharedScriptsCatalog(scripts);
+    } catch (catalogError) {
+      const message =
+        catalogError instanceof Error
+          ? catalogError.message
+          : 'No se pudieron cargar las obras compartidas.';
+      setSharedScriptsCatalogError(message);
+    } finally {
+      setIsLoadingSharedScriptsCatalog(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSharedScriptsCatalog();
+  }, [refreshSharedScriptsCatalog]);
 
   useEffect(() => {
     if (scriptData || loading || isLoadingSharedScript || isSharingScript) {
@@ -687,8 +751,8 @@ export const HomeScreen = () => {
                 </Text>
                 <Text style={styles.shareText}>
                   {sharedScript
-                    ? 'Esta obra ya tiene un enlace compartido. Las fusiones se sincronizan entre quienes abran ese enlace.'
-                    : 'Crea un enlace compartido para que otras personas carguen este mismo guion con las fusiones ya hechas.'}
+                    ? 'Esta obra ya aparece en el listado de obras compartidas. Las fusiones se sincronizan para quien la abra desde la app o desde su enlace directo.'
+                    : 'Publica esta obra para que el resto del reparto la vea dentro de Obras compartidas, con las fusiones ya hechas.'}
                 </Text>
                 {sharedScript ? (
                   <Text style={styles.shareLink}>{buildSharedScriptUrl(sharedScript.shareId)}</Text>
@@ -855,7 +919,7 @@ export const HomeScreen = () => {
                       <Text style={styles.mergeTitle}>Fusionar personajes duplicados</Text>
                       <Text style={styles.mergeHint}>
                         {sharedScript
-                          ? 'Une alias o variantes del mismo personaje. Esta fusion se compartira con quien abra este enlace.'
+                          ? 'Une alias o variantes del mismo personaje. Esta fusion se compartira con quien abra esta obra.'
                           : 'Une alias o variantes del mismo personaje. Se guardara solo para esta obra.'}
                       </Text>
 
@@ -1009,6 +1073,90 @@ export const HomeScreen = () => {
                 </View>
               </View>
             ) : null}
+
+            <View style={styles.sharedLibrarySection}>
+              <View style={styles.sharedSectionHeader}>
+                <View style={styles.sharedSectionHeading}>
+                  <Text style={styles.libraryTitle}>Obras compartidas</Text>
+                  <Text style={styles.libraryHint}>
+                    Cuando alguien pulse Compartir obra, aparecera aqui para el resto del equipo.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.sharedRefreshButton}
+                  onPress={() => void refreshSharedScriptsCatalog()}
+                  disabled={isLoadingSharedScriptsCatalog}
+                >
+                  <Text style={styles.sharedRefreshButtonText}>
+                    {isLoadingSharedScriptsCatalog ? 'Actualizando...' : 'Actualizar'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {sharedScriptsCatalogError ? (
+                <Text style={styles.sharedInfoText}>
+                  No se pudieron cargar las obras compartidas: {sharedScriptsCatalogError}
+                </Text>
+              ) : null}
+
+              {isLoadingSharedScriptsCatalog && sharedScriptsCatalog.length === 0 ? (
+                <Text style={styles.sharedInfoText}>Cargando obras compartidas...</Text>
+              ) : null}
+
+              {!isLoadingSharedScriptsCatalog && sharedScriptsCatalog.length === 0 && !sharedScriptsCatalogError ? (
+                <Text style={styles.sharedInfoText}>
+                  Todavia no hay obras compartidas. Publica una y el resto la vera aqui.
+                </Text>
+              ) : null}
+
+              {sharedScriptsCatalog.length > 0 ? (
+                <View style={styles.libraryList}>
+                  {sharedScriptsCatalog.map((sharedCatalogItem) => (
+                    <View key={sharedCatalogItem.shareId} style={styles.sharedScriptCard}>
+                      <View style={styles.libraryCardBody}>
+                        <View style={styles.sharedScriptTitleRow}>
+                          <Text style={styles.libraryCardTitle}>{sharedCatalogItem.obra}</Text>
+                          {sharedScript?.shareId === sharedCatalogItem.shareId ? (
+                            <View style={styles.sharedActiveBadge}>
+                              <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={styles.libraryCardMeta}>{sharedCatalogItem.fileName}</Text>
+                        <Text style={styles.libraryCardMeta}>
+                          {sharedCatalogItem.mergeCount > 0
+                            ? `${sharedCatalogItem.mergeCount} fusion${sharedCatalogItem.mergeCount === 1 ? '' : 'es'} compartida${sharedCatalogItem.mergeCount === 1 ? '' : 's'}`
+                            : 'Sin fusiones compartidas todavia'}
+                        </Text>
+                        <Text style={styles.libraryCardMeta}>
+                          {sharedCatalogItem.songCount > 0
+                            ? `${sharedCatalogItem.songCount} bloque${sharedCatalogItem.songCount === 1 ? '' : 's'} de cancion preparado${sharedCatalogItem.songCount === 1 ? '' : 's'}`
+                            : 'Sin bloques de cancion registrados'}
+                        </Text>
+                        <Text style={styles.libraryCardMeta}>
+                          {formatSharedScriptTimestamp(sharedCatalogItem.updatedAt)}
+                        </Text>
+                      </View>
+
+                      <View style={styles.libraryActions}>
+                        <TouchableOpacity
+                          style={[styles.libraryButton, styles.libraryOpenButton]}
+                          onPress={() => void loadRemoteSharedScript(sharedCatalogItem.shareId)}
+                        >
+                          <Text style={styles.libraryButtonText}>Abrir</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.libraryButton, styles.sharedCopyButton]}
+                          onPress={() => void copySharedScriptUrl(sharedCatalogItem.shareId)}
+                        >
+                          <Text style={styles.sharedCopyButtonText}>Copiar enlace</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
           </View>
         )}
         <VersionBadge />
@@ -1318,6 +1466,39 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#eceff3',
   },
+  sharedLibrarySection: {
+    width: '100%',
+    padding: 18,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderWidth: 1,
+    borderColor: '#dbe9f6',
+    gap: 16,
+  },
+  sharedSectionHeader: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  sharedSectionHeading: {
+    flex: 1,
+  },
+  sharedRefreshButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(24, 78, 119, 0.88)',
+  },
+  sharedRefreshButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  sharedInfoText: {
+    textAlign: 'center',
+    color: '#5f6b7a',
+    lineHeight: 20,
+  },
   libraryTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 6, color: '#1d2733' },
   libraryHint: { textAlign: 'center', color: '#5f6b7a', marginBottom: 18, lineHeight: 20 },
   libraryList: { gap: 14 },
@@ -1329,7 +1510,34 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 14,
   },
+  sharedScriptCard: {
+    borderRadius: 16,
+    backgroundColor: 'rgba(247, 251, 255, 0.94)',
+    borderWidth: 1,
+    borderColor: '#d7e6f5',
+    padding: 16,
+    gap: 14,
+  },
   libraryCardBody: { gap: 4 },
+  sharedScriptTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  sharedActiveBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(43, 147, 72, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(43, 147, 72, 0.28)',
+  },
+  sharedActiveBadgeText: {
+    color: '#2b9348',
+    fontWeight: '700',
+    fontSize: 12,
+  },
   libraryCardTitle: { fontSize: 17, fontWeight: '700', color: '#1d2733' },
   libraryCardMeta: { color: '#5f6b7a', lineHeight: 20 },
   libraryActions: { flexDirection: 'row', gap: 10 },
@@ -1342,6 +1550,8 @@ const styles = StyleSheet.create({
   },
   libraryOpenButton: { backgroundColor: 'rgba(0, 122, 255, 0.82)', borderColor: 'rgba(0, 122, 255, 0.95)' },
   libraryDeleteButton: { backgroundColor: 'rgba(255, 245, 245, 0.86)', borderColor: '#f3c5c5' },
+  sharedCopyButton: { backgroundColor: 'rgba(255,255,255,0.92)', borderColor: '#d1deeb' },
   libraryButtonText: { color: '#fff', fontWeight: '700' },
   libraryDeleteText: { color: '#c62828', fontWeight: '700' },
+  sharedCopyButtonText: { color: '#184e77', fontWeight: '700' },
 });

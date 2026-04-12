@@ -1,5 +1,9 @@
 import { Platform } from 'react-native';
-import type { SharedScriptManifest, SharedScriptPublishInput } from '../types/sharedScript';
+import type {
+  SharedScriptListItem,
+  SharedScriptManifest,
+  SharedScriptPublishInput,
+} from '../types/sharedScript';
 
 const SHARED_SCRIPT_API_URL = '/api/shared-script';
 
@@ -97,4 +101,19 @@ export const publishSharedScript = async (input: SharedScriptPublishInput) => {
     manifest: SharedScriptManifest;
     shareUrl: string;
   };
+};
+
+export const fetchSharedScriptList = async () => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/list`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptListItem[];
 };
