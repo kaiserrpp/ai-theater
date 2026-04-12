@@ -5,6 +5,7 @@ export type ScriptLineKind = 'dialogue' | 'song';
 
 export interface Dialogue {
   p: string;
+  r?: string[];
   t: string;
   a?: string;
   k?: ScriptLineKind;

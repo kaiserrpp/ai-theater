@@ -1,4 +1,5 @@
 import { Dialogue, ScriptData, SCENE_SYSTEM_SPEAKER, SONG_SYSTEM_SPEAKER } from '../types/script';
+import { getLineRoles } from './scriptScenes';
 
 export type CharacterMergeMap = Record<string, string>;
 
@@ -20,6 +21,15 @@ export const resolveCharacterAlias = (speaker: string, mergeMap: CharacterMergeM
 export const normalizeRoleSelection = (roles: string[], mergeMap: CharacterMergeMap) =>
   Array.from(new Set(roles.map((role) => resolveCharacterAlias(role, mergeMap))));
 
+const mergeLineRoles = (line: Dialogue, mergeMap: CharacterMergeMap) => {
+  const lineRoles = getLineRoles(line);
+  if (lineRoles.length === 0) {
+    return [];
+  }
+
+  return normalizeRoleSelection(lineRoles, mergeMap);
+};
+
 export const applyCharacterMerges = (scriptData: ScriptData, mergeMap: CharacterMergeMap): ScriptData => {
   const mergedCharacters = Array.from(
     new Set(scriptData.personajes.map((character) => resolveCharacterAlias(character, mergeMap)))
@@ -30,8 +40,25 @@ export const applyCharacterMerges = (scriptData: ScriptData, mergeMap: Character
       return line;
     }
 
-    const mergedSpeaker = resolveCharacterAlias(line.p, mergeMap);
-    return mergedSpeaker === line.p ? line : { ...line, p: mergedSpeaker };
+    const mergedRoles = mergeLineRoles(line, mergeMap);
+    const mergedSpeaker =
+      mergedRoles.length > 0 ? mergedRoles.join(' / ') : resolveCharacterAlias(line.p, mergeMap);
+    const shouldPersistRoles = Array.isArray(line.r) || mergedRoles.length > 1;
+    const nextRoles = shouldPersistRoles ? mergedRoles : undefined;
+
+    const hasSameSpeaker = mergedSpeaker === line.p;
+    const hasSameRoles =
+      (Array.isArray(line.r) ? line.r : []).join('|') === (nextRoles ?? []).join('|');
+
+    if (hasSameSpeaker && hasSameRoles) {
+      return line;
+    }
+
+    return {
+      ...line,
+      p: mergedSpeaker,
+      ...(nextRoles ? { r: nextRoles } : {}),
+    };
   });
 
   return {

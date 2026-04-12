@@ -2,7 +2,7 @@ import * as Speech from 'expo-speech';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Dialogue } from '../types/script';
-import { filterScriptByScenes, isSceneMarker, isSongCue } from '../utils/scriptScenes';
+import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 
 interface Props {
   guion: Dialogue[];
@@ -33,7 +33,7 @@ export const RehearsalView: React.FC<Props> = ({
         .trim() ?? '',
     [currentLine]
   );
-  const isMyTurn = Boolean(currentLine && myRoles.includes(currentLine.p));
+  const isMyTurn = lineMatchesRoles(currentLine, myRoles);
   const isFinished = currentIndex >= filteredGuion.length;
 
   const advanceLine = useCallback(() => {

@@ -4,6 +4,19 @@ export const isSceneMarker = (line?: Dialogue | null) => line?.p === SCENE_SYSTE
 export const isSongCue = (line?: Dialogue | null) => line?.p === SONG_SYSTEM_SPEAKER || line?.k === 'song';
 export const isSystemCue = (line?: Dialogue | null) => isSceneMarker(line) || isSongCue(line);
 
+export const getLineRoles = (line?: Dialogue | null) => {
+  if (!line || isSystemCue(line)) {
+    return [];
+  }
+
+  return Array.isArray(line.r) && line.r.length > 0 ? line.r : [line.p];
+};
+
+export const lineMatchesRoles = (line: Dialogue | null | undefined, roles: Iterable<string>) => {
+  const selectedRoles = roles instanceof Set ? roles : new Set(roles);
+  return getLineRoles(line).some((role) => selectedRoles.has(role));
+};
+
 export const getSceneTitles = (guion: Dialogue[]) =>
   guion.filter((line) => isSceneMarker(line)).map((line) => line.t);
 
@@ -21,7 +34,7 @@ export const getScenesForRoles = (guion: Dialogue[], myRoles: string[]) => {
       continue;
     }
 
-    if (currentScene && selectedRoles.has(line.p)) {
+    if (currentScene && lineMatchesRoles(line, selectedRoles)) {
       matchingScenes.set(currentScene, true);
     }
   }

@@ -6,6 +6,8 @@ const DEFAULT_SCENE_TITLE = 'OBRA COMPLETA';
 const TITLE_SCAN_LIMIT = 20;
 const MAX_SPEAKER_WORDS = 2;
 const MAX_SPEAKER_LENGTH = 40;
+const MAX_COMPOSITE_SPEAKER_LENGTH = 80;
+const MAX_SPEAKER_SEGMENTS = 4;
 const TITLE_IGNORE_PATTERNS = [
   /^PRESENTA$/iu,
   /^FULL VERSION$/iu,
@@ -24,6 +26,7 @@ interface LocalAnalysisOptions {
 
 interface ParsedSpeakerLine {
   speaker: string;
+  roles: string[];
   text: string;
   stageDirection: string;
 }
@@ -88,7 +91,12 @@ const countBracketBalance = (value: string) => {
 const parseActHeading = (line: string) => {
   const match = line.match(/^\s*-?\s*ACT(?:O)?\s+([A-Z0-9IVX ]+?)\s*-?\s*$/iu);
   if (!match) {
-    return null;
+    const spanishMatch = line.match(/^\s*-?\s*(PRIMER|SEGUNDO|TERCER|CUARTO)\s+ACTO\s*-?\s*$/iu);
+    if (!spanishMatch) {
+      return null;
+    }
+
+    return normalizeWhitespace(spanishMatch[0].toUpperCase());
   }
 
   return normalizeWhitespace(`ACT ${match[1]}`);
@@ -134,6 +142,12 @@ const extractLeadingStageDirection = (text: string) => {
 const sanitizeSpeakerName = (value: string) =>
   normalizeWhitespace(value.replace(/[.:]+$/g, '').replace(/\s+/g, ' ')).toUpperCase();
 
+const normalizeSpeakerDisplay = (value: string) =>
+  normalizeWhitespace(value.replace(/\s*\/\s*/g, ' / ')).toUpperCase();
+
+const sanitizeSpeakerRole = (value: string) =>
+  sanitizeSpeakerName(value.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' '));
+
 const isValidSpeakerName = (candidate: string) => {
   if (!candidate || candidate.length > MAX_SPEAKER_LENGTH) {
     return false;
@@ -158,18 +172,40 @@ const isValidSpeakerName = (candidate: string) => {
   return !isSceneHeading(candidate);
 };
 
+const extractSpeakerRoles = (candidate: string) => {
+  const speakerSegments = normalizeSpeakerDisplay(candidate)
+    .split('/')
+    .map((segment) => sanitizeSpeakerRole(segment))
+    .filter(Boolean);
+
+  if (speakerSegments.length === 0 || speakerSegments.length > MAX_SPEAKER_SEGMENTS) {
+    return [];
+  }
+
+  if (speakerSegments.some((segment) => !isValidSpeakerName(segment))) {
+    return [];
+  }
+
+  return Array.from(new Set(speakerSegments));
+};
+
 const parseSpeakerLine = (line: string): ParsedSpeakerLine | null => {
   const inlineMatch = line.match(
-    /^([A-Z\u00C1\u00C9\u00CD\u00D3\u00DA\u00DC\u00D1][A-Z\u00C1\u00C9\u00CD\u00D3\u00DA\u00DC\u00D10-9 .,'-]{0,40})\s*:\s*(.*)$/u
+    /^([A-Z\u00C1\u00C9\u00CD\u00D3\u00DA\u00DC\u00D1][A-Z\u00C1\u00C9\u00CD\u00D3\u00DA\u00DC\u00D10-9 .,'()/-]{0,80})\s*:\s*(.*)$/u
   );
   if (inlineMatch) {
-    const speaker = sanitizeSpeakerName(inlineMatch[1]);
-    if (!isValidSpeakerName(speaker)) {
+    const rawSpeaker = normalizeSpeakerDisplay(inlineMatch[1]);
+    if (!rawSpeaker || rawSpeaker.length > MAX_COMPOSITE_SPEAKER_LENGTH) {
+      return null;
+    }
+
+    const roles = extractSpeakerRoles(rawSpeaker);
+    if (roles.length === 0) {
       return null;
     }
 
     const { stageDirection, remainder } = extractLeadingStageDirection(inlineMatch[2].trim());
-    return { speaker, text: remainder, stageDirection };
+    return { speaker: roles.join(' / '), roles, text: remainder, stageDirection };
   }
 
   return null;
@@ -314,11 +350,12 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
     pendingSongTitle = '';
   };
 
-  const startDialogue = (speaker: string, text: string, stageDirection = '') => {
+  const startDialogue = (speaker: string, roles: string[], text: string, stageDirection = '') => {
     flushCurrentSong();
     flushCurrentDialogue();
     currentDialogue = {
       p: speaker,
+      ...(roles.length > 1 ? { r: roles } : {}),
       t: text,
       a: mergeNotes(pendingStageDirection, stageDirection),
     };
@@ -366,8 +403,13 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
         ensureScene(currentAct ? `${currentAct} - ${DEFAULT_SCENE_TITLE}` : DEFAULT_SCENE_TITLE);
       }
 
-      startDialogue(parsedSpeakerLine.speaker, parsedSpeakerLine.text, parsedSpeakerLine.stageDirection);
-      personajes.add(parsedSpeakerLine.speaker);
+      startDialogue(
+        parsedSpeakerLine.speaker,
+        parsedSpeakerLine.roles,
+        parsedSpeakerLine.text,
+        parsedSpeakerLine.stageDirection
+      );
+      parsedSpeakerLine.roles.forEach((role) => personajes.add(role));
       continue;
     }
 

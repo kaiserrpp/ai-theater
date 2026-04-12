@@ -1,6 +1,7 @@
 import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useState } from 'react';
 import { Dialogue } from '../types/script';
+import { lineMatchesRoles } from '../utils/scriptScenes';
 
 export const useRehearsal = (guion: Dialogue[], myRoles: string[]) => {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -26,7 +27,7 @@ export const useRehearsal = (guion: Dialogue[], myRoles: string[]) => {
       return;
     }
 
-    if (myRoles.includes(currentDialogue.p)) {
+    if (lineMatchesRoles(currentDialogue, myRoles)) {
       Speech.stop();
       return;
     }
@@ -66,7 +67,7 @@ export const useRehearsal = (guion: Dialogue[], myRoles: string[]) => {
     currentIndex,
     totalLines: guion.length,
     isFinished,
-    isUserTurn: isActive && !isFinished && myRoles.includes(guion[currentIndex]?.p ?? ''),
+    isUserTurn: isActive && !isFinished && lineMatchesRoles(guion[currentIndex], myRoles),
     startRehearsal,
     stopRehearsal,
     nextLine,
