@@ -2,6 +2,14 @@ import { Asset } from 'expo-asset';
 import * as DocumentPicker from 'expo-document-picker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  buildSharedScriptUrl,
+  copySharedScriptUrl,
+  fetchSharedScript,
+  getSharedScriptIdFromUrl,
+  publishSharedScript,
+  replaceSharedScriptIdInUrl,
+} from '../api/sharedScripts';
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { VersionBadge } from '../components/VersionBadge';
@@ -9,8 +17,9 @@ import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
 import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode } from '../types/script';
-import { normalizeRoleSelection } from '../utils/scriptRoleMerges';
-import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
+import { SharedScriptManifest } from '../types/sharedScript';
+import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
+import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles, isSongCue } from '../utils/scriptScenes';
 
 const demoPdfModule = require('../../assets/demo/demo.pdf');
 
@@ -19,6 +28,41 @@ const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   MINE: null,
   SELECTED: null,
 });
+
+const areMergeMapsEqual = (leftMap: CharacterMergeMap, rightMap: CharacterMergeMap) => {
+  const leftEntries = Object.entries(leftMap).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+  const rightEntries = Object.entries(rightMap).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([leftKey, leftValue], index) => {
+    const [rightKey, rightValue] = rightEntries[index];
+    return leftKey === rightKey && leftValue === rightValue;
+  });
+};
+
+const buildSongPlaceholders = (guion: SharedScriptManifest['scriptData']['guion']) => {
+  const occurrences = new Map<string, number>();
+
+  return guion
+    .filter((line) => isSongCue(line))
+    .map((line) => {
+      const title = line.songTitle || 'Cancion';
+      const currentCount = occurrences.get(title) ?? 0;
+      const nextCount = currentCount + 1;
+      occurrences.set(title, nextCount);
+
+      return {
+        id: `song-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'cue'}-${nextCount}`,
+        title,
+        audioUrl: null,
+        audioFileName: null,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+};
 
 export const HomeScreen = () => {
   const {
@@ -54,6 +98,12 @@ export const HomeScreen = () => {
   const [isScenePanelVisible, setIsScenePanelVisible] = useState(false);
   const [isMergePanelVisible, setIsMergePanelVisible] = useState(false);
   const [pendingResumeMode, setPendingResumeMode] = useState<RehearsalMode | null>(null);
+  const [sharedScript, setSharedScript] = useState<SharedScriptManifest | null>(null);
+  const [sharedStatusText, setSharedStatusText] = useState('');
+  const [sharedError, setSharedError] = useState<string | null>(null);
+  const [isSharingScript, setIsSharingScript] = useState(false);
+  const [isLoadingSharedScript, setIsLoadingSharedScript] = useState(false);
+  const [isHydratingSharedMergeMap, setIsHydratingSharedMergeMap] = useState(false);
 
   const {
     isReady: areRoleMergesReady,
@@ -64,21 +114,30 @@ export const HomeScreen = () => {
     mergeCharacter,
     removeMerge,
     clearMerges,
-  } = useScriptRoleMerges(scriptData);
+  } = useScriptRoleMerges(scriptData, sharedScript ? {
+    mode: 'managed',
+    initialMergeMap: sharedScript.mergeMap,
+  } : undefined);
 
   const displayScriptData = mergedScriptData ?? scriptData;
+  const effectiveError = sharedError ?? error;
+  const effectiveLoading = loading || isLoadingSharedScript || isSharingScript;
 
   const progressText = useMemo(() => {
-    if (!loading) {
+    if (!effectiveLoading) {
       return '';
     }
 
-    if (totalChunks > 0 && currentChunkIndex >= 0) {
+    if (loading && totalChunks > 0 && currentChunkIndex >= 0) {
       return `${statusText} (${currentChunkIndex + 1}/${totalChunks})`;
     }
 
-    return statusText;
-  }, [currentChunkIndex, loading, statusText, totalChunks]);
+    if (loading) {
+      return statusText;
+    }
+
+    return sharedStatusText;
+  }, [currentChunkIndex, effectiveLoading, loading, sharedStatusText, statusText, totalChunks]);
 
   const currentSceneTitles = useMemo(
     () => (displayScriptData ? getSceneTitles(displayScriptData.guion) : []),
@@ -186,7 +245,7 @@ export const HomeScreen = () => {
   }, [mergeTarget, mergeTargetCandidates]);
 
   useEffect(() => {
-    if (!scriptData || loading) {
+    if (!scriptData || effectiveLoading) {
       return;
     }
 
@@ -196,14 +255,16 @@ export const HomeScreen = () => {
       selectedScenes,
       lastRehearsalMode,
       rehearsalCheckpoints,
+      sharedScriptId: sharedScript?.shareId ?? null,
     });
   }, [
     currentScriptFileName,
+    effectiveLoading,
     lastRehearsalMode,
-    loading,
     myRoles,
     rehearsalCheckpoints,
     saveScript,
+    sharedScript?.shareId,
     scriptData,
     selectedScenes,
   ]);
@@ -297,11 +358,16 @@ export const HomeScreen = () => {
     setIsScenePanelVisible(false);
     setIsMergePanelVisible(false);
     setPendingResumeMode(null);
+    setSharedScript(null);
+    setSharedStatusText('');
+    setSharedError(null);
+    setIsHydratingSharedMergeMap(false);
   };
 
   const handleResetScript = () => {
     resetSelectionState();
     setCurrentScriptFileName(null);
+    replaceSharedScriptIdInUrl(null);
     resetScript();
   };
 
@@ -315,9 +381,67 @@ export const HomeScreen = () => {
     const demoFileName = demoAsset.name ? `${demoAsset.name}.${demoAsset.type ?? 'pdf'}` : 'demo.pdf';
 
     resetSelectionState();
+    replaceSharedScriptIdInUrl(null);
     setCurrentScriptFileName(demoFileName);
     await analyzeInStages(demoAsset.localUri ?? demoAsset.uri, undefined, demoFileName);
   }, [analyzeInStages]);
+
+  const loadRemoteSharedScript = useCallback(async (shareId: string) => {
+    setIsLoadingSharedScript(true);
+    setSharedError(null);
+    setSharedStatusText('Cargando obra compartida...');
+
+    try {
+      const manifest = await fetchSharedScript(shareId);
+
+      resetSelectionState();
+      setIsHydratingSharedMergeMap(true);
+      setCurrentScriptFileName(manifest.fileName);
+      setSharedScript(manifest);
+      setSharedStatusText('');
+      setSharedError(null);
+      replaceSharedScriptIdInUrl(manifest.shareId);
+      loadSavedScript(manifest.scriptData);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'No se pudo abrir la obra compartida.';
+      setSharedError(`Error compartiendo: ${message}`);
+      setSharedStatusText('');
+    } finally {
+      setIsLoadingSharedScript(false);
+    }
+  }, [loadSavedScript]);
+
+  const handlePublishSharedScript = useCallback(async () => {
+    if (!scriptData) {
+      return;
+    }
+
+    setIsSharingScript(true);
+    setSharedError(null);
+    setSharedStatusText(sharedScript ? 'Actualizando obra compartida...' : 'Publicando obra compartida...');
+
+    try {
+      const response = await publishSharedScript({
+        shareId: sharedScript?.shareId ?? null,
+        fileName: currentScriptFileName ?? scriptData.obra,
+        scriptData,
+        mergeMap,
+        songs: sharedScript?.songs?.length ? sharedScript.songs : buildSongPlaceholders(scriptData.guion),
+      });
+
+      setSharedScript(response.manifest);
+      setSharedStatusText('Obra compartida lista para enviar.');
+      setIsHydratingSharedMergeMap(false);
+      replaceSharedScriptIdInUrl(response.manifest.shareId);
+      await copySharedScriptUrl(response.manifest.shareId);
+    } catch (publishError) {
+      const message = publishError instanceof Error ? publishError.message : 'No se pudo publicar la obra.';
+      setSharedError(`Error compartiendo: ${message}`);
+      setSharedStatusText('');
+    } finally {
+      setIsSharingScript(false);
+    }
+  }, [currentScriptFileName, mergeMap, scriptData, sharedScript]);
 
   const handleMergeCharacters = () => {
     if (!mergeSource || !mergeTarget) {
@@ -329,7 +453,12 @@ export const HomeScreen = () => {
     setMergeTarget(null);
   };
 
-  const handleOpenSavedScript = (savedScript: SavedScript) => {
+  const handleOpenSavedScript = async (savedScript: SavedScript) => {
+    if (savedScript.config.sharedScriptId) {
+      await loadRemoteSharedScript(savedScript.config.sharedScriptId);
+      return;
+    }
+
     setCurrentScriptFileName(savedScript.fileName);
     setMyRoles(savedScript.config.myRoles);
     setSelectedScenes(savedScript.config.selectedScenes);
@@ -345,8 +474,47 @@ export const HomeScreen = () => {
     setIsScenePanelVisible(false);
     setIsMergePanelVisible(false);
     setPendingResumeMode(null);
+    setSharedScript(null);
+    setSharedStatusText('');
+    setSharedError(null);
+    replaceSharedScriptIdInUrl(null);
     loadSavedScript(savedScript.data);
   };
+
+  useEffect(() => {
+    if (scriptData || loading || isLoadingSharedScript || isSharingScript) {
+      return;
+    }
+
+    const shareId = getSharedScriptIdFromUrl();
+    if (!shareId) {
+      return;
+    }
+
+    void loadRemoteSharedScript(shareId);
+  }, [isLoadingSharedScript, isSharingScript, loadRemoteSharedScript, loading, scriptData]);
+
+  useEffect(() => {
+    if (!sharedScript || !isHydratingSharedMergeMap) {
+      return;
+    }
+
+    if (areMergeMapsEqual(sharedScript.mergeMap, mergeMap)) {
+      setIsHydratingSharedMergeMap(false);
+    }
+  }, [isHydratingSharedMergeMap, mergeMap, sharedScript]);
+
+  useEffect(() => {
+    if (!sharedScript || !scriptData || !areRoleMergesReady || isSharingScript || isHydratingSharedMergeMap) {
+      return;
+    }
+
+    if (areMergeMapsEqual(sharedScript.mergeMap, mergeMap)) {
+      return;
+    }
+
+    void handlePublishSharedScript();
+  }, [areRoleMergesReady, handlePublishSharedScript, isHydratingSharedMergeMap, isSharingScript, mergeMap, scriptData, sharedScript]);
 
   const handleRehearsalProgressChange = useCallback(
     (lineIndex: number, totalLines: number) => {
@@ -464,13 +632,13 @@ export const HomeScreen = () => {
           <Text style={styles.title}>AI-Theatre</Text>
         </View>
 
-        {error && (
+        {effectiveError && (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
+            <Text style={styles.errorText}>{effectiveError}</Text>
           </View>
         )}
 
-        {pendingJob && !loading && !scriptData && (
+        {pendingJob && !effectiveLoading && !scriptData && (
           <View style={styles.resumeBox}>
             <Text style={styles.resumeTitle}>Guion incompleto detectado</Text>
             <TouchableOpacity style={styles.btnResume} onPress={() => void resumePendingJob()}>
@@ -484,10 +652,10 @@ export const HomeScreen = () => {
           </View>
         )}
 
-        {loading || displayScriptData ? (
+        {effectiveLoading || displayScriptData ? (
           <View style={styles.section}>
             <View style={styles.scriptTitlePanel}>
-              {loading && <Text style={styles.status}>{progressText}</Text>}
+              {effectiveLoading && progressText ? <Text style={styles.status}>{progressText}</Text> : null}
               <Text style={styles.obraTitle}>
                 {displayScriptData?.obra ?? currentScriptFileName ?? 'Analizando guion...'}
               </Text>
@@ -509,6 +677,46 @@ export const HomeScreen = () => {
                 {lastRehearsalLabel ? (
                   <Text style={styles.summaryText}>Ultimo modo usado: {lastRehearsalLabel}</Text>
                 ) : null}
+              </View>
+            )}
+
+            {!!displayScriptData && (
+              <View style={styles.shareCard}>
+                <Text style={styles.shareTitle}>
+                  {sharedScript ? 'Obra compartida activa' : 'Compartir esta obra'}
+                </Text>
+                <Text style={styles.shareText}>
+                  {sharedScript
+                    ? 'Esta obra ya tiene un enlace compartido. Las fusiones se sincronizan entre quienes abran ese enlace.'
+                    : 'Crea un enlace compartido para que otras personas carguen este mismo guion con las fusiones ya hechas.'}
+                </Text>
+                {sharedScript ? (
+                  <Text style={styles.shareLink}>{buildSharedScriptUrl(sharedScript.shareId)}</Text>
+                ) : null}
+                <View style={styles.shareActions}>
+                  <TouchableOpacity
+                    style={[styles.shareButton, sharedScript ? styles.shareButtonSecondary : styles.shareButtonPrimary]}
+                    onPress={() => void handlePublishSharedScript()}
+                    disabled={isSharingScript}
+                  >
+                    <Text
+                      style={[
+                        styles.shareButtonText,
+                        sharedScript ? styles.shareButtonSecondaryText : styles.shareButtonPrimaryText,
+                      ]}
+                    >
+                      {sharedScript ? 'Actualizar enlace' : 'Compartir obra'}
+                    </Text>
+                  </TouchableOpacity>
+                  {sharedScript ? (
+                    <TouchableOpacity
+                      style={[styles.shareButton, styles.shareButtonSecondary]}
+                      onPress={() => void copySharedScriptUrl(sharedScript.shareId)}
+                    >
+                      <Text style={[styles.shareButtonText, styles.shareButtonSecondaryText]}>Copiar enlace</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
               </View>
             )}
 
@@ -646,7 +854,9 @@ export const HomeScreen = () => {
                     <View style={styles.mergePanel}>
                       <Text style={styles.mergeTitle}>Fusionar personajes duplicados</Text>
                       <Text style={styles.mergeHint}>
-                        Une alias o variantes del mismo personaje. Se guardara solo para esta obra.
+                        {sharedScript
+                          ? 'Une alias o variantes del mismo personaje. Esta fusion se compartira con quien abra este enlace.'
+                          : 'Une alias o variantes del mismo personaje. Se guardara solo para esta obra.'}
                       </Text>
 
                       {!areRoleMergesReady ? (
@@ -730,7 +940,7 @@ export const HomeScreen = () => {
               )}
             </View>
 
-            {!loading && (
+            {!effectiveLoading && (
               <TouchableOpacity onPress={handleResetScript} style={styles.btnBack}>
                 <Text style={styles.btnBackText}>Cambiar guion</Text>
               </TouchableOpacity>
@@ -742,13 +952,14 @@ export const HomeScreen = () => {
               <TouchableOpacity
                 style={styles.btnMain}
                 onPress={async () => {
-                  const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
-                  if (!result.canceled) {
-                    resetSelectionState();
-                    setCurrentScriptFileName(result.assets[0].name ?? null);
-                    await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
-                  }
-                }}
+                const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
+                if (!result.canceled) {
+                  resetSelectionState();
+                  replaceSharedScriptIdInUrl(null);
+                  setCurrentScriptFileName(result.assets[0].name ?? null);
+                  await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
+                }
+              }}
               >
                 <Text style={styles.btnText}>Cargar PDF</Text>
               </TouchableOpacity>
@@ -774,12 +985,15 @@ export const HomeScreen = () => {
                             ? `${savedScript.config.myRoles.length} personaje${savedScript.config.myRoles.length === 1 ? '' : 's'} seleccionado${savedScript.config.myRoles.length === 1 ? '' : 's'}`
                             : 'Sin personaje elegido todavia'}
                         </Text>
+                        {savedScript.config.sharedScriptId ? (
+                          <Text style={styles.libraryCardMeta}>Obra compartida disponible</Text>
+                        ) : null}
                       </View>
 
                       <View style={styles.libraryActions}>
                         <TouchableOpacity
                           style={[styles.libraryButton, styles.libraryOpenButton]}
-                          onPress={() => handleOpenSavedScript(savedScript)}
+                          onPress={() => void handleOpenSavedScript(savedScript)}
                         >
                           <Text style={styles.libraryButtonText}>Abrir</Text>
                         </TouchableOpacity>
@@ -888,6 +1102,49 @@ const styles = StyleSheet.create({
   },
   summaryTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 10, color: '#1d2733' },
   summaryText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
+  shareCard: {
+    marginBottom: 20,
+    padding: 18,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderWidth: 1,
+    borderColor: 'rgba(220, 231, 245, 0.92)',
+    gap: 12,
+  },
+  shareTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', color: '#17324c' },
+  shareText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
+  shareLink: {
+    textAlign: 'center',
+    color: '#184e77',
+    fontSize: 12,
+    lineHeight: 18,
+    paddingHorizontal: 8,
+  },
+  shareActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  shareButton: {
+    minWidth: 180,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  shareButtonPrimary: {
+    backgroundColor: 'rgba(24, 78, 119, 0.88)',
+    borderColor: 'rgba(24, 78, 119, 0.88)',
+  },
+  shareButtonSecondary: {
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderColor: 'rgba(199, 214, 232, 0.94)',
+  },
+  shareButtonText: { fontWeight: '700' },
+  shareButtonPrimaryText: { color: '#fff' },
+  shareButtonSecondaryText: { color: '#184e77' },
   actionStack: { gap: 14 },
   roleWrapper: { gap: 10 },
   roleToggleButton: { backgroundColor: 'rgba(24, 78, 119, 0.82)' },

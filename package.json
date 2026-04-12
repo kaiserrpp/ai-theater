@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.04.057",
+  "version": "2026.04.058",
   "scripts": {
     "version:bump": "node increment-version.js",
     "start": "expo start",
@@ -18,6 +18,7 @@
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
+    "@vercel/blob": "^2.3.3",
     "expo": "~54.0.33",
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",

@@ -32,6 +32,7 @@ export interface SavedScriptConfig {
   selectedScenes: string[];
   lastRehearsalMode: RehearsalMode | null;
   rehearsalCheckpoints: RehearsalCheckpointMap;
+  sharedScriptId: string | null;
 }
 
 export interface SceneExtractionResult {

@@ -13,7 +13,16 @@ import {
 
 const buildStorageKey = (scriptId: string) => `${SCRIPT_ROLE_MERGES_STORAGE_PREFIX}${scriptId}`;
 
-export const useScriptRoleMerges = (scriptData: ScriptData | null) => {
+interface UseScriptRoleMergesOptions {
+  mode?: 'local' | 'managed';
+  initialMergeMap?: CharacterMergeMap;
+}
+
+export const useScriptRoleMerges = (
+  scriptData: ScriptData | null,
+  options?: UseScriptRoleMergesOptions
+) => {
+  const mode = options?.mode ?? 'local';
   const scriptId = useMemo(() => (scriptData ? getScriptIdentity(scriptData) : ''), [scriptData]);
   const [mergeMap, setMergeMap] = useState<CharacterMergeMap>({});
   const [isReady, setIsReady] = useState(false);
@@ -22,6 +31,12 @@ export const useScriptRoleMerges = (scriptData: ScriptData | null) => {
     let isCancelled = false;
 
     const loadMergeMap = async () => {
+      if (mode === 'managed') {
+        setMergeMap(options?.initialMergeMap ?? {});
+        setIsReady(true);
+        return;
+      }
+
       if (!scriptData || !scriptId) {
         setMergeMap({});
         setIsReady(true);
@@ -54,15 +69,15 @@ export const useScriptRoleMerges = (scriptData: ScriptData | null) => {
     return () => {
       isCancelled = true;
     };
-  }, [scriptData, scriptId]);
+  }, [mode, options?.initialMergeMap, scriptData, scriptId]);
 
   useEffect(() => {
-    if (!scriptId || !isReady) {
+    if (mode !== 'local' || !scriptId || !isReady) {
       return;
     }
 
     void AsyncStorage.setItem(buildStorageKey(scriptId), JSON.stringify(mergeMap));
-  }, [isReady, mergeMap, scriptId]);
+  }, [isReady, mergeMap, mode, scriptId]);
 
   const mergedScriptData = useMemo(
     () => (scriptData ? applyCharacterMerges(scriptData, mergeMap) : null),
