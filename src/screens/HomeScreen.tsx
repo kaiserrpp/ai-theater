@@ -141,6 +141,7 @@ export const HomeScreen = () => {
   const [isLoadingSharedScript, setIsLoadingSharedScript] = useState(false);
   const [isHydratingSharedMergeMap, setIsHydratingSharedMergeMap] = useState(false);
   const [sharedScriptsCatalog, setSharedScriptsCatalog] = useState<SharedScriptListItem[]>([]);
+  const [selectedSharedScriptId, setSelectedSharedScriptId] = useState<string | null>(null);
   const [isLoadingSharedScriptsCatalog, setIsLoadingSharedScriptsCatalog] = useState(false);
   const [sharedScriptsCatalogError, setSharedScriptsCatalogError] = useState<string | null>(null);
 
@@ -177,6 +178,28 @@ export const HomeScreen = () => {
 
     return sharedStatusText;
   }, [currentChunkIndex, effectiveLoading, loading, sharedStatusText, statusText, totalChunks]);
+
+  const selectedSharedScriptSummary = useMemo(() => {
+    if (sharedScriptsCatalog.length === 0) {
+      return null;
+    }
+
+    if (selectedSharedScriptId) {
+      const matchingScript = sharedScriptsCatalog.find((script) => script.shareId === selectedSharedScriptId);
+      if (matchingScript) {
+        return matchingScript;
+      }
+    }
+
+    if (sharedScript) {
+      const activeScript = sharedScriptsCatalog.find((script) => script.shareId === sharedScript.shareId);
+      if (activeScript) {
+        return activeScript;
+      }
+    }
+
+    return sharedScriptsCatalog[0];
+  }, [selectedSharedScriptId, sharedScript, sharedScriptsCatalog]);
 
   const currentSceneTitles = useMemo(
     () => (displayScriptData ? getSceneTitles(displayScriptData.guion) : []),
@@ -437,6 +460,7 @@ export const HomeScreen = () => {
       setIsHydratingSharedMergeMap(true);
       setCurrentScriptFileName(manifest.fileName);
       setSharedScript(manifest);
+      setSelectedSharedScriptId(manifest.shareId);
       setSharedStatusText('');
       setSharedError(null);
       replaceSharedScriptIdInUrl(manifest.shareId);
@@ -469,6 +493,7 @@ export const HomeScreen = () => {
       });
 
       setSharedScript(response.manifest);
+      setSelectedSharedScriptId(response.manifest.shareId);
       setSharedScriptsCatalog((previousScripts) =>
         upsertSharedScriptSummary(previousScripts, buildSharedScriptSummaryFromManifest(response.manifest))
       );
@@ -530,6 +555,17 @@ export const HomeScreen = () => {
     try {
       const scripts = await fetchSharedScriptList();
       setSharedScriptsCatalog(scripts);
+      setSelectedSharedScriptId((previousSelectedId) => {
+        if (previousSelectedId && scripts.some((script) => script.shareId === previousSelectedId)) {
+          return previousSelectedId;
+        }
+
+        if (sharedScript && scripts.some((script) => script.shareId === sharedScript.shareId)) {
+          return sharedScript.shareId;
+        }
+
+        return scripts[0]?.shareId ?? null;
+      });
     } catch (catalogError) {
       const message =
         catalogError instanceof Error
@@ -539,7 +575,7 @@ export const HomeScreen = () => {
     } finally {
       setIsLoadingSharedScriptsCatalog(false);
     }
-  }, []);
+  }, [sharedScript]);
 
   useEffect(() => {
     void refreshSharedScriptsCatalog();
@@ -1111,49 +1147,80 @@ export const HomeScreen = () => {
 
               {sharedScriptsCatalog.length > 0 ? (
                 <View style={styles.libraryList}>
-                  {sharedScriptsCatalog.map((sharedCatalogItem) => (
-                    <View key={sharedCatalogItem.shareId} style={styles.sharedScriptCard}>
-                      <View style={styles.libraryCardBody}>
-                        <View style={styles.sharedScriptTitleRow}>
-                          <Text style={styles.libraryCardTitle}>{sharedCatalogItem.obra}</Text>
-                          {sharedScript?.shareId === sharedCatalogItem.shareId ? (
-                            <View style={styles.sharedActiveBadge}>
-                              <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
-                            </View>
-                          ) : null}
-                        </View>
-                        <Text style={styles.libraryCardMeta}>{sharedCatalogItem.fileName}</Text>
-                        <Text style={styles.libraryCardMeta}>
-                          {sharedCatalogItem.mergeCount > 0
-                            ? `${sharedCatalogItem.mergeCount} fusion${sharedCatalogItem.mergeCount === 1 ? '' : 'es'} compartida${sharedCatalogItem.mergeCount === 1 ? '' : 's'}`
-                            : 'Sin fusiones compartidas todavia'}
-                        </Text>
-                        <Text style={styles.libraryCardMeta}>
-                          {sharedCatalogItem.songCount > 0
-                            ? `${sharedCatalogItem.songCount} bloque${sharedCatalogItem.songCount === 1 ? '' : 's'} de cancion preparado${sharedCatalogItem.songCount === 1 ? '' : 's'}`
-                            : 'Sin bloques de cancion registrados'}
-                        </Text>
-                        <Text style={styles.libraryCardMeta}>
-                          {formatSharedScriptTimestamp(sharedCatalogItem.updatedAt)}
-                        </Text>
-                      </View>
+                  {sharedScriptsCatalog.map((sharedCatalogItem) => {
+                    const isSelected = selectedSharedScriptSummary?.shareId === sharedCatalogItem.shareId;
 
-                      <View style={styles.libraryActions}>
-                        <TouchableOpacity
-                          style={[styles.libraryButton, styles.libraryOpenButton]}
-                          onPress={() => void loadRemoteSharedScript(sharedCatalogItem.shareId)}
-                        >
-                          <Text style={styles.libraryButtonText}>Abrir</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.libraryButton, styles.sharedCopyButton]}
-                          onPress={() => void copySharedScriptUrl(sharedCatalogItem.shareId)}
-                        >
-                          <Text style={styles.sharedCopyButtonText}>Copiar enlace</Text>
-                        </TouchableOpacity>
-                      </View>
+                    return (
+                      <TouchableOpacity
+                        key={sharedCatalogItem.shareId}
+                        style={[styles.sharedScriptListItem, isSelected && styles.sharedScriptListItemSelected]}
+                        onPress={() => setSelectedSharedScriptId(sharedCatalogItem.shareId)}
+                      >
+                        <View style={styles.sharedScriptListText}>
+                          <Text
+                            style={[
+                              styles.sharedScriptListTitle,
+                              isSelected && styles.sharedScriptListTitleSelected,
+                            ]}
+                          >
+                            {sharedCatalogItem.obra}
+                          </Text>
+                          <Text style={styles.sharedScriptListDate}>
+                            {formatSharedScriptTimestamp(sharedCatalogItem.updatedAt)}
+                          </Text>
+                        </View>
+                        {sharedScript?.shareId === sharedCatalogItem.shareId ? (
+                          <View style={styles.sharedActiveBadge}>
+                            <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
+                          </View>
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              {selectedSharedScriptSummary ? (
+                <View style={styles.sharedScriptCard}>
+                  <View style={styles.libraryCardBody}>
+                    <View style={styles.sharedScriptTitleRow}>
+                      <Text style={styles.libraryCardTitle}>{selectedSharedScriptSummary.obra}</Text>
+                      {sharedScript?.shareId === selectedSharedScriptSummary.shareId ? (
+                        <View style={styles.sharedActiveBadge}>
+                          <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
+                        </View>
+                      ) : null}
                     </View>
-                  ))}
+                    <Text style={styles.libraryCardMeta}>{selectedSharedScriptSummary.fileName}</Text>
+                    <Text style={styles.libraryCardMeta}>
+                      {selectedSharedScriptSummary.mergeCount > 0
+                        ? `${selectedSharedScriptSummary.mergeCount} fusion${selectedSharedScriptSummary.mergeCount === 1 ? '' : 'es'} compartida${selectedSharedScriptSummary.mergeCount === 1 ? '' : 's'}`
+                        : 'Sin fusiones compartidas todavia'}
+                    </Text>
+                    <Text style={styles.libraryCardMeta}>
+                      {selectedSharedScriptSummary.songCount > 0
+                        ? `${selectedSharedScriptSummary.songCount} bloque${selectedSharedScriptSummary.songCount === 1 ? '' : 's'} de cancion preparado${selectedSharedScriptSummary.songCount === 1 ? '' : 's'}`
+                        : 'Sin bloques de cancion registrados'}
+                    </Text>
+                    <Text style={styles.libraryCardMeta}>
+                      {formatSharedScriptTimestamp(selectedSharedScriptSummary.updatedAt)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.libraryActions}>
+                    <TouchableOpacity
+                      style={[styles.libraryButton, styles.libraryOpenButton]}
+                      onPress={() => void loadRemoteSharedScript(selectedSharedScriptSummary.shareId)}
+                    >
+                      <Text style={styles.libraryButtonText}>Abrir</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.libraryButton, styles.sharedCopyButton]}
+                      onPress={() => void copySharedScriptUrl(selectedSharedScriptSummary.shareId)}
+                    >
+                      <Text style={styles.sharedCopyButtonText}>Copiar enlace</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ) : null}
             </View>
@@ -1517,6 +1584,38 @@ const styles = StyleSheet.create({
     borderColor: '#d7e6f5',
     padding: 16,
     gap: 14,
+  },
+  sharedScriptListItem: {
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: '#dbe6f2',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sharedScriptListItemSelected: {
+    backgroundColor: 'rgba(232, 243, 255, 0.96)',
+    borderColor: '#8eb8e2',
+  },
+  sharedScriptListText: {
+    flex: 1,
+    gap: 4,
+  },
+  sharedScriptListTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1d2733',
+  },
+  sharedScriptListTitleSelected: {
+    color: '#184e77',
+  },
+  sharedScriptListDate: {
+    color: '#5f6b7a',
+    lineHeight: 20,
   },
   libraryCardBody: { gap: 4 },
   sharedScriptTitleRow: {
