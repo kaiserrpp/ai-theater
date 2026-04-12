@@ -656,15 +656,6 @@ export const HomeScreen = () => {
     ? Math.min(pendingJob.index + 2, pendingJob.totalChunks.length)
     : null;
 
-  const lastRehearsalLabel =
-    lastRehearsalMode === 'ALL'
-      ? 'obra completa'
-      : lastRehearsalMode === 'MINE'
-        ? 'mis escenas'
-        : lastRehearsalMode === 'SELECTED'
-          ? 'escenas seleccionadas'
-        : null;
-
   const selectedRolesSummary =
     myRoles.length > 0 ? myRoles.join(', ') : 'Todavia no has elegido personaje';
 
@@ -757,54 +748,6 @@ export const HomeScreen = () => {
                 {displayScriptData?.obra ?? currentScriptFileName ?? 'Analizando guion...'}
               </Text>
             </View>
-
-            {!!displayScriptData && (
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Configuracion guardada para esta obra</Text>
-                <Text style={styles.summaryText}>
-                  {myRoles.length > 0
-                    ? `${myRoles.length} personaje${myRoles.length === 1 ? '' : 's'} seleccionado${myRoles.length === 1 ? '' : 's'}`
-                    : 'Todavia no has elegido personaje'}
-                </Text>
-                <Text style={styles.summaryText}>
-                  {selectedScenes.length > 0
-                    ? `${selectedScenes.length} escena${selectedScenes.length === 1 ? '' : 's'} recordada${selectedScenes.length === 1 ? '' : 's'}`
-                    : 'Aun no has guardado una seleccion de escenas'}
-                </Text>
-                {lastRehearsalLabel ? (
-                  <Text style={styles.summaryText}>Ultimo modo usado: {lastRehearsalLabel}</Text>
-                ) : null}
-              </View>
-            )}
-
-            {!!displayScriptData && (
-              <View style={styles.shareCard}>
-                <Text style={styles.shareTitle}>
-                  {sharedScript ? 'Obra compartida activa' : 'Compartir esta obra'}
-                </Text>
-                <Text style={styles.shareText}>
-                  {sharedScript
-                    ? 'Esta obra ya aparece en el listado de Obras compartidas. Las fusiones se sincronizan para quien la abra desde la app.'
-                    : 'Publica esta obra para que el resto del reparto la vea dentro de Obras compartidas, con las fusiones ya hechas.'}
-                </Text>
-                <View style={styles.shareActions}>
-                  <TouchableOpacity
-                    style={[styles.shareButton, sharedScript ? styles.shareButtonSecondary : styles.shareButtonPrimary]}
-                    onPress={() => void handlePublishSharedScript()}
-                    disabled={isSharingScript}
-                  >
-                    <Text
-                      style={[
-                        styles.shareButtonText,
-                        sharedScript ? styles.shareButtonSecondaryText : styles.shareButtonPrimaryText,
-                      ]}
-                    >
-                      {sharedScript ? 'Actualizar obra compartida' : 'Compartir obra'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
 
             <View style={styles.actionStack}>
               <View style={styles.roleWrapper}>
@@ -1025,6 +968,18 @@ export const HomeScreen = () => {
                 </View>
               )}
             </View>
+
+            {!!displayScriptData && !effectiveLoading ? (
+              <TouchableOpacity
+                style={[styles.compactShareButton, sharedScript && styles.compactShareButtonActive]}
+                onPress={() => void handlePublishSharedScript()}
+                disabled={isSharingScript}
+              >
+                <Text style={[styles.compactShareButtonText, sharedScript && styles.compactShareButtonTextActive]}>
+                  {sharedScript ? 'Actualizar obra compartida' : 'Compartir obra'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
 
             {!effectiveLoading && (
               <TouchableOpacity onPress={handleResetScript} style={styles.btnBack}>
@@ -1287,53 +1242,30 @@ const styles = StyleSheet.create({
   },
   status: { color: '#1e6091', textAlign: 'center', marginBottom: 8, fontWeight: 'bold' },
   obraTitle: { fontSize: 24, fontWeight: '800', textAlign: 'center', color: '#17324c' },
-  summaryCard: {
-    marginBottom: 20,
-    padding: 18,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.82)',
-    borderWidth: 1,
-    borderColor: 'rgba(214, 231, 255, 0.9)',
-  },
-  summaryTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 10, color: '#1d2733' },
-  summaryText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
-  shareCard: {
-    marginBottom: 20,
-    padding: 18,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.84)',
-    borderWidth: 1,
-    borderColor: 'rgba(220, 231, 245, 0.92)',
-    gap: 12,
-  },
-  shareTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', color: '#17324c' },
-  shareText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
-  shareActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  shareButton: {
-    minWidth: 180,
+  actionStack: { gap: 14 },
+  compactShareButton: {
+    marginTop: 18,
+    alignSelf: 'center',
+    minWidth: 220,
+    paddingHorizontal: 18,
     paddingVertical: 14,
-    paddingHorizontal: 14,
     borderRadius: 14,
     alignItems: 'center',
-    borderWidth: 1,
-  },
-  shareButtonPrimary: {
     backgroundColor: 'rgba(24, 78, 119, 0.88)',
-    borderColor: 'rgba(24, 78, 119, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(24, 78, 119, 0.95)',
   },
-  shareButtonSecondary: {
+  compactShareButtonActive: {
     backgroundColor: 'rgba(255,255,255,0.9)',
     borderColor: 'rgba(199, 214, 232, 0.94)',
   },
-  shareButtonText: { fontWeight: '700' },
-  shareButtonPrimaryText: { color: '#fff' },
-  shareButtonSecondaryText: { color: '#184e77' },
-  actionStack: { gap: 14 },
+  compactShareButtonText: {
+    fontWeight: '700',
+    color: '#fff',
+  },
+  compactShareButtonTextActive: {
+    color: '#184e77',
+  },
   roleWrapper: { gap: 10 },
   roleToggleButton: { backgroundColor: 'rgba(24, 78, 119, 0.82)' },
   sceneWrapper: { gap: 10 },
