@@ -3,8 +3,6 @@ import * as DocumentPicker from 'expo-document-picker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import {
-  buildSharedScriptUrl,
-  copySharedScriptUrl,
   fetchSharedScriptList,
   fetchSharedScript,
   getSharedScriptIdFromUrl,
@@ -500,7 +498,6 @@ export const HomeScreen = () => {
       setSharedStatusText('Obra compartida lista para enviar.');
       setIsHydratingSharedMergeMap(false);
       replaceSharedScriptIdInUrl(response.manifest.shareId);
-      await copySharedScriptUrl(response.manifest.shareId);
     } catch (publishError) {
       const message = publishError instanceof Error ? publishError.message : 'No se pudo publicar la obra.';
       setSharedError(`Error compartiendo: ${message}`);
@@ -787,12 +784,9 @@ export const HomeScreen = () => {
                 </Text>
                 <Text style={styles.shareText}>
                   {sharedScript
-                    ? 'Esta obra ya aparece en el listado de obras compartidas. Las fusiones se sincronizan para quien la abra desde la app o desde su enlace directo.'
+                    ? 'Esta obra ya aparece en el listado de Obras compartidas. Las fusiones se sincronizan para quien la abra desde la app.'
                     : 'Publica esta obra para que el resto del reparto la vea dentro de Obras compartidas, con las fusiones ya hechas.'}
                 </Text>
-                {sharedScript ? (
-                  <Text style={styles.shareLink}>{buildSharedScriptUrl(sharedScript.shareId)}</Text>
-                ) : null}
                 <View style={styles.shareActions}>
                   <TouchableOpacity
                     style={[styles.shareButton, sharedScript ? styles.shareButtonSecondary : styles.shareButtonPrimary]}
@@ -805,17 +799,9 @@ export const HomeScreen = () => {
                         sharedScript ? styles.shareButtonSecondaryText : styles.shareButtonPrimaryText,
                       ]}
                     >
-                      {sharedScript ? 'Actualizar enlace' : 'Compartir obra'}
+                      {sharedScript ? 'Actualizar obra compartida' : 'Compartir obra'}
                     </Text>
                   </TouchableOpacity>
-                  {sharedScript ? (
-                    <TouchableOpacity
-                      style={[styles.shareButton, styles.shareButtonSecondary]}
-                      onPress={() => void copySharedScriptUrl(sharedScript.shareId)}
-                    >
-                      <Text style={[styles.shareButtonText, styles.shareButtonSecondaryText]}>Copiar enlace</Text>
-                    </TouchableOpacity>
-                  ) : null}
                 </View>
               </View>
             )}
@@ -1214,12 +1200,6 @@ export const HomeScreen = () => {
                     >
                       <Text style={styles.libraryButtonText}>Abrir</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.libraryButton, styles.sharedCopyButton]}
-                      onPress={() => void copySharedScriptUrl(selectedSharedScriptSummary.shareId)}
-                    >
-                      <Text style={styles.sharedCopyButtonText}>Copiar enlace</Text>
-                    </TouchableOpacity>
                   </View>
                 </View>
               ) : null}
@@ -1328,13 +1308,6 @@ const styles = StyleSheet.create({
   },
   shareTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center', color: '#17324c' },
   shareText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
-  shareLink: {
-    textAlign: 'center',
-    color: '#184e77',
-    fontSize: 12,
-    lineHeight: 18,
-    paddingHorizontal: 8,
-  },
   shareActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1649,8 +1622,6 @@ const styles = StyleSheet.create({
   },
   libraryOpenButton: { backgroundColor: 'rgba(0, 122, 255, 0.82)', borderColor: 'rgba(0, 122, 255, 0.95)' },
   libraryDeleteButton: { backgroundColor: 'rgba(255, 245, 245, 0.86)', borderColor: '#f3c5c5' },
-  sharedCopyButton: { backgroundColor: 'rgba(255,255,255,0.92)', borderColor: '#d1deeb' },
   libraryButtonText: { color: '#fff', fontWeight: '700' },
   libraryDeleteText: { color: '#c62828', fontWeight: '700' },
-  sharedCopyButtonText: { color: '#184e77', fontWeight: '700' },
 });

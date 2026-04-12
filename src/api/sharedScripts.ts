@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import type {
   SharedScriptListItem,
   SharedScriptManifest,
@@ -14,20 +13,6 @@ const parseErrorMessage = async (response: Response) => {
   } catch {
     return `Error ${response.status}`;
   }
-};
-
-const getCurrentOrigin = () => {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-
-  return window.location.origin;
-};
-
-export const buildSharedScriptUrl = (shareId: string) => {
-  const origin = getCurrentOrigin();
-  const path = `/?share=${encodeURIComponent(shareId)}`;
-  return origin ? `${origin}${path}` : path;
 };
 
 export const getSharedScriptIdFromUrl = () => {
@@ -52,20 +37,6 @@ export const replaceSharedScriptIdInUrl = (shareId: string | null) => {
   }
 
   window.history.replaceState({}, '', nextUrl.toString());
-};
-
-export const copySharedScriptUrl = async (shareId: string) => {
-  const shareUrl = buildSharedScriptUrl(shareId);
-
-  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-    } catch {
-      return shareUrl;
-    }
-  }
-
-  return shareUrl;
 };
 
 export const fetchSharedScript = async (shareId: string) => {
