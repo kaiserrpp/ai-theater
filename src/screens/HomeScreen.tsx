@@ -443,7 +443,9 @@ export const HomeScreen = () => {
   return (
     <ScreenWrapper>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>AI-Theatre</Text>
+        <View style={styles.titlePanel}>
+          <Text style={styles.title}>AI-Theatre</Text>
+        </View>
 
         {error && (
           <View style={styles.errorBox}>
@@ -467,10 +469,12 @@ export const HomeScreen = () => {
 
         {loading || displayScriptData ? (
           <View style={styles.section}>
-            {loading && <Text style={styles.status}>{progressText}</Text>}
-            <Text style={styles.obraTitle}>
-              {displayScriptData?.obra ?? currentScriptFileName ?? 'Analizando guion...'}
-            </Text>
+            <View style={styles.scriptTitlePanel}>
+              {loading && <Text style={styles.status}>{progressText}</Text>}
+              <Text style={styles.obraTitle}>
+                {displayScriptData?.obra ?? currentScriptFileName ?? 'Analizando guion...'}
+              </Text>
+            </View>
 
             {!!displayScriptData && (
               <View style={styles.summaryCard}>
@@ -778,7 +782,30 @@ export const HomeScreen = () => {
 
 const styles = StyleSheet.create({
   container: { padding: 20, alignItems: 'center' },
-  title: { fontSize: 34, fontWeight: '800', marginBottom: 20, color: '#1b2530' },
+  titlePanel: {
+    alignSelf: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(240, 245, 250, 0.82)',
+    shadowColor: '#10263d',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  title: {
+    fontSize: 34,
+    fontWeight: '800',
+    color: '#17324c',
+    textAlign: 'center',
+    textShadowColor: 'rgba(255,255,255,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   errorBox: { backgroundColor: '#ffebee', padding: 15, borderRadius: 8, marginBottom: 20, width: '100%' },
   errorText: {
     color: '#c62828',
@@ -798,13 +825,35 @@ const styles = StyleSheet.create({
     borderColor: '#cde8d0',
   },
   resumeTitle: { fontWeight: 'bold', marginBottom: 10 },
-  btnResume: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 10, width: '100%', alignItems: 'center' },
+  btnResume: {
+    backgroundColor: 'rgba(76, 175, 80, 0.82)',
+    padding: 12,
+    borderRadius: 10,
+    width: '100%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+  },
   discardButton: { marginTop: 10 },
   discardText: { color: '#c62828', fontWeight: '600' },
   homeContent: { width: '100%', gap: 24 },
   section: { width: '100%' },
-  status: { color: '#007AFF', textAlign: 'center', marginBottom: 10, fontWeight: 'bold' },
-  obraTitle: { fontSize: 24, fontWeight: '800', textAlign: 'center', marginBottom: 20, color: '#1b2530' },
+  scriptTitlePanel: {
+    marginBottom: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(220, 233, 247, 0.9)',
+    shadowColor: '#17324c',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 2,
+  },
+  status: { color: '#1e6091', textAlign: 'center', marginBottom: 8, fontWeight: 'bold' },
+  obraTitle: { fontSize: 24, fontWeight: '800', textAlign: 'center', color: '#17324c' },
   summaryCard: {
     marginBottom: 20,
     padding: 18,
@@ -817,14 +866,19 @@ const styles = StyleSheet.create({
   summaryText: { textAlign: 'center', color: '#34506b', lineHeight: 20 },
   actionStack: { gap: 14 },
   roleWrapper: { gap: 10 },
-  roleToggleButton: { backgroundColor: '#184e77' },
+  roleToggleButton: { backgroundColor: 'rgba(24, 78, 119, 0.82)' },
   sceneWrapper: { gap: 10 },
-  sceneToggleButton: { backgroundColor: '#5b3f8c' },
+  sceneToggleButton: { backgroundColor: 'rgba(91, 63, 140, 0.82)' },
   selectionPreview: {
     textAlign: 'center',
-    color: '#3d5366',
+    color: '#27435d',
     lineHeight: 20,
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(222, 233, 244, 0.88)',
   },
   rolePanel: {
     padding: 16,
@@ -851,13 +905,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: '#ede7fb',
+    backgroundColor: 'rgba(237, 231, 251, 0.82)',
   },
   sceneActionText: { color: '#5b3f8c', fontWeight: '700' },
   label: { color: '#4f6274', marginBottom: 10, textAlign: 'center', fontWeight: '600' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 8 },
   mergeWrapper: { gap: 12 },
-  mergeToggleButton: { backgroundColor: '#7c4d2d' },
+  mergeToggleButton: { backgroundColor: 'rgba(124, 77, 45, 0.82)' },
   mergePanel: {
     padding: 16,
     borderRadius: 18,
@@ -869,7 +923,7 @@ const styles = StyleSheet.create({
   mergeHint: { color: '#6b5b49', textAlign: 'center', marginBottom: 16, lineHeight: 20 },
   mergeLoading: { textAlign: 'center', color: '#5f6b7a' },
   mergeStep: { fontWeight: '600', marginBottom: 10, textAlign: 'center', color: '#3b4147' },
-  mergeAction: { marginTop: 4, marginBottom: 8, backgroundColor: '#9c6644' },
+  mergeAction: { marginTop: 4, marginBottom: 8, backgroundColor: 'rgba(156, 102, 68, 0.84)' },
   mergeList: { gap: 10 },
   mergeChip: {
     backgroundColor: '#fff4e8',
@@ -893,11 +947,42 @@ const styles = StyleSheet.create({
   tagTextSelected: { color: '#1b5e20', fontWeight: '600' },
   menu: { gap: 12 },
   menuOption: { gap: 10 },
-  btnMenu: { backgroundColor: '#007AFF', padding: 18, borderRadius: 14, alignItems: 'center' },
-  btnSecondary: { backgroundColor: '#2b9348' },
-  btnTertiary: { backgroundColor: '#5b3f8c' },
-  btnMain: { backgroundColor: '#007AFF', padding: 20, borderRadius: 18, alignItems: 'center' },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  btnMenu: {
+    backgroundColor: 'rgba(0, 122, 255, 0.78)',
+    padding: 18,
+    borderRadius: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    shadowColor: '#0d1b2a',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  btnSecondary: { backgroundColor: 'rgba(43, 147, 72, 0.8)' },
+  btnTertiary: { backgroundColor: 'rgba(91, 63, 140, 0.8)' },
+  btnMain: {
+    backgroundColor: 'rgba(0, 122, 255, 0.8)',
+    padding: 20,
+    borderRadius: 18,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    shadowColor: '#0d1b2a',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  btnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+    textShadowColor: 'rgba(0,0,0,0.22)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   btnBack: { marginTop: 25, alignSelf: 'center' },
   btnBackText: { color: '#184e77', fontWeight: '700' },
   buttonDisabled: { opacity: 0.5 },
@@ -934,11 +1019,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   resumeChoicePrimary: {
-    backgroundColor: '#2b9348',
-    borderColor: '#2b9348',
+    backgroundColor: 'rgba(43, 147, 72, 0.84)',
+    borderColor: 'rgba(43, 147, 72, 0.95)',
   },
   resumeChoiceSecondary: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.82)',
     borderColor: '#c9d7cb',
   },
   resumeChoicePrimaryText: { color: '#fff', fontWeight: '700' },
@@ -973,8 +1058,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
   },
-  libraryOpenButton: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  libraryDeleteButton: { backgroundColor: '#fff5f5', borderColor: '#f3c5c5' },
+  libraryOpenButton: { backgroundColor: 'rgba(0, 122, 255, 0.82)', borderColor: 'rgba(0, 122, 255, 0.95)' },
+  libraryDeleteButton: { backgroundColor: 'rgba(255, 245, 245, 0.86)', borderColor: '#f3c5c5' },
   libraryButtonText: { color: '#fff', fontWeight: '700' },
   libraryDeleteText: { color: '#c62828', fontWeight: '700' },
 });
