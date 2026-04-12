@@ -35,12 +35,18 @@ export const RehearsalView: React.FC<Props> = ({
   );
   const isMyTurn = lineMatchesRoles(currentLine, myRoles);
   const isFinished = currentIndex >= filteredGuion.length;
+  const canGoBack = currentIndex > 0;
 
   const advanceLine = useCallback(() => {
     setCurrentIndex((previousIndex) =>
       previousIndex < filteredGuion.length ? previousIndex + 1 : previousIndex
     );
   }, [filteredGuion.length]);
+
+  const goBackLine = useCallback(() => {
+    Speech.stop();
+    setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
+  }, []);
 
   useEffect(() => {
     const safeInitialIndex = Math.max(0, Math.min(initialIndex, filteredGuion.length));
@@ -85,16 +91,30 @@ export const RehearsalView: React.FC<Props> = ({
     onExit();
   };
 
+  const renderHeader = (title: string) => (
+    <View style={styles.header}>
+      <View style={styles.headerActions}>
+        <TouchableOpacity onPress={handleExit}>
+          <Text style={styles.blue}>Cerrar ensayo</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={goBackLine} disabled={!canGoBack}>
+          <Text style={[styles.backLink, !canGoBack && styles.backLinkDisabled]}>{'<'} Linea anterior</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.sceneName}>{title}</Text>
+    </View>
+  );
+
   if (isSceneMarker(currentLine)) {
     return (
-      <View style={styles.intro}>
-        <Text style={styles.introTitle}>Escena: {currentLine.t}</Text>
-        <TouchableOpacity style={styles.btnNext} onPress={advanceLine}>
-          <Text style={styles.btnText}>Empezar esta escena</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={handleExit} style={styles.exitButton}>
-          <Text>Salir</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        {renderHeader('Cambio de escena')}
+        <View style={styles.intro}>
+          <Text style={styles.introTitle}>Escena: {currentLine.t}</Text>
+          <TouchableOpacity style={styles.btnNext} onPress={advanceLine}>
+            <Text style={styles.btnText}>Empezar esta escena</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -102,12 +122,7 @@ export const RehearsalView: React.FC<Props> = ({
   if (isSongCue(currentLine)) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleExit}>
-            <Text style={styles.blue}>Cerrar ensayo</Text>
-          </TouchableOpacity>
-          <Text style={styles.sceneName}>Cancion dentro de la escena</Text>
-        </View>
+        {renderHeader('Cancion dentro de la escena')}
 
         <ScrollView contentContainerStyle={styles.center}>
           <View style={styles.songBox}>
@@ -128,12 +143,7 @@ export const RehearsalView: React.FC<Props> = ({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleExit}>
-          <Text style={styles.blue}>Cerrar ensayo</Text>
-        </TouchableOpacity>
-        <Text style={styles.sceneName}>Ensayando {filterScenes.length} escenas</Text>
-      </View>
+      {renderHeader(`Ensayando ${filterScenes.length} escenas`)}
 
       <ScrollView contentContainerStyle={styles.center}>
         {isFinished ? (
@@ -173,12 +183,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  headerActions: {
+    gap: 8,
+  },
   blue: { color: '#007AFF', fontWeight: 'bold' },
+  backLink: { color: '#007AFF', fontWeight: '600' },
+  backLinkDisabled: { color: '#9fb9d3' },
   sceneName: { fontSize: 12, color: '#666' },
   center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
-  exitButton: { marginTop: 20 },
   finishedBox: { alignItems: 'center' },
   finishedTitle: { fontSize: 20, fontWeight: 'bold' },
   box: { padding: 30, borderRadius: 20, backgroundColor: '#f8f9fa', alignItems: 'center' },
