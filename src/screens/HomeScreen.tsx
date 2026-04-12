@@ -1,3 +1,4 @@
+import { Asset } from 'expo-asset';
 import * as DocumentPicker from 'expo-document-picker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -10,6 +11,8 @@ import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
 import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode } from '../types/script';
 import { normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
+
+const demoPdfModule = require('../../assets/demo/demo.pdf');
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   ALL: null,
@@ -301,6 +304,20 @@ export const HomeScreen = () => {
     setCurrentScriptFileName(null);
     resetScript();
   };
+
+  const handleLoadDemo = useCallback(async () => {
+    const demoAsset = Asset.fromModule(demoPdfModule);
+
+    if (!demoAsset.localUri) {
+      await demoAsset.downloadAsync();
+    }
+
+    const demoFileName = demoAsset.name ? `${demoAsset.name}.${demoAsset.type ?? 'pdf'}` : 'demo.pdf';
+
+    resetSelectionState();
+    setCurrentScriptFileName(demoFileName);
+    await analyzeInStages(demoAsset.localUri ?? demoAsset.uri, undefined, demoFileName);
+  }, [analyzeInStages]);
 
   const handleMergeCharacters = () => {
     if (!mergeSource || !mergeTarget) {
@@ -721,19 +738,25 @@ export const HomeScreen = () => {
           </View>
         ) : (
           <View style={styles.homeContent}>
-            <TouchableOpacity
-              style={styles.btnMain}
-              onPress={async () => {
-                const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
-                if (!result.canceled) {
-                  resetSelectionState();
-                  setCurrentScriptFileName(result.assets[0].name ?? null);
-                  await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
-                }
-              }}
-            >
-              <Text style={styles.btnText}>Cargar PDF</Text>
-            </TouchableOpacity>
+            <View style={styles.homeActions}>
+              <TouchableOpacity
+                style={styles.btnMain}
+                onPress={async () => {
+                  const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
+                  if (!result.canceled) {
+                    resetSelectionState();
+                    setCurrentScriptFileName(result.assets[0].name ?? null);
+                    await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
+                  }
+                }}
+              >
+                <Text style={styles.btnText}>Cargar PDF</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.btnMain, styles.btnDemo]} onPress={() => void handleLoadDemo()}>
+                <Text style={styles.btnText}>Cargar demo</Text>
+              </TouchableOpacity>
+            </View>
 
             {savedScripts.length > 0 ? (
               <View style={styles.librarySection}>
@@ -837,6 +860,7 @@ const styles = StyleSheet.create({
   discardButton: { marginTop: 10 },
   discardText: { color: '#c62828', fontWeight: '600' },
   homeContent: { width: '100%', gap: 24 },
+  homeActions: { gap: 12 },
   section: { width: '100%' },
   scriptTitlePanel: {
     marginBottom: 20,
@@ -975,6 +999,7 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 3,
   },
+  btnDemo: { backgroundColor: 'rgba(124, 77, 45, 0.82)' },
   btnText: {
     color: '#fff',
     fontWeight: 'bold',
