@@ -66,3 +66,24 @@ export interface SharedSongAudioRegistrationInput {
   contentType?: string | null;
   size?: number | null;
 }
+
+export interface SharedSongAudioUpdateInput {
+  shareId: string;
+  songId: string;
+  audioId: string;
+  password: string;
+  label: string;
+  kind: SharedSongAudioKind;
+  guideRoles: string[];
+  audioUrl?: string | null;
+  audioFileName?: string | null;
+  contentType?: string | null;
+  size?: number | null;
+}
+
+export interface SharedSongAudioDeleteInput {
+  shareId: string;
+  songId: string;
+  audioId: string;
+  password: string;
+}

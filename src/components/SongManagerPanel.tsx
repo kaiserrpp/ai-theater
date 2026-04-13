@@ -2,9 +2,15 @@ import * as DocumentPicker from 'expo-document-picker';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { uploadSharedSongAudio } from '../api/sharedSongUploads';
-import { registerSharedSongAudio, verifySongAdminPassword } from '../api/sharedScripts';
+import {
+  deleteSharedSongAudio,
+  registerSharedSongAudio,
+  updateSharedSongAudio,
+  verifySongAdminPassword,
+} from '../api/sharedScripts';
 import {
   SharedScriptManifest,
+  SharedSongAudioAsset,
   SharedSongAsset,
   SharedSongAudioKind,
 } from '../types/sharedScript';
@@ -58,6 +64,9 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [managerError, setManagerError] = useState<string | null>(null);
   const [isSongPickerVisible, setIsSongPickerVisible] = useState(false);
   const [isUploadFormVisible, setIsUploadFormVisible] = useState(false);
+  const [editingAudioId, setEditingAudioId] = useState<string | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [deletingAudioId, setDeletingAudioId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sharedScript?.songs.length) {
@@ -79,6 +88,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setUploadProgress(null);
     setManagerError(null);
     setIsUploadFormVisible(false);
+    setEditingAudioId(null);
   }, [selectedSongId]);
 
   const selectedSong = useMemo<SharedSongAsset | null>(() => {
@@ -88,6 +98,14 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     return sharedScript.songs.find((song) => song.id === selectedSongId) ?? null;
   }, [selectedSongId, sharedScript]);
+
+  const editingAudio = useMemo<SharedSongAudioAsset | null>(() => {
+    if (!selectedSong || !editingAudioId) {
+      return null;
+    }
+
+    return selectedSong.audios.find((audio) => audio.id === editingAudioId) ?? null;
+  }, [editingAudioId, selectedSong]);
 
   const totalAudioCount = useMemo(
     () => sharedScript?.songs.reduce((count, song) => count + song.audios.length, 0) ?? 0,
@@ -127,36 +145,66 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsSongPickerVisible(false);
   };
 
+  const resetAudioForm = () => {
+    setAudioLabel('');
+    setAudioKind(DEFAULT_UPLOAD_KIND);
+    setGuideRoles([]);
+    setUploadProgress(null);
+    setManagerError(null);
+    setIsUploadFormVisible(false);
+    setEditingAudioId(null);
+  };
+
+  const startEditingAudio = (audio: SharedSongAudioAsset) => {
+    setEditingAudioId(audio.id);
+    setAudioLabel(audio.label);
+    setAudioKind(audio.kind);
+    setGuideRoles(audio.guideRoles);
+    setUploadProgress(null);
+    setManagerError(null);
+    setIsUploadFormVisible(true);
+  };
+
+  const pickAndUploadAudioFile = async () => {
+    if (!sharedScript || !selectedSong) {
+      return null;
+    }
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['audio/*', 'audio/mp4', 'video/mp4'],
+      copyToCacheDirectory: false,
+    });
+
+    if (result.canceled) {
+      return null;
+    }
+
+    const file = await resolveAssetBlob(result.assets[0]);
+    setUploadProgress(0);
+
+    return uploadSharedSongAudio({
+      shareId: sharedScript.shareId,
+      songId: selectedSong.id,
+      file,
+      password: password.trim(),
+      onUploadProgress: (percentage) => setUploadProgress(Math.round(percentage)),
+    });
+  };
+
   const handleUploadAudio = async () => {
     if (!sharedScript || !selectedSong) {
       return;
     }
 
     setManagerError(null);
+    setIsUploading(true);
 
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['audio/*', 'audio/mp4', 'video/mp4'],
-        copyToCacheDirectory: false,
-      });
-
-      if (result.canceled) {
+      const uploadedAudio = await pickAndUploadAudioFile();
+      if (!uploadedAudio) {
         return;
       }
-
-      const file = await resolveAssetBlob(result.assets[0]);
       const nextLabel = audioLabel.trim() || buildDefaultAudioLabel(audioKind, guideRoles);
-
-      setIsUploading(true);
-      setUploadProgress(0);
-
-      const uploadedAudio = await uploadSharedSongAudio({
-        shareId: sharedScript.shareId,
-        songId: selectedSong.id,
-        file,
-        password: password.trim(),
-        onUploadProgress: (percentage) => setUploadProgress(Math.round(percentage)),
-      });
 
       const manifest = await registerSharedSongAudio({
         shareId: sharedScript.shareId,
@@ -172,15 +220,109 @@ export const SongManagerPanel: React.FC<Props> = ({
       });
 
       onManifestUpdated(manifest);
-      setAudioLabel('');
-      setAudioKind(DEFAULT_UPLOAD_KIND);
-      setGuideRoles([]);
-      setUploadProgress(null);
-      setIsUploadFormVisible(false);
+      resetAudioForm();
     } catch (error) {
       setManagerError(error instanceof Error ? error.message : 'No se pudo subir el audio.');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleSaveAudioEdits = async () => {
+    if (!sharedScript || !selectedSong || !editingAudio) {
+      return;
+    }
+
+    setIsSavingEdit(true);
+    setManagerError(null);
+
+    try {
+      const manifest = await updateSharedSongAudio({
+        shareId: sharedScript.shareId,
+        songId: selectedSong.id,
+        audioId: editingAudio.id,
+        password: password.trim(),
+        label: audioLabel.trim() || buildDefaultAudioLabel(audioKind, guideRoles),
+        kind: audioKind,
+        guideRoles,
+      });
+
+      onManifestUpdated(manifest);
+      resetAudioForm();
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudieron guardar los cambios del audio.'
+      );
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleReplaceAudio = async () => {
+    if (!sharedScript || !selectedSong || !editingAudio) {
+      return;
+    }
+
+    setIsSavingEdit(true);
+    setManagerError(null);
+
+    try {
+      const uploadedAudio = await pickAndUploadAudioFile();
+      if (!uploadedAudio) {
+        return;
+      }
+
+      const manifest = await updateSharedSongAudio({
+        shareId: sharedScript.shareId,
+        songId: selectedSong.id,
+        audioId: editingAudio.id,
+        password: password.trim(),
+        label: audioLabel.trim() || buildDefaultAudioLabel(audioKind, guideRoles),
+        kind: audioKind,
+        guideRoles,
+        audioUrl: uploadedAudio.url,
+        audioFileName: uploadedAudio.fileName,
+        contentType: uploadedAudio.contentType,
+        size: uploadedAudio.size,
+      });
+
+      onManifestUpdated(manifest);
+      resetAudioForm();
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudo reemplazar el audio.'
+      );
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeleteAudio = async (audioId: string) => {
+    if (!sharedScript || !selectedSong) {
+      return;
+    }
+
+    setDeletingAudioId(audioId);
+    setManagerError(null);
+
+    try {
+      const manifest = await deleteSharedSongAudio({
+        shareId: sharedScript.shareId,
+        songId: selectedSong.id,
+        audioId,
+        password: password.trim(),
+      });
+
+      onManifestUpdated(manifest);
+      if (editingAudioId === audioId) {
+        resetAudioForm();
+      }
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudo borrar el audio.'
+      );
+    } finally {
+      setDeletingAudioId(null);
     }
   };
 
@@ -313,6 +455,23 @@ export const SongManagerPanel: React.FC<Props> = ({
                               {audio.audioFileName ? (
                                 <Text style={styles.audioChipMeta}>{audio.audioFileName}</Text>
                               ) : null}
+                              <View style={styles.audioActions}>
+                                <TouchableOpacity
+                                  style={[styles.audioActionButton, styles.audioEditButton]}
+                                  onPress={() => startEditingAudio(audio)}
+                                >
+                                  <Text style={styles.audioActionText}>Editar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[styles.audioActionButton, styles.audioDeleteButton]}
+                                  onPress={() => void handleDeleteAudio(audio.id)}
+                                  disabled={deletingAudioId === audio.id}
+                                >
+                                  <Text style={styles.audioDeleteText}>
+                                    {deletingAudioId === audio.id ? 'Borrando...' : 'Borrar'}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
                           ))}
                         </View>
@@ -329,13 +488,17 @@ export const SongManagerPanel: React.FC<Props> = ({
                         <Text style={styles.secondaryActionText}>
                           {isUploadFormVisible
                             ? 'Ocultar menu de audio'
-                            : 'Anadir audio a esta cancion'}
+                            : editingAudio
+                              ? 'Seguir editando audio'
+                              : 'Anadir audio a esta cancion'}
                         </Text>
                       </TouchableOpacity>
 
                       {isUploadFormVisible ? (
                         <View style={styles.formSection}>
-                          <Text style={styles.sectionTitle}>Nuevo audio</Text>
+                          <Text style={styles.sectionTitle}>
+                            {editingAudio ? 'Editar audio' : 'Nuevo audio'}
+                          </Text>
                         <Text style={styles.formLabel}>Tipo de audio</Text>
                         <View style={styles.kindActions}>
                           {(['karaoke', 'vocal_guide'] as SharedSongAudioKind[]).map((kind) => (
@@ -388,15 +551,45 @@ export const SongManagerPanel: React.FC<Props> = ({
                         ) : null}
                         {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
 
-                        <TouchableOpacity
-                          style={[styles.primaryAction, isUploading && styles.buttonDisabled]}
-                          onPress={() => void handleUploadAudio()}
-                          disabled={isUploading}
-                        >
-                          <Text style={styles.primaryActionText}>
-                            {isUploading ? 'Subiendo audio...' : 'Seleccionar audio'}
-                          </Text>
-                        </TouchableOpacity>
+                        {editingAudio ? (
+                          <View style={styles.editActionStack}>
+                            <TouchableOpacity
+                              style={[styles.primaryAction, isSavingEdit && styles.buttonDisabled]}
+                              onPress={() => void handleSaveAudioEdits()}
+                              disabled={isSavingEdit}
+                            >
+                              <Text style={styles.primaryActionText}>
+                                {isSavingEdit ? 'Guardando...' : 'Guardar cambios'}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.secondaryAction, isSavingEdit && styles.buttonDisabled]}
+                              onPress={() => void handleReplaceAudio()}
+                              disabled={isSavingEdit}
+                            >
+                              <Text style={styles.secondaryActionText}>
+                                {isSavingEdit ? 'Actualizando audio...' : 'Reemplazar audio'}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.cancelLink}
+                              onPress={resetAudioForm}
+                              disabled={isSavingEdit}
+                            >
+                              <Text style={styles.cancelLinkText}>Cancelar edicion</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={[styles.primaryAction, isUploading && styles.buttonDisabled]}
+                            onPress={() => void handleUploadAudio()}
+                            disabled={isUploading}
+                          >
+                            <Text style={styles.primaryActionText}>
+                              {isUploading ? 'Subiendo audio...' : 'Seleccionar audio'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                         </View>
                       ) : null}
                     </View>
@@ -604,6 +797,34 @@ const styles = StyleSheet.create({
     color: '#6b5b49',
     lineHeight: 20,
   },
+  audioActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  audioActionButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  audioEditButton: {
+    backgroundColor: '#f5ede3',
+    borderColor: '#e4d1b3',
+  },
+  audioDeleteButton: {
+    backgroundColor: '#fff4f4',
+    borderColor: '#f0c8c8',
+  },
+  audioActionText: {
+    color: '#6f4c19',
+    fontWeight: '700',
+  },
+  audioDeleteText: {
+    color: '#b3261e',
+    fontWeight: '700',
+  },
   kindActions: {
     flexDirection: 'row',
     gap: 10,
@@ -652,6 +873,17 @@ const styles = StyleSheet.create({
   progressText: {
     textAlign: 'center',
     color: '#184e77',
+    fontWeight: '700',
+  },
+  editActionStack: {
+    gap: 10,
+  },
+  cancelLink: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  cancelLinkText: {
+    color: '#7a4d13',
     fontWeight: '700',
   },
   buttonDisabled: {

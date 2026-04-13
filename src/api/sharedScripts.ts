@@ -1,5 +1,7 @@
 import type {
+  SharedSongAudioDeleteInput,
   SharedSongAudioRegistrationInput,
+  SharedSongAudioUpdateInput,
   SharedScriptListItem,
   SharedScriptManifest,
   SharedScriptPublishInput,
@@ -110,6 +112,40 @@ export const verifySongAdminPassword = async (password: string) => {
 export const registerSharedSongAudio = async (input: SharedSongAudioRegistrationInput) => {
   const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const updateSharedSongAudio = async (input: SharedSongAudioUpdateInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const deleteSharedSongAudio = async (input: SharedSongAudioDeleteInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
+    method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
