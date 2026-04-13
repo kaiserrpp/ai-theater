@@ -1,13 +1,16 @@
 import * as Speech from 'expo-speech';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Dialogue } from '../types/script';
+import { SharedSongAsset } from '../types/sharedScript';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
+import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
 
 interface Props {
   guion: Dialogue[];
   myRoles: string[];
   filterScenes: string[];
+  sharedSongs?: SharedSongAsset[];
   initialIndex?: number;
   onProgressChange?: (lineIndex: number, totalLines: number) => void;
   onExit: () => void;
@@ -17,12 +20,16 @@ export const RehearsalView: React.FC<Props> = ({
   guion,
   myRoles,
   filterScenes,
+  sharedSongs = [],
   initialIndex = 0,
   onProgressChange,
   onExit,
 }) => {
   const filteredGuion = useMemo(() => filterScriptByScenes(guion, filterScenes), [filterScenes, guion]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const currentLine = filteredGuion[currentIndex];
   const speakableLineText = useMemo(
@@ -36,6 +43,10 @@ export const RehearsalView: React.FC<Props> = ({
   const isMyTurn = lineMatchesRoles(currentLine, myRoles);
   const isFinished = currentIndex >= filteredGuion.length;
   const canGoBack = currentIndex > 0;
+  const currentSongAsset = useMemo(
+    () => findSharedSongForLine(sharedSongs, guion, currentLine),
+    [currentLine, guion, sharedSongs]
+  );
 
   const advanceLine = useCallback(() => {
     setCurrentIndex((previousIndex) =>
@@ -43,10 +54,21 @@ export const RehearsalView: React.FC<Props> = ({
     );
   }, [filteredGuion.length]);
 
+  const stopSongAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+
+    setPlayingAudioId(null);
+  }, []);
+
   const goBackLine = useCallback(() => {
     Speech.stop();
+    stopSongAudio();
     setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
-  }, []);
+  }, [stopSongAudio]);
 
   useEffect(() => {
     const safeInitialIndex = Math.max(0, Math.min(initialIndex, filteredGuion.length));
@@ -59,10 +81,12 @@ export const RehearsalView: React.FC<Props> = ({
 
   useEffect(() => {
     Speech.stop();
+    stopSongAudio();
 
     if (isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine) || isMyTurn) {
       return () => {
         void Speech.stop();
+        stopSongAudio();
       };
     }
 
@@ -70,6 +94,7 @@ export const RehearsalView: React.FC<Props> = ({
       setTimeout(advanceLine, 200);
       return () => {
         void Speech.stop();
+        stopSongAudio();
       };
     }
 
@@ -83,13 +108,54 @@ export const RehearsalView: React.FC<Props> = ({
 
     return () => {
       void Speech.stop();
+      stopSongAudio();
     };
-  }, [advanceLine, currentLine, isFinished, isMyTurn, speakableLineText]);
+  }, [advanceLine, currentLine, isFinished, isMyTurn, speakableLineText, stopSongAudio]);
+
+  useEffect(() => () => {
+    stopSongAudio();
+  }, [stopSongAudio]);
 
   const handleExit = () => {
     Speech.stop();
+    stopSongAudio();
     onExit();
   };
+
+  const handlePlaySongAudio = useCallback((audioUrl: string, audioId: string) => {
+    if (typeof Audio === 'undefined') {
+      setAudioError('La reproduccion de audio solo esta disponible en la app web.');
+      return;
+    }
+
+    if (playingAudioId === audioId && audioRef.current) {
+      stopSongAudio();
+      return;
+    }
+
+    setAudioError(null);
+    stopSongAudio();
+
+    const nextAudio = new Audio(audioUrl);
+    nextAudio.onended = () => {
+      setPlayingAudioId(null);
+      audioRef.current = null;
+    };
+    nextAudio.onerror = () => {
+      setPlayingAudioId(null);
+      audioRef.current = null;
+      setAudioError('No se pudo reproducir este audio.');
+    };
+
+    audioRef.current = nextAudio;
+    setPlayingAudioId(audioId);
+
+    void nextAudio.play().catch(() => {
+      setPlayingAudioId(null);
+      audioRef.current = null;
+      setAudioError('No se pudo reproducir este audio.');
+    });
+  }, [playingAudioId, stopSongAudio]);
 
   const renderHeader = (title: string) => (
     <View style={styles.header}>
@@ -131,6 +197,37 @@ export const RehearsalView: React.FC<Props> = ({
             {currentLine.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
             <Text style={styles.songText}>{currentLine.t}</Text>
             <Text style={styles.songHint}>La voz se pausa aqui para que podais seguir la letra manualmente.</Text>
+
+            {currentSongAsset?.audios.length ? (
+              <View style={styles.songAudioList}>
+                <Text style={styles.songSectionTitle}>Audios disponibles</Text>
+                {currentSongAsset.audios.map((audio) => {
+                  const isPlaying = playingAudioId === audio.id;
+
+                  return (
+                    <View key={audio.id} style={styles.songAudioCard}>
+                      <View style={styles.songAudioText}>
+                        <Text style={styles.songAudioTitle}>{audio.label}</Text>
+                        <Text style={styles.songAudioMeta}>
+                          {formatSongAudioKind(audio.kind)}
+                          {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.songAudioButton, isPlaying && styles.songAudioButtonActive]}
+                        onPress={() => handlePlaySongAudio(audio.audioUrl, audio.id)}
+                      >
+                        <Text style={styles.songAudioButtonText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.songHint}>Todavia no hay audios cargados para esta cancion.</Text>
+            )}
+
+            {audioError ? <Text style={styles.songErrorText}>{audioError}</Text> : null}
           </View>
         </ScrollView>
 
@@ -232,6 +329,58 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#7a6332',
     fontSize: 14,
+  },
+  songSectionTitle: {
+    marginTop: 22,
+    marginBottom: 10,
+    textAlign: 'center',
+    color: '#5f3a00',
+    fontWeight: '800',
+  },
+  songAudioList: {
+    gap: 10,
+  },
+  songAudioCard: {
+    marginTop: 4,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderWidth: 1,
+    borderColor: '#f0ddb4',
+    gap: 12,
+  },
+  songAudioText: {
+    gap: 4,
+  },
+  songAudioTitle: {
+    fontWeight: '700',
+    color: '#5f3a00',
+    textAlign: 'center',
+  },
+  songAudioMeta: {
+    textAlign: 'center',
+    color: '#7a6332',
+    lineHeight: 20,
+  },
+  songAudioButton: {
+    alignSelf: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#5f3a00',
+  },
+  songAudioButtonActive: {
+    backgroundColor: '#9c2f24',
+  },
+  songAudioButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  songErrorText: {
+    marginTop: 12,
+    color: '#b3261e',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   myBox: { backgroundColor: '#fff0f0', borderWidth: 2, borderColor: 'red' },
   name: { fontSize: 22, fontWeight: '900', marginBottom: 10 },

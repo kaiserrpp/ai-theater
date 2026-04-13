@@ -61,10 +61,10 @@ module.exports = async (request, response) => {
       updatedAt: now,
     };
 
-    await writeManifest(manifest);
+    const normalizedManifest = await writeManifest(manifest);
 
     response.status(200).json({
-      manifest,
+      manifest: normalizedManifest,
       shareUrl: buildShareUrl(request, shareId),
     });
   } catch (error) {

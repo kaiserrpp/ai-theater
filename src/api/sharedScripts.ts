@@ -1,4 +1,5 @@
 import type {
+  SharedSongAudioRegistrationInput,
   SharedScriptListItem,
   SharedScriptManifest,
   SharedScriptPublishInput,
@@ -87,4 +88,38 @@ export const fetchSharedScriptList = async () => {
   }
 
   return (await response.json()) as SharedScriptListItem[];
+};
+
+export const verifySongAdminPassword = async (password: string) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-auth`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ password }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as { ok: true };
+};
+
+export const registerSharedSongAudio = async (input: SharedSongAudioRegistrationInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
 };

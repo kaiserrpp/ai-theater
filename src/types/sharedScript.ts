@@ -1,16 +1,32 @@
 import { ScriptData } from './script';
 import type { CharacterMergeMap } from '../utils/scriptRoleMerges';
 
+export type SharedSongAudioKind = 'karaoke' | 'vocal_guide';
+
+export interface SharedSongAudioAsset {
+  id: string;
+  label: string;
+  kind: SharedSongAudioKind;
+  guideRoles: string[];
+  audioUrl: string;
+  audioFileName: string | null;
+  contentType: string | null;
+  size: number | null;
+  updatedAt: string;
+}
+
 export interface SharedSongAsset {
   id: string;
   title: string;
-  audioUrl: string | null;
-  audioFileName?: string | null;
+  lineIndex: number;
+  sceneTitle: string | null;
+  lyrics: string;
+  audios: SharedSongAudioAsset[];
   updatedAt: string;
 }
 
 export interface SharedScriptManifest {
-  version: 1;
+  version: number;
   shareId: string;
   fileName: string;
   scriptData: ScriptData;
@@ -36,4 +52,17 @@ export interface SharedScriptPublishInput {
   scriptData: ScriptData;
   mergeMap: CharacterMergeMap;
   songs?: SharedSongAsset[];
+}
+
+export interface SharedSongAudioRegistrationInput {
+  shareId: string;
+  songId: string;
+  password: string;
+  label: string;
+  kind: SharedSongAudioKind;
+  guideRoles: string[];
+  audioUrl: string;
+  audioFileName?: string | null;
+  contentType?: string | null;
+  size?: number | null;
 }

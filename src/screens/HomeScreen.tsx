@@ -10,6 +10,7 @@ import {
 } from '../api/sharedScripts';
 import { RehearsalView } from '../components/RehearsalView';
 import { ScreenWrapper } from '../components/ScreenWrapper';
+import { SongManagerPanel } from '../components/SongManagerPanel';
 import { VersionBadge } from '../components/VersionBadge';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
@@ -17,7 +18,8 @@ import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
 import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScriptConfig } from '../types/script';
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
-import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles, isSongCue } from '../utils/scriptScenes';
+import { syncSharedSongsWithScript } from '../utils/sharedSongs';
+import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   ALL: null,
@@ -37,27 +39,6 @@ const areMergeMapsEqual = (leftMap: CharacterMergeMap, rightMap: CharacterMergeM
     const [rightKey, rightValue] = rightEntries[index];
     return leftKey === rightKey && leftValue === rightValue;
   });
-};
-
-const buildSongPlaceholders = (guion: SharedScriptManifest['scriptData']['guion']) => {
-  const occurrences = new Map<string, number>();
-
-  return guion
-    .filter((line) => isSongCue(line))
-    .map((line) => {
-      const title = line.songTitle || 'Cancion';
-      const currentCount = occurrences.get(title) ?? 0;
-      const nextCount = currentCount + 1;
-      occurrences.set(title, nextCount);
-
-      return {
-        id: `song-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'cue'}-${nextCount}`,
-        title,
-        audioUrl: null,
-        audioFileName: null,
-        updatedAt: new Date().toISOString(),
-      };
-    });
 };
 
 const buildSharedScriptSummaryFromManifest = (
@@ -430,6 +411,19 @@ export const HomeScreen = () => {
     resetScript();
   };
 
+  const handleSharedScriptManifestUpdate = useCallback((manifest: SharedScriptManifest) => {
+    const normalizedManifest = {
+      ...manifest,
+      songs: syncSharedSongsWithScript(manifest.scriptData.guion, manifest.songs),
+    };
+
+    setSharedScript(normalizedManifest);
+    setSelectedSharedScriptId(normalizedManifest.shareId);
+    setSharedScriptsCatalog((previousScripts) =>
+      upsertSharedScriptSummary(previousScripts, buildSharedScriptSummaryFromManifest(normalizedManifest))
+    );
+  }, []);
+
   const loadRemoteSharedScript = useCallback(async (
     shareId: string,
     savedConfig?: SavedScriptConfig | null
@@ -439,7 +433,11 @@ export const HomeScreen = () => {
     setSharedStatusText('Cargando obra compartida...');
 
     try {
-      const manifest = await fetchSharedScript(shareId);
+      const remoteManifest = await fetchSharedScript(shareId);
+      const manifest = {
+        ...remoteManifest,
+        songs: syncSharedSongsWithScript(remoteManifest.scriptData.guion, remoteManifest.songs),
+      };
 
       resetSelectionState();
       setIsHydratingSharedMergeMap(true);
@@ -480,17 +478,22 @@ export const HomeScreen = () => {
         fileName: currentScriptFileName ?? scriptData.obra,
         scriptData,
         mergeMap,
-        songs: sharedScript?.songs?.length ? sharedScript.songs : buildSongPlaceholders(scriptData.guion),
+        songs: syncSharedSongsWithScript(scriptData.guion, sharedScript?.songs),
       });
 
-      setSharedScript(response.manifest);
-      setSelectedSharedScriptId(response.manifest.shareId);
+      const manifest = {
+        ...response.manifest,
+        songs: syncSharedSongsWithScript(response.manifest.scriptData.guion, response.manifest.songs),
+      };
+
+      setSharedScript(manifest);
+      setSelectedSharedScriptId(manifest.shareId);
       setSharedScriptsCatalog((previousScripts) =>
-        upsertSharedScriptSummary(previousScripts, buildSharedScriptSummaryFromManifest(response.manifest))
+        upsertSharedScriptSummary(previousScripts, buildSharedScriptSummaryFromManifest(manifest))
       );
       setSharedStatusText('Obra compartida lista para enviar.');
       setIsHydratingSharedMergeMap(false);
-      replaceSharedScriptIdInUrl(response.manifest.shareId);
+      replaceSharedScriptIdInUrl(manifest.shareId);
     } catch (publishError) {
       const message = publishError instanceof Error ? publishError.message : 'No se pudo publicar la obra.';
       setSharedError(`Error compartiendo: ${message}`);
@@ -698,6 +701,7 @@ export const HomeScreen = () => {
           guion={displayScriptData.guion}
           myRoles={myRoles}
           filterScenes={activeRehearsalScenes}
+          sharedSongs={sharedScript?.songs ?? []}
           initialIndex={rehearsalStartIndex}
           onProgressChange={handleRehearsalProgressChange}
           onExit={() => setIsRehearsing(false)}
@@ -963,15 +967,23 @@ export const HomeScreen = () => {
             </View>
 
             {!!displayScriptData && !effectiveLoading ? (
-              <TouchableOpacity
-                style={[styles.compactShareButton, sharedScript && styles.compactShareButtonActive]}
-                onPress={() => void handlePublishSharedScript()}
-                disabled={isSharingScript}
-              >
-                <Text style={[styles.compactShareButtonText, sharedScript && styles.compactShareButtonTextActive]}>
-                  {sharedScript ? 'Actualizar obra compartida' : 'Compartir obra'}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.shareActions}>
+                <TouchableOpacity
+                  style={[styles.compactShareButton, sharedScript && styles.compactShareButtonActive]}
+                  onPress={() => void handlePublishSharedScript()}
+                  disabled={isSharingScript}
+                >
+                  <Text style={[styles.compactShareButtonText, sharedScript && styles.compactShareButtonTextActive]}>
+                    {sharedScript ? 'Actualizar obra compartida' : 'Compartir obra'}
+                  </Text>
+                </TouchableOpacity>
+
+                <SongManagerPanel
+                  sharedScript={sharedScript}
+                  availableRoles={displayScriptData.personajes}
+                  onManifestUpdated={handleSharedScriptManifestUpdate}
+                />
+              </View>
             ) : null}
 
             {!effectiveLoading && (
@@ -1260,6 +1272,7 @@ const styles = StyleSheet.create({
   status: { color: '#1e6091', textAlign: 'center', marginBottom: 8, fontWeight: 'bold' },
   obraTitle: { fontSize: 24, fontWeight: '800', textAlign: 'center', color: '#17324c' },
   actionStack: { gap: 14 },
+  shareActions: { gap: 10 },
   compactShareButton: {
     marginTop: 18,
     alignSelf: 'center',

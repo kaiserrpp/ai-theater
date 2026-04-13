@@ -1,7 +1,8 @@
 const { head, list, put } = require('@vercel/blob');
 
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2;
 const EMPTY_SONGS = [];
+const SONG_AUDIO_KINDS = new Set(['karaoke', 'vocal_guide']);
 
 const buildManifestPath = (shareId) => `shared-scripts/${shareId}/manifest.json`;
 
@@ -28,6 +29,56 @@ const normalizeMergeMap = (value) => {
   );
 };
 
+const normalizeGuideRoles = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(value.filter((role) => typeof role === 'string' && role.trim()))
+  );
+};
+
+const normalizeSongAudioKind = (value) =>
+  SONG_AUDIO_KINDS.has(value) ? value : 'karaoke';
+
+const normalizeSongAudio = (value, fallbackIndex = 0) => {
+  if (!isObject(value) || typeof value.audioUrl !== 'string' || !value.audioUrl.trim()) {
+    return null;
+  }
+
+  const kind = normalizeSongAudioKind(value.kind);
+
+  return {
+    id:
+      typeof value.id === 'string' && value.id.trim()
+        ? value.id.trim()
+        : `audio-${fallbackIndex + 1}`,
+    label:
+      typeof value.label === 'string' && value.label.trim()
+        ? value.label.trim()
+        : kind === 'vocal_guide'
+          ? 'Vocal guide'
+          : 'Karaoke',
+    kind,
+    guideRoles: normalizeGuideRoles(value.guideRoles),
+    audioUrl: value.audioUrl.trim(),
+    audioFileName:
+      typeof value.audioFileName === 'string' && value.audioFileName.trim()
+        ? value.audioFileName.trim()
+        : null,
+    contentType:
+      typeof value.contentType === 'string' && value.contentType.trim()
+        ? value.contentType.trim()
+        : null,
+    size: typeof value.size === 'number' ? value.size : null,
+    updatedAt:
+      typeof value.updatedAt === 'string' && value.updatedAt.trim()
+        ? value.updatedAt.trim()
+        : new Date().toISOString(),
+  };
+};
+
 const normalizeSongs = (value) => {
   if (!Array.isArray(value)) {
     return EMPTY_SONGS;
@@ -38,11 +89,75 @@ const normalizeSongs = (value) => {
     .map((song) => ({
       id: song.id,
       title: song.title,
-      audioUrl: typeof song.audioUrl === 'string' ? song.audioUrl : null,
-      audioFileName: typeof song.audioFileName === 'string' ? song.audioFileName : null,
+      lineIndex: typeof song.lineIndex === 'number' ? song.lineIndex : -1,
+      sceneTitle: typeof song.sceneTitle === 'string' ? song.sceneTitle : null,
+      lyrics: typeof song.lyrics === 'string' ? song.lyrics : '',
+      audios: Array.isArray(song.audios)
+        ? song.audios
+            .map((audio, index) => normalizeSongAudio(audio, index))
+            .filter(Boolean)
+        : (() => {
+            const legacyAudio = normalizeSongAudio(
+              {
+                id: 'audio-legacy',
+                label: typeof song.audioFileName === 'string' ? song.audioFileName : 'Audio',
+                kind: 'karaoke',
+                guideRoles: [],
+                audioUrl: song.audioUrl,
+                audioFileName: song.audioFileName,
+                updatedAt: song.updatedAt,
+              },
+              0
+            );
+
+            return legacyAudio ? [legacyAudio] : [];
+          })(),
       updatedAt: typeof song.updatedAt === 'string' ? song.updatedAt : new Date().toISOString(),
     }));
 };
+
+const normalizeManifest = (value) => ({
+  version: MANIFEST_VERSION,
+  shareId: typeof value?.shareId === 'string' ? value.shareId : createShareId(),
+  fileName:
+    typeof value?.fileName === 'string' && value.fileName.trim()
+      ? value.fileName.trim()
+      : isValidScriptData(value?.scriptData)
+        ? value.scriptData.obra
+        : 'Obra compartida',
+  scriptData: isValidScriptData(value?.scriptData)
+    ? value.scriptData
+    : { obra: 'Obra compartida', personajes: [], guion: [] },
+  mergeMap: normalizeMergeMap(value?.mergeMap),
+  songs: normalizeSongs(value?.songs),
+  createdAt:
+    typeof value?.createdAt === 'string' && value.createdAt.trim()
+      ? value.createdAt
+      : new Date().toISOString(),
+  updatedAt:
+    typeof value?.updatedAt === 'string' && value.updatedAt.trim()
+      ? value.updatedAt
+      : new Date().toISOString(),
+});
+
+const getSongAdminPasswordFromRequest = (request) => {
+  const headerValue = request.headers['x-song-admin-password'];
+  if (Array.isArray(headerValue)) {
+    return headerValue[0] ?? '';
+  }
+
+  if (typeof headerValue === 'string') {
+    return headerValue;
+  }
+
+  return '';
+};
+
+const hasSongAdminPasswordConfigured = () =>
+  typeof process.env.SONG_ADMIN_PASSWORD === 'string' && process.env.SONG_ADMIN_PASSWORD.length > 0;
+
+const isValidSongAdminPassword = (password) =>
+  hasSongAdminPasswordConfigured() && password === process.env.SONG_ADMIN_PASSWORD;
 
 const buildShareUrl = (request, shareId) => {
   const protocol = request.headers['x-forwarded-proto'] || 'https';
@@ -65,7 +180,8 @@ const readManifestFromUrl = async (url) => {
     throw new Error('No se pudo descargar la obra compartida.');
   }
 
-  return response.json();
+  const manifest = await response.json();
+  return normalizeManifest(manifest);
 };
 
 const readManifest = async (shareId) => {
@@ -74,12 +190,16 @@ const readManifest = async (shareId) => {
 };
 
 const writeManifest = async (manifest) => {
-  await put(buildManifestPath(manifest.shareId), JSON.stringify(manifest, null, 2), {
+  const normalizedManifest = normalizeManifest(manifest);
+
+  await put(buildManifestPath(normalizedManifest.shareId), JSON.stringify(normalizedManifest, null, 2), {
     access: 'public',
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: 'application/json; charset=utf-8',
   });
+
+  return normalizedManifest;
 };
 
 const buildManifestSummary = (manifest) => ({
@@ -123,8 +243,12 @@ module.exports = {
   MANIFEST_VERSION,
   buildShareUrl,
   createShareId,
+  getSongAdminPasswordFromRequest,
+  hasSongAdminPasswordConfigured,
   isValidScriptData,
+  isValidSongAdminPassword,
   listSharedScriptSummaries,
+  normalizeManifest,
   normalizeMergeMap,
   normalizeSongs,
   parseJsonBody,
