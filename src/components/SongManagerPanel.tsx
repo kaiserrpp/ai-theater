@@ -118,7 +118,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'audio/*',
+        type: ['audio/*', 'audio/mp4', 'video/mp4'],
         copyToCacheDirectory: false,
       });
 

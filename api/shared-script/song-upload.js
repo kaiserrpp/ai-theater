@@ -43,13 +43,12 @@ module.exports = async (request, response) => {
         }
 
         return {
-          allowedContentTypes: ['audio/*'],
+          allowedContentTypes: ['audio/*', 'video/mp4'],
           maximumSizeInBytes: 100 * 1024 * 1024,
           allowOverwrite: true,
           tokenPayload: JSON.stringify(metadata),
         };
       },
-      onUploadCompleted: async () => {},
     });
 
     response.status(200).json(result);
