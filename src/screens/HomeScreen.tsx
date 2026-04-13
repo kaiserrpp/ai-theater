@@ -15,7 +15,7 @@ import { VersionBadge } from '../components/VersionBadge';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
-import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode } from '../types/script';
+import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScriptConfig } from '../types/script';
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles, isSongCue } from '../utils/scriptScenes';
@@ -446,7 +446,10 @@ export const HomeScreen = () => {
     await analyzeInStages(demoAsset.localUri ?? demoAsset.uri, undefined, demoFileName);
   }, [analyzeInStages]);
 
-  const loadRemoteSharedScript = useCallback(async (shareId: string) => {
+  const loadRemoteSharedScript = useCallback(async (
+    shareId: string,
+    savedConfig?: SavedScriptConfig | null
+  ) => {
     setIsLoadingSharedScript(true);
     setSharedError(null);
     setSharedStatusText('Cargando obra compartida...');
@@ -462,6 +465,12 @@ export const HomeScreen = () => {
       setSharedStatusText('');
       setSharedError(null);
       replaceSharedScriptIdInUrl(manifest.shareId);
+      if (savedConfig) {
+        setMyRoles(savedConfig.myRoles);
+        setSelectedScenes(savedConfig.selectedScenes);
+        setLastRehearsalMode(savedConfig.lastRehearsalMode);
+        setRehearsalCheckpoints(savedConfig.rehearsalCheckpoints);
+      }
       loadSavedScript(manifest.scriptData);
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'No se pudo abrir la obra compartida.';
@@ -519,7 +528,7 @@ export const HomeScreen = () => {
 
   const handleOpenSavedScript = async (savedScript: SavedScript) => {
     if (savedScript.config.sharedScriptId) {
-      await loadRemoteSharedScript(savedScript.config.sharedScriptId);
+      await loadRemoteSharedScript(savedScript.config.sharedScriptId, savedScript.config);
       return;
     }
 
