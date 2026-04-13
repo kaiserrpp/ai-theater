@@ -195,8 +195,6 @@ export const RehearsalView: React.FC<Props> = ({
             <Text style={styles.songBadge}>Cancion</Text>
             <Text style={styles.songTitle}>{currentLine.songTitle || 'Cancion'}</Text>
             {currentLine.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
-            <Text style={styles.songText}>{currentLine.t}</Text>
-            <Text style={styles.songHint}>La voz se pausa aqui para que podais seguir la letra manualmente.</Text>
 
             {currentSongAsset?.audios.length ? (
               <View style={styles.songAudioList}>
@@ -228,6 +226,10 @@ export const RehearsalView: React.FC<Props> = ({
             )}
 
             {audioError ? <Text style={styles.songErrorText}>{audioError}</Text> : null}
+            <Text style={styles.songText}>{currentLine.t}</Text>
+            <Text style={styles.songHint}>
+              La voz se pausa aqui para que podais seguir la letra manualmente.
+            </Text>
           </View>
         </ScrollView>
 
@@ -331,7 +333,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   songSectionTitle: {
-    marginTop: 22,
+    marginTop: 0,
     marginBottom: 10,
     textAlign: 'center',
     color: '#5f3a00',

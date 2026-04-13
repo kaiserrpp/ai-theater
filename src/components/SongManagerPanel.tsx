@@ -54,6 +54,8 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [managerError, setManagerError] = useState<string | null>(null);
+  const [isSongPickerVisible, setIsSongPickerVisible] = useState(false);
+  const [isUploadFormVisible, setIsUploadFormVisible] = useState(false);
 
   useEffect(() => {
     if (!sharedScript?.songs.length) {
@@ -67,6 +69,15 @@ export const SongManagerPanel: React.FC<Props> = ({
         : sharedScript.songs[0].id
     );
   }, [sharedScript]);
+
+  useEffect(() => {
+    setAudioLabel('');
+    setAudioKind(DEFAULT_UPLOAD_KIND);
+    setGuideRoles([]);
+    setUploadProgress(null);
+    setManagerError(null);
+    setIsUploadFormVisible(false);
+  }, [selectedSongId]);
 
   const selectedSong = useMemo<SharedSongAsset | null>(() => {
     if (!sharedScript || !selectedSongId) {
@@ -107,6 +118,11 @@ export const SongManagerPanel: React.FC<Props> = ({
     } finally {
       setIsVerifyingPassword(false);
     }
+  };
+
+  const handleSelectSong = (songId: string) => {
+    setSelectedSongId(songId);
+    setIsSongPickerVisible(false);
   };
 
   const handleUploadAudio = async () => {
@@ -158,6 +174,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       setAudioKind(DEFAULT_UPLOAD_KIND);
       setGuideRoles([]);
       setUploadProgress(null);
+      setIsUploadFormVisible(false);
     } catch (error) {
       setManagerError(error instanceof Error ? error.message : 'No se pudo subir el audio.');
     } finally {
@@ -222,8 +239,31 @@ export const SongManagerPanel: React.FC<Props> = ({
               ) : (
                 <>
                   <Text style={styles.successText}>Sesion de gestion activa.</Text>
+                  <TouchableOpacity
+                    style={styles.secondaryAction}
+                    onPress={() => setIsSongPickerVisible((previousValue) => !previousValue)}
+                  >
+                    <Text style={styles.secondaryActionText}>
+                      {isSongPickerVisible
+                        ? 'Ocultar canciones'
+                        : selectedSong
+                          ? 'Cambiar cancion'
+                          : 'Seleccionar cancion'}
+                    </Text>
+                  </TouchableOpacity>
 
-                  <View style={styles.songList}>
+                  {selectedSong ? (
+                    <Text style={styles.selectionSummary}>
+                      Cancion seleccionada: {selectedSong.title}
+                    </Text>
+                  ) : (
+                    <Text style={styles.selectionSummary}>
+                      Elige una cancion para ver su detalle y cargar audios.
+                    </Text>
+                  )}
+
+                  {isSongPickerVisible ? (
+                    <View style={styles.songList}>
                     {sharedScript.songs.map((song) => {
                       const isSelected = selectedSong?.id === song.id;
 
@@ -231,7 +271,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                         <TouchableOpacity
                           key={song.id}
                           style={[styles.songRow, isSelected && styles.songRowSelected]}
-                          onPress={() => setSelectedSongId(song.id)}
+                          onPress={() => handleSelectSong(song.id)}
                         >
                           <View style={styles.songRowText}>
                             <Text style={[styles.songRowTitle, isSelected && styles.songRowTitleSelected]}>
@@ -245,16 +285,19 @@ export const SongManagerPanel: React.FC<Props> = ({
                         </TouchableOpacity>
                       );
                     })}
-                  </View>
+                    </View>
+                  ) : null}
 
                   {selectedSong ? (
                     <View style={styles.songDetailBox}>
                       <Text style={styles.songDetailTitle}>{selectedSong.title}</Text>
-                      <Text style={styles.songDetailMeta}>{selectedSong.sceneTitle || 'Sin escena asociada'}</Text>
-                      <Text style={styles.songLyrics}>{selectedSong.lyrics}</Text>
+                      <Text style={styles.songDetailMeta}>
+                        {selectedSong.sceneTitle || 'Sin escena asociada'}
+                      </Text>
 
                       {selectedSong.audios.length > 0 ? (
                         <View style={styles.audioList}>
+                          <Text style={styles.sectionTitle}>Audios cargados</Text>
                           {selectedSong.audios.map((audio) => (
                             <View key={audio.id} style={styles.audioChip}>
                               <Text style={styles.audioChipTitle}>{audio.label}</Text>
@@ -272,7 +315,22 @@ export const SongManagerPanel: React.FC<Props> = ({
                         <Text style={styles.infoText}>Todavia no hay audios para esta cancion.</Text>
                       )}
 
-                      <View style={styles.formSection}>
+                      <Text style={styles.songLyrics}>{selectedSong.lyrics}</Text>
+
+                      <TouchableOpacity
+                        style={styles.secondaryAction}
+                        onPress={() => setIsUploadFormVisible((previousValue) => !previousValue)}
+                      >
+                        <Text style={styles.secondaryActionText}>
+                          {isUploadFormVisible
+                            ? 'Ocultar menu de audio'
+                            : 'Anadir audio a esta cancion'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {isUploadFormVisible ? (
+                        <View style={styles.formSection}>
+                          <Text style={styles.sectionTitle}>Nuevo audio</Text>
                         <Text style={styles.formLabel}>Tipo de audio</Text>
                         <View style={styles.kindActions}>
                           {(['karaoke', 'vocal_guide'] as SharedSongAudioKind[]).map((kind) => (
@@ -334,7 +392,8 @@ export const SongManagerPanel: React.FC<Props> = ({
                             {isUploading ? 'Subiendo audio...' : 'Seleccionar audio'}
                           </Text>
                         </TouchableOpacity>
-                      </View>
+                        </View>
+                      ) : null}
                     </View>
                   ) : null}
                 </>
@@ -412,10 +471,19 @@ const styles = StyleSheet.create({
   },
   formSection: {
     gap: 12,
+    marginTop: 6,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#ecdcc5',
   },
   formLabel: {
     fontWeight: '700',
     color: '#432818',
+  },
+  sectionTitle: {
+    textAlign: 'center',
+    color: '#5f3a00',
+    fontWeight: '800',
   },
   primaryAction: {
     paddingHorizontal: 18,
@@ -427,6 +495,24 @@ const styles = StyleSheet.create({
   primaryActionText: {
     color: '#fff',
     fontWeight: '700',
+  },
+  secondaryAction: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: '#f5ede3',
+    borderWidth: 1,
+    borderColor: '#e4d1b3',
+  },
+  secondaryActionText: {
+    color: '#6f4c19',
+    fontWeight: '700',
+  },
+  selectionSummary: {
+    textAlign: 'center',
+    color: '#6b5b49',
+    lineHeight: 20,
   },
   infoText: {
     textAlign: 'center',
