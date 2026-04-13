@@ -1,4 +1,3 @@
-import { Asset } from 'expo-asset';
 import * as DocumentPicker from 'expo-document-picker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -19,8 +18,6 @@ import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScript
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles, isSongCue } from '../utils/scriptScenes';
-
-const demoPdfModule = require('../../assets/demo/demo.pdf');
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   ALL: null,
@@ -131,6 +128,8 @@ export const HomeScreen = () => {
   const [isRolePanelVisible, setIsRolePanelVisible] = useState(false);
   const [isScenePanelVisible, setIsScenePanelVisible] = useState(false);
   const [isMergePanelVisible, setIsMergePanelVisible] = useState(false);
+  const [isSavedScriptsPanelVisible, setIsSavedScriptsPanelVisible] = useState(false);
+  const [isSharedScriptsPanelVisible, setIsSharedScriptsPanelVisible] = useState(false);
   const [pendingResumeMode, setPendingResumeMode] = useState<RehearsalMode | null>(null);
   const [sharedScript, setSharedScript] = useState<SharedScriptManifest | null>(null);
   const [sharedStatusText, setSharedStatusText] = useState('');
@@ -430,21 +429,6 @@ export const HomeScreen = () => {
     replaceSharedScriptIdInUrl(null);
     resetScript();
   };
-
-  const handleLoadDemo = useCallback(async () => {
-    const demoAsset = Asset.fromModule(demoPdfModule);
-
-    if (!demoAsset.localUri) {
-      await demoAsset.downloadAsync();
-    }
-
-    const demoFileName = demoAsset.name ? `${demoAsset.name}.${demoAsset.type ?? 'pdf'}` : 'demo.pdf';
-
-    resetSelectionState();
-    replaceSharedScriptIdInUrl(null);
-    setCurrentScriptFileName(demoFileName);
-    await analyzeInStages(demoAsset.localUri ?? demoAsset.uri, undefined, demoFileName);
-  }, [analyzeInStages]);
 
   const loadRemoteSharedScript = useCallback(async (
     shareId: string,
@@ -998,175 +982,199 @@ export const HomeScreen = () => {
           </View>
         ) : (
           <View style={styles.homeContent}>
-            <View style={styles.homeActions}>
+            <View style={styles.sharedLibrarySection}>
               <TouchableOpacity
-                style={styles.btnMain}
-                onPress={async () => {
-                const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
-                if (!result.canceled) {
-                  resetSelectionState();
-                  replaceSharedScriptIdInUrl(null);
-                  setCurrentScriptFileName(result.assets[0].name ?? null);
-                  await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
-                }
-              }}
+                style={styles.collapsibleSectionHeader}
+                onPress={() => setIsSavedScriptsPanelVisible((previousValue) => !previousValue)}
               >
-                <Text style={styles.btnText}>Cargar PDF</Text>
+                <View>
+                  <Text style={styles.libraryTitle}>
+                    Obras en curso {savedScripts.length > 0 ? `(${savedScripts.length})` : ''}
+                  </Text>
+                  <Text style={styles.libraryHint}>
+                    {isSavedScriptsPanelVisible ? 'Ocultar obras en curso' : 'Mostrar obras en curso'}
+                  </Text>
+                </View>
+                <Text style={styles.collapsibleIndicator}>{isSavedScriptsPanelVisible ? '−' : '+'}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.btnMain, styles.btnDemo]} onPress={() => void handleLoadDemo()}>
-                <Text style={styles.btnText}>Cargar demo</Text>
-              </TouchableOpacity>
+              {isSavedScriptsPanelVisible ? (
+                savedScripts.length > 0 ? (
+                  <View style={styles.libraryList}>
+                    {savedScripts.map((savedScript) => (
+                      <View key={savedScript.id} style={styles.libraryCard}>
+                        <View style={styles.libraryCardBody}>
+                          <Text style={styles.libraryCardTitle}>{savedScript.data.obra}</Text>
+                          <Text style={styles.libraryCardMeta}>{savedScript.fileName}</Text>
+                          <Text style={styles.libraryCardMeta}>
+                            {savedScript.config.myRoles.length > 0
+                              ? `${savedScript.config.myRoles.length} personaje${savedScript.config.myRoles.length === 1 ? '' : 's'} seleccionado${savedScript.config.myRoles.length === 1 ? '' : 's'}`
+                              : 'Sin personaje elegido todavia'}
+                          </Text>
+                          {savedScript.config.sharedScriptId ? (
+                            <Text style={styles.libraryCardMeta}>Obra compartida disponible</Text>
+                          ) : null}
+                        </View>
+
+                        <View style={styles.libraryActions}>
+                          <TouchableOpacity
+                            style={[styles.libraryButton, styles.libraryOpenButton]}
+                            onPress={() => void handleOpenSavedScript(savedScript)}
+                          >
+                            <Text style={styles.libraryButtonText}>Abrir</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.libraryButton, styles.libraryDeleteButton]}
+                            onPress={() => void deleteScript(savedScript.id)}
+                          >
+                            <Text style={styles.libraryDeleteText}>Borrar</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.sharedInfoText}>Todavia no hay obras en curso guardadas.</Text>
+                )
+              ) : null}
             </View>
 
-            {savedScripts.length > 0 ? (
-              <View style={styles.librarySection}>
-                <Text style={styles.libraryTitle}>Obras guardadas</Text>
-                <Text style={styles.libraryHint}>Abre una obra y retomaras tu configuracion guardada.</Text>
+            <View style={styles.sharedLibrarySection}>
+              <TouchableOpacity
+                style={styles.collapsibleSectionHeader}
+                onPress={() => setIsSharedScriptsPanelVisible((previousValue) => !previousValue)}
+              >
+                <View style={styles.sharedSectionHeading}>
+                  <Text style={styles.libraryTitle}>
+                    Obras compartidas {sharedScriptsCatalog.length > 0 ? `(${sharedScriptsCatalog.length})` : ''}
+                  </Text>
+                  <Text style={styles.libraryHint}>
+                    {isSharedScriptsPanelVisible ? 'Ocultar obras compartidas' : 'Mostrar obras compartidas'}
+                  </Text>
+                </View>
+                <View style={styles.sharedHeaderActions}>
+                  <TouchableOpacity
+                    style={styles.sharedRefreshButton}
+                    onPress={() => void refreshSharedScriptsCatalog()}
+                    disabled={isLoadingSharedScriptsCatalog}
+                  >
+                    <Text style={styles.sharedRefreshButtonText}>
+                      {isLoadingSharedScriptsCatalog ? '...' : 'Actualizar'}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={styles.collapsibleIndicator}>{isSharedScriptsPanelVisible ? '−' : '+'}</Text>
+                </View>
+              </TouchableOpacity>
 
-                <View style={styles.libraryList}>
-                  {savedScripts.map((savedScript) => (
-                    <View key={savedScript.id} style={styles.libraryCard}>
+              {isSharedScriptsPanelVisible ? (
+                <>
+                  {sharedScriptsCatalogError ? (
+                    <Text style={styles.sharedInfoText}>
+                      No se pudieron cargar las obras compartidas: {sharedScriptsCatalogError}
+                    </Text>
+                  ) : null}
+
+                  {isLoadingSharedScriptsCatalog && sharedScriptsCatalog.length === 0 ? (
+                    <Text style={styles.sharedInfoText}>Cargando obras compartidas...</Text>
+                  ) : null}
+
+                  {!isLoadingSharedScriptsCatalog && sharedScriptsCatalog.length === 0 && !sharedScriptsCatalogError ? (
+                    <Text style={styles.sharedInfoText}>
+                      Todavia no hay obras compartidas. Publica una y el resto la vera aqui.
+                    </Text>
+                  ) : null}
+
+                  {sharedScriptsCatalog.length > 0 ? (
+                    <View style={styles.libraryList}>
+                      {sharedScriptsCatalog.map((sharedCatalogItem) => {
+                        const isSelected = selectedSharedScriptSummary?.shareId === sharedCatalogItem.shareId;
+
+                        return (
+                          <TouchableOpacity
+                            key={sharedCatalogItem.shareId}
+                            style={[styles.sharedScriptListItem, isSelected && styles.sharedScriptListItemSelected]}
+                            onPress={() => setSelectedSharedScriptId(sharedCatalogItem.shareId)}
+                          >
+                            <View style={styles.sharedScriptListText}>
+                              <Text
+                                style={[
+                                  styles.sharedScriptListTitle,
+                                  isSelected && styles.sharedScriptListTitleSelected,
+                                ]}
+                              >
+                                {sharedCatalogItem.obra}
+                              </Text>
+                              <Text style={styles.sharedScriptListDate}>
+                                {formatSharedScriptTimestamp(sharedCatalogItem.updatedAt)}
+                              </Text>
+                            </View>
+                            {sharedScript?.shareId === sharedCatalogItem.shareId ? (
+                              <View style={styles.sharedActiveBadge}>
+                                <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
+                              </View>
+                            ) : null}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+
+                  {selectedSharedScriptSummary ? (
+                    <View style={styles.sharedScriptCard}>
                       <View style={styles.libraryCardBody}>
-                        <Text style={styles.libraryCardTitle}>{savedScript.data.obra}</Text>
-                        <Text style={styles.libraryCardMeta}>{savedScript.fileName}</Text>
+                        <View style={styles.sharedScriptTitleRow}>
+                          <Text style={styles.libraryCardTitle}>{selectedSharedScriptSummary.obra}</Text>
+                          {sharedScript?.shareId === selectedSharedScriptSummary.shareId ? (
+                            <View style={styles.sharedActiveBadge}>
+                              <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={styles.libraryCardMeta}>{selectedSharedScriptSummary.fileName}</Text>
                         <Text style={styles.libraryCardMeta}>
-                          {savedScript.config.myRoles.length > 0
-                            ? `${savedScript.config.myRoles.length} personaje${savedScript.config.myRoles.length === 1 ? '' : 's'} seleccionado${savedScript.config.myRoles.length === 1 ? '' : 's'}`
-                            : 'Sin personaje elegido todavia'}
+                          {selectedSharedScriptSummary.mergeCount > 0
+                            ? `${selectedSharedScriptSummary.mergeCount} fusion${selectedSharedScriptSummary.mergeCount === 1 ? '' : 'es'} compartida${selectedSharedScriptSummary.mergeCount === 1 ? '' : 's'}`
+                            : 'Sin fusiones compartidas todavia'}
                         </Text>
-                        {savedScript.config.sharedScriptId ? (
-                          <Text style={styles.libraryCardMeta}>Obra compartida disponible</Text>
-                        ) : null}
+                        <Text style={styles.libraryCardMeta}>
+                          {selectedSharedScriptSummary.songCount > 0
+                            ? `${selectedSharedScriptSummary.songCount} bloque${selectedSharedScriptSummary.songCount === 1 ? '' : 's'} de cancion preparado${selectedSharedScriptSummary.songCount === 1 ? '' : 's'}`
+                            : 'Sin bloques de cancion registrados'}
+                        </Text>
+                        <Text style={styles.libraryCardMeta}>
+                          {formatSharedScriptTimestamp(selectedSharedScriptSummary.updatedAt)}
+                        </Text>
                       </View>
 
                       <View style={styles.libraryActions}>
                         <TouchableOpacity
                           style={[styles.libraryButton, styles.libraryOpenButton]}
-                          onPress={() => void handleOpenSavedScript(savedScript)}
+                          onPress={() => void loadRemoteSharedScript(selectedSharedScriptSummary.shareId)}
                         >
                           <Text style={styles.libraryButtonText}>Abrir</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.libraryButton, styles.libraryDeleteButton]}
-                          onPress={() => void deleteScript(savedScript.id)}
-                        >
-                          <Text style={styles.libraryDeleteText}>Borrar</Text>
-                        </TouchableOpacity>
                       </View>
                     </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
-            <View style={styles.sharedLibrarySection}>
-              <View style={styles.sharedSectionHeader}>
-                <View style={styles.sharedSectionHeading}>
-                  <Text style={styles.libraryTitle}>Obras compartidas</Text>
-                  <Text style={styles.libraryHint}>
-                    Cuando alguien pulse Compartir obra, aparecera aqui para el resto del equipo.
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.sharedRefreshButton}
-                  onPress={() => void refreshSharedScriptsCatalog()}
-                  disabled={isLoadingSharedScriptsCatalog}
-                >
-                  <Text style={styles.sharedRefreshButtonText}>
-                    {isLoadingSharedScriptsCatalog ? 'Actualizando...' : 'Actualizar'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {sharedScriptsCatalogError ? (
-                <Text style={styles.sharedInfoText}>
-                  No se pudieron cargar las obras compartidas: {sharedScriptsCatalogError}
-                </Text>
+                  ) : null}
+                </>
               ) : null}
+            </View>
 
-              {isLoadingSharedScriptsCatalog && sharedScriptsCatalog.length === 0 ? (
-                <Text style={styles.sharedInfoText}>Cargando obras compartidas...</Text>
-              ) : null}
-
-              {!isLoadingSharedScriptsCatalog && sharedScriptsCatalog.length === 0 && !sharedScriptsCatalogError ? (
-                <Text style={styles.sharedInfoText}>
-                  Todavia no hay obras compartidas. Publica una y el resto la vera aqui.
-                </Text>
-              ) : null}
-
-              {sharedScriptsCatalog.length > 0 ? (
-                <View style={styles.libraryList}>
-                  {sharedScriptsCatalog.map((sharedCatalogItem) => {
-                    const isSelected = selectedSharedScriptSummary?.shareId === sharedCatalogItem.shareId;
-
-                    return (
-                      <TouchableOpacity
-                        key={sharedCatalogItem.shareId}
-                        style={[styles.sharedScriptListItem, isSelected && styles.sharedScriptListItemSelected]}
-                        onPress={() => setSelectedSharedScriptId(sharedCatalogItem.shareId)}
-                      >
-                        <View style={styles.sharedScriptListText}>
-                          <Text
-                            style={[
-                              styles.sharedScriptListTitle,
-                              isSelected && styles.sharedScriptListTitleSelected,
-                            ]}
-                          >
-                            {sharedCatalogItem.obra}
-                          </Text>
-                          <Text style={styles.sharedScriptListDate}>
-                            {formatSharedScriptTimestamp(sharedCatalogItem.updatedAt)}
-                          </Text>
-                        </View>
-                        {sharedScript?.shareId === sharedCatalogItem.shareId ? (
-                          <View style={styles.sharedActiveBadge}>
-                            <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
-                          </View>
-                        ) : null}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              ) : null}
-
-              {selectedSharedScriptSummary ? (
-                <View style={styles.sharedScriptCard}>
-                  <View style={styles.libraryCardBody}>
-                    <View style={styles.sharedScriptTitleRow}>
-                      <Text style={styles.libraryCardTitle}>{selectedSharedScriptSummary.obra}</Text>
-                      {sharedScript?.shareId === selectedSharedScriptSummary.shareId ? (
-                        <View style={styles.sharedActiveBadge}>
-                          <Text style={styles.sharedActiveBadgeText}>Abierta</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text style={styles.libraryCardMeta}>{selectedSharedScriptSummary.fileName}</Text>
-                    <Text style={styles.libraryCardMeta}>
-                      {selectedSharedScriptSummary.mergeCount > 0
-                        ? `${selectedSharedScriptSummary.mergeCount} fusion${selectedSharedScriptSummary.mergeCount === 1 ? '' : 'es'} compartida${selectedSharedScriptSummary.mergeCount === 1 ? '' : 's'}`
-                        : 'Sin fusiones compartidas todavia'}
-                    </Text>
-                    <Text style={styles.libraryCardMeta}>
-                      {selectedSharedScriptSummary.songCount > 0
-                        ? `${selectedSharedScriptSummary.songCount} bloque${selectedSharedScriptSummary.songCount === 1 ? '' : 's'} de cancion preparado${selectedSharedScriptSummary.songCount === 1 ? '' : 's'}`
-                        : 'Sin bloques de cancion registrados'}
-                    </Text>
-                    <Text style={styles.libraryCardMeta}>
-                      {formatSharedScriptTimestamp(selectedSharedScriptSummary.updatedAt)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.libraryActions}>
-                    <TouchableOpacity
-                      style={[styles.libraryButton, styles.libraryOpenButton]}
-                      onPress={() => void loadRemoteSharedScript(selectedSharedScriptSummary.shareId)}
-                    >
-                      <Text style={styles.libraryButtonText}>Abrir</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : null}
+            <View style={styles.homeActions}>
+              <TouchableOpacity
+                style={styles.btnMain}
+                onPress={async () => {
+                  const result = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
+                  if (!result.canceled) {
+                    resetSelectionState();
+                    replaceSharedScriptIdInUrl(null);
+                    setCurrentScriptFileName(result.assets[0].name ?? null);
+                    await analyzeInStages(result.assets[0].uri, undefined, result.assets[0].name);
+                  }
+                }}
+              >
+                <Text style={styles.btnText}>Cargar PDF</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -1233,7 +1241,7 @@ const styles = StyleSheet.create({
   discardButton: { marginTop: 10 },
   discardText: { color: '#c62828', fontWeight: '600' },
   homeContent: { width: '100%', gap: 24 },
-  homeActions: { gap: 12 },
+  homeActions: { gap: 12, width: '100%' },
   section: { width: '100%' },
   scriptTitlePanel: {
     marginBottom: 20,
@@ -1385,7 +1393,6 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 3,
   },
-  btnDemo: { backgroundColor: 'rgba(124, 77, 45, 0.82)' },
   btnText: {
     color: '#fff',
     fontWeight: 'bold',
@@ -1456,11 +1463,28 @@ const styles = StyleSheet.create({
     borderColor: '#dbe9f6',
     gap: 16,
   },
+  collapsibleSectionHeader: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  collapsibleIndicator: {
+    fontSize: 28,
+    lineHeight: 28,
+    color: '#184e77',
+    fontWeight: '500',
+  },
   sharedSectionHeader: {
     flexDirection: 'row',
     gap: 12,
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+  },
+  sharedHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   sharedSectionHeading: {
     flex: 1,
