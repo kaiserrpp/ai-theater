@@ -14,6 +14,7 @@ interface Props {
   sharedScript: SharedScriptManifest | null;
   availableRoles: string[];
   onManifestUpdated: (manifest: SharedScriptManifest) => void;
+  standalone?: boolean;
 }
 
 const DEFAULT_UPLOAD_KIND: SharedSongAudioKind = 'karaoke';
@@ -41,6 +42,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   sharedScript,
   availableRoles,
   onManifestUpdated,
+  standalone = false,
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -183,21 +185,24 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const isDisabled = !sharedScript;
+  const isPanelVisible = standalone || isVisible;
 
   return (
     <View style={styles.wrapper}>
-      <TouchableOpacity
-        style={[styles.toggleButton, isDisabled && styles.toggleButtonDisabled]}
-        onPress={() => setIsVisible((previousValue) => !previousValue)}
-        disabled={isDisabled}
-      >
-        <Text style={styles.toggleButtonText}>
-          {isVisible ? 'Ocultar gestion de canciones' : 'Gestionar canciones'}
-          {sharedScript ? ` (${sharedScript.songs.length})` : ''}
-        </Text>
-      </TouchableOpacity>
+      {!standalone ? (
+        <TouchableOpacity
+          style={[styles.toggleButton, isDisabled && styles.toggleButtonDisabled]}
+          onPress={() => setIsVisible((previousValue) => !previousValue)}
+          disabled={isDisabled}
+        >
+          <Text style={styles.toggleButtonText}>
+            {isVisible ? 'Ocultar gestion de canciones' : 'Gestionar canciones'}
+            {sharedScript ? ` (${sharedScript.songs.length})` : ''}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
-      {!isVisible ? null : (
+      {!isPanelVisible ? null : (
         <View style={styles.panel}>
           {!sharedScript ? (
             <Text style={styles.infoText}>Comparte esta obra antes de gestionar sus canciones.</Text>

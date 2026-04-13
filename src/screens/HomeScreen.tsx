@@ -111,6 +111,7 @@ export const HomeScreen = () => {
   const [isMergePanelVisible, setIsMergePanelVisible] = useState(false);
   const [isSavedScriptsPanelVisible, setIsSavedScriptsPanelVisible] = useState(false);
   const [isSharedScriptsPanelVisible, setIsSharedScriptsPanelVisible] = useState(false);
+  const [isManagingSongs, setIsManagingSongs] = useState(false);
   const [pendingResumeMode, setPendingResumeMode] = useState<RehearsalMode | null>(null);
   const [sharedScript, setSharedScript] = useState<SharedScriptManifest | null>(null);
   const [sharedStatusText, setSharedStatusText] = useState('');
@@ -397,6 +398,7 @@ export const HomeScreen = () => {
     setIsRolePanelVisible(false);
     setIsScenePanelVisible(false);
     setIsMergePanelVisible(false);
+    setIsManagingSongs(false);
     setPendingResumeMode(null);
     setSharedScript(null);
     setSharedStatusText('');
@@ -710,6 +712,42 @@ export const HomeScreen = () => {
     );
   }
 
+  if (isManagingSongs && displayScriptData) {
+    return (
+      <ScreenWrapper>
+        <ScrollView contentContainerStyle={styles.container}>
+          <View style={styles.titlePanel}>
+            <Text style={styles.title}>AI-Theatre</Text>
+          </View>
+
+          <View style={styles.scriptTitlePanel}>
+            <Text style={styles.status}>Gestion de canciones</Text>
+            <Text style={styles.obraTitle}>{displayScriptData.obra}</Text>
+          </View>
+
+          {effectiveError && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{effectiveError}</Text>
+            </View>
+          )}
+
+          <View style={styles.songManagerScreen}>
+            <SongManagerPanel
+              sharedScript={sharedScript}
+              availableRoles={displayScriptData.personajes}
+              onManifestUpdated={handleSharedScriptManifestUpdate}
+              standalone
+            />
+          </View>
+
+          <TouchableOpacity onPress={() => setIsManagingSongs(false)} style={styles.btnBack}>
+            <Text style={styles.btnBackText}>Volver a la obra</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </ScreenWrapper>
+    );
+  }
+
   return (
     <ScreenWrapper>
       <ScrollView contentContainerStyle={styles.container}>
@@ -978,11 +1016,20 @@ export const HomeScreen = () => {
                   </Text>
                 </TouchableOpacity>
 
-                <SongManagerPanel
-                  sharedScript={sharedScript}
-                  availableRoles={displayScriptData.personajes}
-                  onManifestUpdated={handleSharedScriptManifestUpdate}
-                />
+                <TouchableOpacity
+                  style={[
+                    styles.compactShareButton,
+                    styles.songManagerButton,
+                    !sharedScript && styles.buttonDisabled,
+                  ]}
+                  onPress={() => setIsManagingSongs(true)}
+                  disabled={!sharedScript}
+                >
+                  <Text style={styles.compactShareButtonText}>
+                    Gestionar canciones
+                    {sharedScript ? ` (${sharedScript.songs.length})` : ''}
+                  </Text>
+                </TouchableOpacity>
               </View>
             ) : null}
 
@@ -1295,6 +1342,13 @@ const styles = StyleSheet.create({
   },
   compactShareButtonTextActive: {
     color: '#184e77',
+  },
+  songManagerButton: {
+    backgroundColor: 'rgba(111, 76, 25, 0.88)',
+    borderColor: 'rgba(111, 76, 25, 0.96)',
+  },
+  songManagerScreen: {
+    width: '100%',
   },
   roleWrapper: { gap: 10 },
   roleToggleButton: { backgroundColor: 'rgba(24, 78, 119, 0.82)' },
