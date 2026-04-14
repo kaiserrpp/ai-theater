@@ -86,8 +86,10 @@ export const RehearsalView: React.FC<Props> = ({
     isListeningActive,
     isListeningSupported,
     signalLevel,
-    isVoiceDetected,
+    hasSpeechStarted,
+    isSignalAboveThreshold,
     silenceElapsedMs,
+    voiceThreshold,
     startListening,
     stopListening,
   } = useSilenceAdvance({
@@ -409,17 +411,24 @@ export const RehearsalView: React.FC<Props> = ({
                       styles.listenMeterFill,
                       {
                         width: `${Math.max(6, Math.round(signalLevel * 100))}%`,
-                        backgroundColor: isVoiceDetected ? '#2b9348' : '#d98a00',
+                        backgroundColor: isSignalAboveThreshold ? '#2b9348' : '#d98a00',
                       },
                     ]}
                   />
                 </View>
                 <Text style={styles.listenDebugText}>
                   Nivel micro: {Math.round(signalLevel * 100)}% · Estado:{' '}
-                  {isVoiceDetected ? 'hablando / esperando silencio' : 'silencio'}
+                  {isSignalAboveThreshold
+                    ? 'hablando'
+                    : hasSpeechStarted
+                      ? 'silencio detectado'
+                      : 'esperando voz'}
                 </Text>
                 <Text style={styles.listenDebugText}>
                   Silencio acumulado: {(silenceElapsedMs / 1000).toFixed(1)} s
+                </Text>
+                <Text style={styles.listenDebugText}>
+                  Umbral de voz: {(voiceThreshold * 100).toFixed(1)}%
                 </Text>
               </View>
             ) : null}

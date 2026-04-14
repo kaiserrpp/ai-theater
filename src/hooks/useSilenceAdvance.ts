@@ -14,13 +14,17 @@ interface UseSilenceAdvanceResult {
   isListeningActive: boolean;
   isListeningSupported: boolean;
   signalLevel: number;
-  isVoiceDetected: boolean;
+  hasSpeechStarted: boolean;
+  isSignalAboveThreshold: boolean;
   silenceElapsedMs: number;
+  voiceThreshold: number;
   startListening: () => Promise<void>;
   stopListening: () => void;
 }
 
-const VOICE_THRESHOLD = 0.025;
+const MIN_VOICE_THRESHOLD = 0.01;
+const THRESHOLD_MULTIPLIER = 2.4;
+const THRESHOLD_RELEASE_FACTOR = 0.78;
 const SILENCE_MS = 1000;
 
 type WindowWithWebkitAudioContext = Window & typeof globalThis & {
@@ -67,6 +71,7 @@ export const useSilenceAdvance = ({
   const lastVoiceTimestampRef = useRef(0);
   const silenceHandledRef = useRef(false);
   const lastUiUpdateRef = useRef(0);
+  const noiseFloorRef = useRef(0.004);
 
   const isListeningSupported = useMemo(isListeningSupportedOnDevice, []);
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>(
@@ -74,8 +79,10 @@ export const useSilenceAdvance = ({
   );
   const [listeningError, setListeningError] = useState<string | null>(null);
   const [signalLevel, setSignalLevel] = useState(0);
-  const [isVoiceDetected, setIsVoiceDetected] = useState(false);
+  const [hasSpeechStarted, setHasSpeechStarted] = useState(false);
+  const [isSignalAboveThreshold, setIsSignalAboveThreshold] = useState(false);
   const [silenceElapsedMs, setSilenceElapsedMs] = useState(0);
+  const [voiceThreshold, setVoiceThreshold] = useState(MIN_VOICE_THRESHOLD);
 
   onSilenceDetectedRef.current = onSilenceDetected;
 
@@ -111,8 +118,10 @@ export const useSilenceAdvance = ({
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
     setListeningError(null);
     setSignalLevel(0);
-    setIsVoiceDetected(false);
+    setHasSpeechStarted(false);
+    setIsSignalAboveThreshold(false);
     setSilenceElapsedMs(0);
+    setVoiceThreshold(MIN_VOICE_THRESHOLD);
   }, [isListeningSupported]);
 
   useEffect(() => () => {
@@ -122,7 +131,8 @@ export const useSilenceAdvance = ({
   useEffect(() => {
     resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
     setSignalLevel(0);
-    setIsVoiceDetected(false);
+    setHasSpeechStarted(false);
+    setIsSignalAboveThreshold(false);
     setSilenceElapsedMs(0);
   }, [lineKey]);
 
@@ -130,7 +140,8 @@ export const useSilenceAdvance = ({
     if (!enabledForCurrentLine) {
       resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
       setSignalLevel(0);
-      setIsVoiceDetected(false);
+      setHasSpeechStarted(false);
+      setIsSignalAboveThreshold(false);
       setSilenceElapsedMs(0);
     }
   }, [enabledForCurrentLine]);
@@ -152,19 +163,27 @@ export const useSilenceAdvance = ({
     }
 
     const rms = Math.sqrt(sumSquares / samples.length);
+    const adaptiveThreshold = Math.max(MIN_VOICE_THRESHOLD, noiseFloorRef.current * THRESHOLD_MULTIPLIER);
+    const releaseThreshold = adaptiveThreshold * THRESHOLD_RELEASE_FACTOR;
+    const isAboveThreshold = rms >= adaptiveThreshold;
     const now =
       typeof performance !== 'undefined' && typeof performance.now === 'function'
         ? performance.now()
         : Date.now();
 
+    if (!isAboveThreshold) {
+      noiseFloorRef.current = noiseFloorRef.current * 0.94 + rms * 0.06;
+    }
+
     if (enabledForCurrentLine) {
-      if (rms >= VOICE_THRESHOLD) {
+      if (isAboveThreshold) {
         hasDetectedVoiceRef.current = true;
         lastVoiceTimestampRef.current = now;
         silenceHandledRef.current = false;
       } else if (
         hasDetectedVoiceRef.current &&
         !silenceHandledRef.current &&
+        rms <= releaseThreshold &&
         now - lastVoiceTimestampRef.current >= SILENCE_MS
       ) {
         silenceHandledRef.current = true;
@@ -174,13 +193,15 @@ export const useSilenceAdvance = ({
 
     if (now - lastUiUpdateRef.current >= 120) {
       lastUiUpdateRef.current = now;
-      setSignalLevel(Math.min(1, rms / (VOICE_THRESHOLD * 4)));
-      setIsVoiceDetected(hasDetectedVoiceRef.current);
+      setSignalLevel(Math.min(1, rms / Math.max(adaptiveThreshold * 2.2, MIN_VOICE_THRESHOLD * 2)));
+      setHasSpeechStarted(hasDetectedVoiceRef.current);
+      setIsSignalAboveThreshold(isAboveThreshold);
       setSilenceElapsedMs(
         hasDetectedVoiceRef.current && lastVoiceTimestampRef.current > 0
           ? Math.max(0, Math.round(now - lastVoiceTimestampRef.current))
           : 0
       );
+      setVoiceThreshold(adaptiveThreshold);
     }
 
     frameRef.current = requestAnimationFrame(monitorSignal);
@@ -231,8 +252,10 @@ export const useSilenceAdvance = ({
       samplesRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
       resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
       setSignalLevel(0);
-      setIsVoiceDetected(false);
+      setHasSpeechStarted(false);
+      setIsSignalAboveThreshold(false);
       setSilenceElapsedMs(0);
+      setVoiceThreshold(MIN_VOICE_THRESHOLD);
       setListeningStatus('active');
       monitorSignal();
     } catch (error) {
@@ -257,8 +280,10 @@ export const useSilenceAdvance = ({
     isListeningActive: listeningStatus === 'active',
     isListeningSupported,
     signalLevel,
-    isVoiceDetected,
+    hasSpeechStarted,
+    isSignalAboveThreshold,
     silenceElapsedMs,
+    voiceThreshold,
     startListening,
     stopListening,
   };
