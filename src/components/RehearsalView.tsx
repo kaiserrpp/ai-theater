@@ -85,6 +85,9 @@ export const RehearsalView: React.FC<Props> = ({
     listeningError,
     isListeningActive,
     isListeningSupported,
+    signalLevel,
+    isVoiceDetected,
+    silenceElapsedMs,
     startListening,
     stopListening,
   } = useSilenceAdvance({
@@ -396,9 +399,29 @@ export const RehearsalView: React.FC<Props> = ({
               </Text>
             ) : null}
             {isMyTurn && isListeningActive ? (
-              <Text style={styles.listenHint}>
-                La escucha esta activa: cuando termines y guardes silencio, pasaremos a la siguiente linea.
-              </Text>
+              <View style={styles.listenMonitor}>
+                <Text style={styles.listenHint}>
+                  La escucha esta activa: cuando termines y guardes silencio, pasaremos a la siguiente linea.
+                </Text>
+                <View style={styles.listenMeterTrack}>
+                  <View
+                    style={[
+                      styles.listenMeterFill,
+                      {
+                        width: `${Math.max(6, Math.round(signalLevel * 100))}%`,
+                        backgroundColor: isVoiceDetected ? '#2b9348' : '#d98a00',
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.listenDebugText}>
+                  Nivel micro: {Math.round(signalLevel * 100)}% · Estado:{' '}
+                  {isVoiceDetected ? 'hablando / esperando silencio' : 'silencio'}
+                </Text>
+                <Text style={styles.listenDebugText}>
+                  Silencio acumulado: {(silenceElapsedMs / 1000).toFixed(1)} s
+                </Text>
+              </View>
             ) : null}
           </View>
         )}
@@ -579,6 +602,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  listenMonitor: {
+    marginTop: 12,
+    width: '100%',
+    gap: 8,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderWidth: 1,
+    borderColor: '#d7e6f5',
+  },
+  listenMeterTrack: {
+    width: '100%',
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: '#dfe8ef',
+    overflow: 'hidden',
+  },
+  listenMeterFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  listenDebugText: {
+    fontSize: 13,
+    color: '#47604f',
+    textAlign: 'center',
+    lineHeight: 18,
   },
   footer: { backgroundColor: '#007AFF', padding: 25, alignItems: 'center' },
   footerActive: { backgroundColor: 'red' },

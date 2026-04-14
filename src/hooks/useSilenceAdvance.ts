@@ -13,6 +13,9 @@ interface UseSilenceAdvanceResult {
   listeningError: string | null;
   isListeningActive: boolean;
   isListeningSupported: boolean;
+  signalLevel: number;
+  isVoiceDetected: boolean;
+  silenceElapsedMs: number;
   startListening: () => Promise<void>;
   stopListening: () => void;
 }
@@ -63,12 +66,16 @@ export const useSilenceAdvance = ({
   const hasDetectedVoiceRef = useRef(false);
   const lastVoiceTimestampRef = useRef(0);
   const silenceHandledRef = useRef(false);
+  const lastUiUpdateRef = useRef(0);
 
   const isListeningSupported = useMemo(isListeningSupportedOnDevice, []);
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>(
     isListeningSupported ? 'idle' : 'unsupported'
   );
   const [listeningError, setListeningError] = useState<string | null>(null);
+  const [signalLevel, setSignalLevel] = useState(0);
+  const [isVoiceDetected, setIsVoiceDetected] = useState(false);
+  const [silenceElapsedMs, setSilenceElapsedMs] = useState(0);
 
   onSilenceDetectedRef.current = onSilenceDetected;
 
@@ -100,8 +107,12 @@ export const useSilenceAdvance = ({
 
     samplesRef.current = null;
     resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+    lastUiUpdateRef.current = 0;
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
     setListeningError(null);
+    setSignalLevel(0);
+    setIsVoiceDetected(false);
+    setSilenceElapsedMs(0);
   }, [isListeningSupported]);
 
   useEffect(() => () => {
@@ -110,11 +121,17 @@ export const useSilenceAdvance = ({
 
   useEffect(() => {
     resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+    setSignalLevel(0);
+    setIsVoiceDetected(false);
+    setSilenceElapsedMs(0);
   }, [lineKey]);
 
   useEffect(() => {
     if (!enabledForCurrentLine) {
       resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+      setSignalLevel(0);
+      setIsVoiceDetected(false);
+      setSilenceElapsedMs(0);
     }
   }, [enabledForCurrentLine]);
 
@@ -153,6 +170,17 @@ export const useSilenceAdvance = ({
         silenceHandledRef.current = true;
         onSilenceDetectedRef.current();
       }
+    }
+
+    if (now - lastUiUpdateRef.current >= 120) {
+      lastUiUpdateRef.current = now;
+      setSignalLevel(Math.min(1, rms / (VOICE_THRESHOLD * 4)));
+      setIsVoiceDetected(hasDetectedVoiceRef.current);
+      setSilenceElapsedMs(
+        hasDetectedVoiceRef.current && lastVoiceTimestampRef.current > 0
+          ? Math.max(0, Math.round(now - lastVoiceTimestampRef.current))
+          : 0
+      );
     }
 
     frameRef.current = requestAnimationFrame(monitorSignal);
@@ -202,6 +230,9 @@ export const useSilenceAdvance = ({
       analyserRef.current = analyser;
       samplesRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
       resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+      setSignalLevel(0);
+      setIsVoiceDetected(false);
+      setSilenceElapsedMs(0);
       setListeningStatus('active');
       monitorSignal();
     } catch (error) {
@@ -225,6 +256,9 @@ export const useSilenceAdvance = ({
     listeningError,
     isListeningActive: listeningStatus === 'active',
     isListeningSupported,
+    signalLevel,
+    isVoiceDetected,
+    silenceElapsedMs,
     startListening,
     stopListening,
   };
