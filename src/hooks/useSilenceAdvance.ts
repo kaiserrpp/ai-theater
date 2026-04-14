@@ -25,12 +25,11 @@ interface UseSilenceAdvanceResult {
 }
 
 const MIN_VOICE_THRESHOLD = 0.01;
-const THRESHOLD_MULTIPLIER = 2.1;
+const THRESHOLD_MULTIPLIER = 2.3;
 const THRESHOLD_RELEASE_FACTOR = 0.78;
 const SILENCE_MS = 1000;
 const LINE_GRACE_MS = 350;
-const MIN_SPEECH_MS = 160;
-const SPEECH_GAP_TOLERANCE_MS = 220;
+const REQUIRED_VOICE_FRAMES = 2;
 
 type WindowWithWebkitAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
@@ -54,14 +53,14 @@ const resetLineTracking = (
   hasDetectedVoiceRef: React.MutableRefObject<boolean>,
   lastVoiceTimestampRef: React.MutableRefObject<number>,
   silenceHandledRef: React.MutableRefObject<boolean>,
-  speechStartRef: React.MutableRefObject<number>,
-  lineStartedAtRef: React.MutableRefObject<number>
+  lineStartedAtRef: React.MutableRefObject<number>,
+  consecutiveVoiceFramesRef: React.MutableRefObject<number>
 ) => {
   hasDetectedVoiceRef.current = false;
   lastVoiceTimestampRef.current = 0;
   silenceHandledRef.current = false;
-  speechStartRef.current = 0;
   lineStartedAtRef.current = 0;
+  consecutiveVoiceFramesRef.current = 0;
 };
 
 export const useSilenceAdvance = ({
@@ -79,8 +78,8 @@ export const useSilenceAdvance = ({
   const hasDetectedVoiceRef = useRef(false);
   const lastVoiceTimestampRef = useRef(0);
   const silenceHandledRef = useRef(false);
-  const speechStartRef = useRef(0);
   const lineStartedAtRef = useRef(0);
+  const consecutiveVoiceFramesRef = useRef(0);
   const lastUiUpdateRef = useRef(0);
   const noiseFloorRef = useRef(0.004);
 
@@ -130,8 +129,8 @@ export const useSilenceAdvance = ({
       hasDetectedVoiceRef,
       lastVoiceTimestampRef,
       silenceHandledRef,
-      speechStartRef,
-      lineStartedAtRef
+      lineStartedAtRef,
+      consecutiveVoiceFramesRef
     );
     lastUiUpdateRef.current = 0;
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
@@ -154,8 +153,8 @@ export const useSilenceAdvance = ({
       hasDetectedVoiceRef,
       lastVoiceTimestampRef,
       silenceHandledRef,
-      speechStartRef,
-      lineStartedAtRef
+      lineStartedAtRef,
+      consecutiveVoiceFramesRef
     );
     setSignalLevel(0);
     setRawLevel(0);
@@ -171,8 +170,8 @@ export const useSilenceAdvance = ({
         hasDetectedVoiceRef,
         lastVoiceTimestampRef,
         silenceHandledRef,
-        speechStartRef,
-        lineStartedAtRef
+        lineStartedAtRef,
+        consecutiveVoiceFramesRef
       );
       setSignalLevel(0);
       setRawLevel(0);
@@ -220,25 +219,15 @@ export const useSilenceAdvance = ({
       if (now - lineStartedAtRef.current < LINE_GRACE_MS) {
         silenceHandledRef.current = false;
       } else if (isAboveThreshold) {
-        if (speechStartRef.current === 0) {
-          speechStartRef.current = now;
-        }
-
+        consecutiveVoiceFramesRef.current += 1;
         lastVoiceTimestampRef.current = now;
         silenceHandledRef.current = false;
 
-        if (now - speechStartRef.current >= MIN_SPEECH_MS) {
+        if (consecutiveVoiceFramesRef.current >= REQUIRED_VOICE_FRAMES) {
           hasDetectedVoiceRef.current = true;
         }
       } else {
-        if (!hasDetectedVoiceRef.current) {
-          if (
-            speechStartRef.current > 0 &&
-            now - lastVoiceTimestampRef.current > SPEECH_GAP_TOLERANCE_MS
-          ) {
-            speechStartRef.current = 0;
-          }
-        }
+        consecutiveVoiceFramesRef.current = 0;
 
         if (
           hasDetectedVoiceRef.current &&
@@ -271,8 +260,6 @@ export const useSilenceAdvance = ({
             ? hasDetectedVoiceRef.current
               ? 'hablando'
               : 'armando voz'
-            : speechStartRef.current > 0 && !hasDetectedVoiceRef.current
-              ? 'armando voz'
             : hasDetectedVoiceRef.current
               ? 'silencio detectado'
               : 'esperando voz'
@@ -329,8 +316,8 @@ export const useSilenceAdvance = ({
         hasDetectedVoiceRef,
         lastVoiceTimestampRef,
         silenceHandledRef,
-        speechStartRef,
-        lineStartedAtRef
+        lineStartedAtRef,
+        consecutiveVoiceFramesRef
       );
       setSignalLevel(0);
       setRawLevel(0);
