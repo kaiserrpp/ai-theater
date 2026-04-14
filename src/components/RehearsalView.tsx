@@ -392,19 +392,25 @@ export const RehearsalView: React.FC<Props> = ({
             <Text style={[styles.name, isMyTurn && styles.myName]}>{currentLine?.p}</Text>
             {currentLine?.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
             <Text style={[styles.text, isMyTurn && styles.myText]}>{currentLine?.t}</Text>
-            {isMyTurn && <Text style={styles.myTurnHint}>Tu turno: lee y pulsa siguiente</Text>}
+            {isMyTurn && (
+              <Text style={styles.myTurnHint}>
+                Tu turno: lee y guardaremos silencio para pasar solos, o pulsa siguiente si lo prefieres.
+              </Text>
+            )}
             {isMyTurn && listeningStatus === 'error' && listeningError ? (
               <Text style={styles.listenError}>{listeningError}</Text>
             ) : null}
             {isMyTurn && isListeningSupported && !isListeningActive ? (
               <Text style={styles.listenHint}>
-                Activa la escucha una vez para que la app avance sola tras 1 segundo de silencio.
+                Activa la escucha una vez: a partir de ahi se armara sola en tus lineas y avanzara tras 1
+                segundo de silencio.
               </Text>
             ) : null}
             {isMyTurn && isListeningActive ? (
               <View style={styles.listenMonitor}>
                 <Text style={styles.listenHint}>
-                  La escucha esta activa: cuando termines y guardes silencio, pasaremos a la siguiente linea.
+                  La escucha esta activa para todo el ensayo, pero solo se arma automaticamente cuando entra
+                  una linea tuya.
                 </Text>
                 <View style={styles.listenMeterTrack}>
                   <View
