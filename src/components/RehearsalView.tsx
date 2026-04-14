@@ -52,6 +52,28 @@ export const RehearsalView: React.FC<Props> = ({
     ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
     : null;
 
+  const getSongPlaybackErrorMessage = useCallback(
+    (error: unknown, isAutomaticAttempt: boolean) => {
+      const errorName =
+        error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+      const errorMessage =
+        error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
+      const normalizedText = `${errorName} ${errorMessage}`.toLowerCase();
+      const isAutoplayBlocked =
+        normalizedText.includes('notallowed') ||
+        normalizedText.includes('not allowed') ||
+        normalizedText.includes('user gesture') ||
+        normalizedText.includes('gesture');
+
+      if (isAutomaticAttempt && isAutoplayBlocked) {
+        return 'En iPhone o Safari puede hacer falta pulsar Reproducir para iniciar la cancion.';
+      }
+
+      return 'No se pudo reproducir este audio.';
+    },
+    []
+  );
+
   const advanceLine = useCallback(() => {
     setCurrentIndex((previousIndex) =>
       previousIndex < filteredGuion.length ? previousIndex + 1 : previousIndex
@@ -129,7 +151,7 @@ export const RehearsalView: React.FC<Props> = ({
   const handlePlaySongAudio = useCallback((
     audioUrl: string,
     audioId: string,
-    options?: { advanceOnEnd?: boolean }
+    options?: { advanceOnEnd?: boolean; autoStart?: boolean }
   ) => {
     if (typeof Audio === 'undefined') {
       setAudioError('La reproduccion de audio solo esta disponible en la app web.');
@@ -161,12 +183,12 @@ export const RehearsalView: React.FC<Props> = ({
     audioRef.current = nextAudio;
     setPlayingAudioId(audioId);
 
-    void nextAudio.play().catch(() => {
+    void nextAudio.play().catch((error: unknown) => {
       setPlayingAudioId(null);
       audioRef.current = null;
-      setAudioError('No se pudo reproducir este audio.');
+      setAudioError(getSongPlaybackErrorMessage(error, options?.autoStart === true));
     });
-  }, [advanceLine, playingAudioId, stopSongAudio]);
+  }, [advanceLine, getSongPlaybackErrorMessage, playingAudioId, stopSongAudio]);
 
   useEffect(() => {
     if (!currentSongKey) {
@@ -184,7 +206,10 @@ export const RehearsalView: React.FC<Props> = ({
 
     autoStartedSongKeyRef.current = currentSongKey;
     const [singleAudio] = currentSongAsset.audios;
-    handlePlaySongAudio(singleAudio.audioUrl, singleAudio.id, { advanceOnEnd: true });
+    handlePlaySongAudio(singleAudio.audioUrl, singleAudio.id, {
+      advanceOnEnd: true,
+      autoStart: true,
+    });
   }, [currentSongAsset, currentSongKey, handlePlaySongAudio]);
 
   const renderHeader = (title: string) => (
