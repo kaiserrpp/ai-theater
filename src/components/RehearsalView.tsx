@@ -30,7 +30,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
-  const [autoListenEnabled, setAutoListenEnabled] = useState(false);
+  const [autoListenEnabled] = useState(true);
+  const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -139,6 +140,12 @@ export const RehearsalView: React.FC<Props> = ({
   }, [currentSongKey]);
 
   useEffect(() => {
+    if (isMyTurn || isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine)) {
+      setSpeechStatusMessage(null);
+    }
+  }, [currentLine, isFinished, isMyTurn]);
+
+  useEffect(() => {
     if (!autoListenEnabled) {
       if (isListeningActive) {
         stopListening();
@@ -185,6 +192,10 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     if (autoListenEnabled && (isListeningActive || listeningStatus === 'requesting')) {
+      setSpeechStatusMessage('Esperando a liberar el micro para reproducir la siguiente linea...');
+      if (isListeningActive || listeningStatus === 'requesting') {
+        stopListening();
+      }
       return () => {
         void Speech.stop();
         stopSongAudio();
@@ -192,13 +203,23 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     const speechDelayMs = autoListenEnabled ? 220 : 0;
+    setSpeechStatusMessage(
+      autoListenEnabled
+        ? 'Micro liberado. Preparando la voz de Siri para la siguiente linea...'
+        : 'Preparando la voz de Siri para la siguiente linea...'
+    );
     const startSpeech = setTimeout(() => {
+      setSpeechStatusMessage('Reproduciendo la linea con Siri...');
       Speech.speak(speakableLineText, {
         language: 'es-ES',
         onDone: () => {
+          setSpeechStatusMessage('Linea reproducida. Avanzando...');
           setTimeout(advanceLine, 500);
         },
-        onError: () => advanceLine(),
+        onError: () => {
+          setSpeechStatusMessage('Siri ha devuelto un error al reproducir esta linea.');
+          advanceLine();
+        },
       });
     }, speechDelayMs);
 
@@ -216,6 +237,7 @@ export const RehearsalView: React.FC<Props> = ({
     listeningStatus,
     isMyTurn,
     speakableLineText,
+    stopListening,
     stopSongAudio,
   ]);
 
@@ -311,27 +333,13 @@ export const RehearsalView: React.FC<Props> = ({
           <Text style={[styles.backLink, !canGoBack && styles.backLinkDisabled]}>{'<'} Linea anterior</Text>
         </TouchableOpacity>
         {isListeningSupported ? (
-          <TouchableOpacity
-            onPress={() => {
-              if (autoListenEnabled) {
-                setAutoListenEnabled(false);
-                stopListening();
-                return;
-              }
-
-              setAutoListenEnabled(true);
-            }}
-          >
-            <Text style={[styles.listenLink, autoListenEnabled && styles.listenLinkActive]}>
-              {listeningStatus === 'requesting'
-                ? 'Pidiendo micro...'
-                : autoListenEnabled
-                  ? isListeningActive
-                    ? 'Escucha activa'
-                    : 'Escucha preparada'
-                  : 'Activar escucha'}
-            </Text>
-          </TouchableOpacity>
+          <Text style={[styles.listenLink, autoListenEnabled && styles.listenLinkActive]}>
+            {listeningStatus === 'requesting'
+              ? 'Pidiendo micro...'
+              : isListeningActive
+                ? 'Escucha activa'
+                : 'Escucha automatica'}
+          </Text>
         ) : null}
       </View>
       <View style={styles.headerStatus}>
@@ -458,12 +466,6 @@ export const RehearsalView: React.FC<Props> = ({
             {isMyTurn && listeningStatus === 'error' && listeningError ? (
               <Text style={styles.listenError}>{listeningError}</Text>
             ) : null}
-            {isMyTurn && isListeningSupported && !autoListenEnabled ? (
-              <Text style={styles.listenHint}>
-                Activa la escucha una vez: a partir de ahi se armara sola en tus lineas y avanzara tras 1
-                segundo de silencio.
-              </Text>
-            ) : null}
             {isMyTurn && autoListenEnabled ? (
               <View style={styles.listenMonitor}>
                 <Text style={styles.listenHint}>
@@ -495,6 +497,14 @@ export const RehearsalView: React.FC<Props> = ({
                 <Text style={styles.listenDebugText}>
                   Voz confirmada: {hasSpeechStarted ? 'si' : 'no'} · Sobre umbral:{' '}
                   {isSignalAboveThreshold ? 'si' : 'no'}
+                </Text>
+              </View>
+            ) : null}
+            {!isMyTurn && speechStatusMessage ? (
+              <View style={styles.speechMonitor}>
+                <Text style={styles.speechMonitorText}>{speechStatusMessage}</Text>
+                <Text style={styles.speechMonitorTextSmall}>
+                  Estado micro: {listeningStatus} · Escucha automatica: si
                 </Text>
               </View>
             ) : null}
@@ -703,6 +713,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#47604f',
     textAlign: 'center',
+    lineHeight: 18,
+  },
+  speechMonitor: {
+    marginTop: 14,
+    width: '100%',
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(235, 244, 255, 0.92)',
+    borderWidth: 1,
+    borderColor: '#d4e3f3',
+    gap: 6,
+  },
+  speechMonitorText: {
+    color: '#22476b',
+    textAlign: 'center',
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  speechMonitorTextSmall: {
+    color: '#4f6274',
+    textAlign: 'center',
+    fontSize: 12,
     lineHeight: 18,
   },
   footer: { backgroundColor: '#007AFF', padding: 25, alignItems: 'center' },

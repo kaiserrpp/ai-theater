@@ -76,6 +76,7 @@ export const useSilenceAdvance = ({
   const lineCompletedRef = useRef(false);
   const lastUiUpdateRef = useRef(0);
   const lastFrameTimestampRef = useRef(0);
+  const requestVersionRef = useRef(0);
 
   const isListeningSupported = useMemo(isListeningSupportedOnDevice, []);
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>(
@@ -140,6 +141,8 @@ export const useSilenceAdvance = ({
   }, []);
 
   const stopListening = useCallback(() => {
+    requestVersionRef.current += 1;
+
     if (frameRef.current !== null && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
@@ -319,6 +322,8 @@ export const useSilenceAdvance = ({
     setListeningError(null);
 
     try {
+      const requestVersion = requestVersionRef.current + 1;
+      requestVersionRef.current = requestVersion;
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -341,6 +346,14 @@ export const useSilenceAdvance = ({
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 2048;
       sourceNode.connect(analyser);
+
+      if (requestVersionRef.current !== requestVersion) {
+        sourceNode.disconnect();
+        analyser.disconnect();
+        mediaStream.getTracks().forEach((track) => track.stop());
+        void audioContext.close().catch(() => undefined);
+        return;
+      }
 
       streamRef.current = mediaStream;
       audioContextRef.current = audioContext;
