@@ -29,7 +29,7 @@ const THRESHOLD_MULTIPLIER = 2.3;
 const THRESHOLD_RELEASE_FACTOR = 0.78;
 const SILENCE_MS = 1000;
 const LINE_GRACE_MS = 350;
-const REQUIRED_VOICE_FRAMES = 2;
+const REQUIRED_VOICE_FRAMES = 1;
 
 type WindowWithWebkitAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
