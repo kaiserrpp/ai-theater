@@ -29,7 +29,8 @@ const THRESHOLD_MULTIPLIER = 2.1;
 const THRESHOLD_RELEASE_FACTOR = 0.78;
 const SILENCE_MS = 1000;
 const LINE_GRACE_MS = 350;
-const MIN_SPEECH_MS = 320;
+const MIN_SPEECH_MS = 160;
+const SPEECH_GAP_TOLERANCE_MS = 220;
 
 type WindowWithWebkitAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
@@ -231,7 +232,12 @@ export const useSilenceAdvance = ({
         }
       } else {
         if (!hasDetectedVoiceRef.current) {
-          speechStartRef.current = 0;
+          if (
+            speechStartRef.current > 0 &&
+            now - lastVoiceTimestampRef.current > SPEECH_GAP_TOLERANCE_MS
+          ) {
+            speechStartRef.current = 0;
+          }
         }
 
         if (
@@ -265,6 +271,8 @@ export const useSilenceAdvance = ({
             ? hasDetectedVoiceRef.current
               ? 'hablando'
               : 'armando voz'
+            : speechStartRef.current > 0 && !hasDetectedVoiceRef.current
+              ? 'armando voz'
             : hasDetectedVoiceRef.current
               ? 'silencio detectado'
               : 'esperando voz'
