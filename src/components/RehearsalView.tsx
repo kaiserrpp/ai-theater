@@ -5,11 +5,7 @@ import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
 import { REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
 import { SharedSongAsset } from '../types/sharedScript';
-import {
-  isProblematicSpeechListeningEnvironment,
-  speakRehearsalSpeech,
-  stopRehearsalSpeech,
-} from '../utils/rehearsalSpeech';
+import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
 
@@ -32,14 +28,14 @@ export const RehearsalView: React.FC<Props> = ({
   onProgressChange,
   onExit,
 }) => {
-  const shouldPreferSpeechCompatibilityMode = isProblematicSpeechListeningEnvironment();
   const filteredGuion = useMemo(() => filterScriptByScenes(guion, filterScenes), [filterScenes, guion]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
-  const [autoListenEnabled, setAutoListenEnabled] = useState(!shouldPreferSpeechCompatibilityMode);
+  const [autoListenEnabled, setAutoListenEnabled] = useState(true);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
+  const [showCompatibilityInfo, setShowCompatibilityInfo] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -117,17 +113,21 @@ export const RehearsalView: React.FC<Props> = ({
     onSilenceDetected: advanceLine,
   });
 
-  const disableAutoListenForDevice = useCallback(async (reasonMessage: string) => {
-    setAutoListenEnabled(false);
-    setCompatibilityMessage(reasonMessage);
-    stopListening();
+  const disableAutoListenForDevice = useCallback(
+    async (reasonMessage: string, storedValue = 'manual-disabled') => {
+      setAutoListenEnabled(false);
+      setCompatibilityMessage(reasonMessage);
+      setShowCompatibilityInfo(false);
+      stopListening();
 
-    try {
-      await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, 'disabled');
-    } catch (error) {
-      console.error('Error guardando compatibilidad de audio', error);
-    }
-  }, [stopListening]);
+      try {
+        await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, storedValue);
+      } catch (error) {
+        console.error('Error guardando compatibilidad de audio', error);
+      }
+    },
+    [stopListening]
+  );
 
   const stopSongAudio = useCallback(() => {
     if (audioRef.current) {
@@ -169,32 +169,20 @@ export const RehearsalView: React.FC<Props> = ({
           return;
         }
 
-        if (storedMode === 'disabled') {
+        if (storedMode === 'manual-disabled') {
           setAutoListenEnabled(false);
           setCompatibilityMessage(
-            'En este dispositivo hemos desactivado la escucha automatica para no bloquear la voz del resto.'
+            'En este dispositivo has desactivado la escucha automatica porque la voz del resto no se escuchaba bien.'
           );
-          return;
-        }
-
-        if (storedMode === 'enabled') {
-          setAutoListenEnabled(true);
-          setCompatibilityMessage(null);
-          return;
-        }
-
-        if (shouldPreferSpeechCompatibilityMode) {
-          setAutoListenEnabled(false);
-          setCompatibilityMessage(
-            'Compatibilidad iPhone/Safari: la escucha automatica queda desactivada para que las lineas del resto se oigan bien.'
-          );
-          await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, 'disabled');
           return;
         }
 
         setAutoListenEnabled(true);
         setCompatibilityMessage(null);
-        await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, 'enabled');
+
+        if (storedMode === 'disabled' || storedMode === 'enabled') {
+          await AsyncStorage.removeItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY);
+        }
       } catch (error) {
         console.error('Error cargando compatibilidad de audio', error);
       }
@@ -205,7 +193,7 @@ export const RehearsalView: React.FC<Props> = ({
     return () => {
       isMounted = false;
     };
-  }, [shouldPreferSpeechCompatibilityMode]);
+  }, []);
 
   useEffect(() => {
     if (isMyTurn || isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine)) {
@@ -416,18 +404,31 @@ export const RehearsalView: React.FC<Props> = ({
                 ? 'Escucha activa'
                 : autoListenEnabled
                   ? 'Escucha automatica'
-                  : 'Escucha desactivada'}
+                  : 'Escucha manual'}
           </Text>
         ) : null}
       </View>
       <View style={styles.headerStatus}>
-        <Text style={styles.sceneName}>{title}</Text>
+        <View style={styles.headerStatusTopRow}>
+          <Text style={styles.sceneName}>{title}</Text>
+          {compatibilityMessage ? (
+            <TouchableOpacity
+              style={styles.compatibilityDot}
+              onPress={() => setShowCompatibilityInfo((previous) => !previous)}
+            >
+              <Text style={styles.compatibilityDotText}>!</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
         {autoListenEnabled ? (
           <Text style={styles.listenStatus}>
             {isListeningActive ? 'Micro escuchando tu replica' : 'Escucha lista para tu proxima replica'}
           </Text>
-        ) : compatibilityMessage ? (
-          <Text style={styles.listenStatusMuted}>Compatibilidad activada en este dispositivo</Text>
+        ) : null}
+        {compatibilityMessage && showCompatibilityInfo ? (
+          <View style={styles.compatibilityPopover}>
+            <Text style={styles.compatibilityPopoverText}>{compatibilityMessage}</Text>
+          </View>
         ) : null}
       </View>
     </View>
@@ -546,9 +547,6 @@ export const RehearsalView: React.FC<Props> = ({
             {isMyTurn && listeningStatus === 'error' && listeningError ? (
               <Text style={styles.listenError}>{listeningError}</Text>
             ) : null}
-            {compatibilityMessage ? (
-              <Text style={styles.compatibilityHint}>{compatibilityMessage}</Text>
-            ) : null}
             {isMyTurn && autoListenEnabled ? (
               <View style={styles.listenMonitor}>
                 <Text style={styles.listenHint}>
@@ -633,6 +631,13 @@ const styles = StyleSheet.create({
   headerStatus: {
     alignItems: 'flex-end',
     gap: 4,
+    maxWidth: '58%',
+  },
+  headerStatusTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   blue: { color: '#007AFF', fontWeight: 'bold' },
   backLink: { color: '#007AFF', fontWeight: '600' },
@@ -641,7 +646,36 @@ const styles = StyleSheet.create({
   listenLinkActive: { color: '#2b9348' },
   sceneName: { fontSize: 12, color: '#666' },
   listenStatus: { fontSize: 12, color: '#2b9348', fontWeight: '600' },
-  listenStatusMuted: { fontSize: 12, color: '#8a5a00', fontWeight: '600' },
+  compatibilityDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: '#d62828',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compatibilityDotText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '900',
+    lineHeight: 12,
+  },
+  compatibilityPopover: {
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(214, 40, 40, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(214, 40, 40, 0.18)',
+    maxWidth: 240,
+  },
+  compatibilityPopoverText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#7a1f1f',
+    textAlign: 'right',
+  },
   center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
@@ -780,14 +814,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
     color: '#b3261e',
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  compatibilityHint: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#8a5a00',
     fontWeight: '600',
     textAlign: 'center',
     lineHeight: 20,
