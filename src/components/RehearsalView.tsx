@@ -586,6 +586,18 @@ export const RehearsalView: React.FC<Props> = ({
             {!isMyTurn && speechStatusMessage ? (
               <View style={styles.speechMonitor}>
                 <Text style={styles.speechMonitorText}>{speechStatusMessage}</Text>
+                {autoListenEnabled ? (
+                  <TouchableOpacity
+                    style={styles.speechFallbackButton}
+                    onPress={() =>
+                      void disableAutoListenForDevice(
+                        'Hemos desactivado la escucha automatica en este dispositivo porque has indicado que la voz del resto no se escucha bien.'
+                      )
+                    }
+                  >
+                    <Text style={styles.speechFallbackButtonText}>No se escucha la voz</Text>
+                  </TouchableOpacity>
+                ) : null}
                 <Text style={styles.speechMonitorTextSmall}>
                   Estado micro: {listeningStatus} · Escucha automatica: si
                 </Text>
@@ -828,6 +840,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 12,
     lineHeight: 18,
+  },
+  speechFallbackButton: {
+    alignSelf: 'center',
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#b06d00',
+  },
+  speechFallbackButtonText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   footer: { backgroundColor: '#007AFF', padding: 25, alignItems: 'center' },
   footerActive: { backgroundColor: 'red' },
