@@ -2,7 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
-import { REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY } from '../store/storageKeys';
+import {
+  LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
+  REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
+} from '../store/storageKeys';
 import { Dialogue } from '../types/script';
 import { SharedSongAsset } from '../types/sharedScript';
 import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
@@ -164,9 +167,16 @@ export const RehearsalView: React.FC<Props> = ({
 
     const loadAudioCompatibility = async () => {
       try {
-        const storedMode = await AsyncStorage.getItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY);
+        const [storedMode, legacyStoredMode] = await Promise.all([
+          AsyncStorage.getItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY),
+          AsyncStorage.getItem(LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY),
+        ]);
         if (!isMounted) {
           return;
+        }
+
+        if (legacyStoredMode) {
+          await AsyncStorage.removeItem(LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY);
         }
 
         if (storedMode === 'manual-disabled') {
