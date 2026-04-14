@@ -135,6 +135,22 @@ export const RehearsalView: React.FC<Props> = ({
     [stopListening]
   );
 
+  const enableAutoListenForDevice = useCallback(async () => {
+    setAutoListenEnabled(true);
+    setTemporarilySuspendingAutoListen(false);
+    setCompatibilityMessage(null);
+    setShowCompatibilityInfo(false);
+
+    try {
+      await Promise.all([
+        AsyncStorage.removeItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY),
+        AsyncStorage.removeItem(LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY),
+      ]);
+    } catch (error) {
+      console.error('Error reseteando compatibilidad de audio', error);
+    }
+  }, []);
+
   const stopSongAudio = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
@@ -443,15 +459,30 @@ export const RehearsalView: React.FC<Props> = ({
           <Text style={[styles.backLink, !canGoBack && styles.backLinkDisabled]}>{'<'} Linea anterior</Text>
         </TouchableOpacity>
         {isListeningSupported ? (
-          <Text style={[styles.listenLink, autoListenEnabled && styles.listenLinkActive]}>
-            {listeningStatus === 'requesting'
-              ? 'Pidiendo micro...'
-              : isListeningActive
-                ? 'Escucha activa'
-                : autoListenEnabled
-                  ? 'Escucha automatica'
-                  : 'Escucha manual'}
-          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              if (!autoListenEnabled) {
+                void enableAutoListenForDevice();
+              }
+            }}
+            disabled={autoListenEnabled}
+          >
+            <Text
+              style={[
+                styles.listenLink,
+                autoListenEnabled && styles.listenLinkActive,
+                !autoListenEnabled && styles.listenLinkResettable,
+              ]}
+            >
+              {listeningStatus === 'requesting'
+                ? 'Pidiendo micro...'
+                : isListeningActive
+                  ? 'Escucha activa'
+                  : autoListenEnabled
+                    ? 'Escucha automatica'
+                    : 'Escucha manual'}
+            </Text>
+          </TouchableOpacity>
         ) : null}
       </View>
       <View style={styles.headerStatus}>
@@ -690,6 +721,7 @@ const styles = StyleSheet.create({
   backLinkDisabled: { color: '#9fb9d3' },
   listenLink: { color: '#8a5a00', fontWeight: '700' },
   listenLinkActive: { color: '#2b9348' },
+  listenLinkResettable: { color: '#c96b00', textDecorationLine: 'underline' },
   sceneName: { fontSize: 12, color: '#666' },
   listenStatus: { fontSize: 12, color: '#2b9348', fontWeight: '600' },
   compatibilityDot: {
