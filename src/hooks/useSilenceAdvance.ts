@@ -18,14 +18,17 @@ interface UseSilenceAdvanceResult {
   isSignalAboveThreshold: boolean;
   silenceElapsedMs: number;
   voiceThreshold: number;
+  lineStateLabel: string;
   startListening: () => Promise<void>;
   stopListening: () => void;
 }
 
 const MIN_VOICE_THRESHOLD = 0.01;
-const THRESHOLD_MULTIPLIER = 2.4;
+const THRESHOLD_MULTIPLIER = 2.1;
 const THRESHOLD_RELEASE_FACTOR = 0.78;
 const SILENCE_MS = 1000;
+const ARMING_SILENCE_MS = 250;
+const MIN_SPEECH_MS = 320;
 
 type WindowWithWebkitAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
@@ -48,11 +51,17 @@ const isListeningSupportedOnDevice = () =>
 const resetLineTracking = (
   hasDetectedVoiceRef: React.MutableRefObject<boolean>,
   lastVoiceTimestampRef: React.MutableRefObject<number>,
-  silenceHandledRef: React.MutableRefObject<boolean>
+  silenceHandledRef: React.MutableRefObject<boolean>,
+  awaitingQuietRef: React.MutableRefObject<boolean>,
+  quietSinceRef: React.MutableRefObject<number>,
+  speechStartRef: React.MutableRefObject<number>
 ) => {
   hasDetectedVoiceRef.current = false;
   lastVoiceTimestampRef.current = 0;
   silenceHandledRef.current = false;
+  awaitingQuietRef.current = true;
+  quietSinceRef.current = 0;
+  speechStartRef.current = 0;
 };
 
 export const useSilenceAdvance = ({
@@ -70,6 +79,9 @@ export const useSilenceAdvance = ({
   const hasDetectedVoiceRef = useRef(false);
   const lastVoiceTimestampRef = useRef(0);
   const silenceHandledRef = useRef(false);
+  const awaitingQuietRef = useRef(true);
+  const quietSinceRef = useRef(0);
+  const speechStartRef = useRef(0);
   const lastUiUpdateRef = useRef(0);
   const noiseFloorRef = useRef(0.004);
 
@@ -83,6 +95,7 @@ export const useSilenceAdvance = ({
   const [isSignalAboveThreshold, setIsSignalAboveThreshold] = useState(false);
   const [silenceElapsedMs, setSilenceElapsedMs] = useState(0);
   const [voiceThreshold, setVoiceThreshold] = useState(MIN_VOICE_THRESHOLD);
+  const [lineStateLabel, setLineStateLabel] = useState('esperando calma');
 
   onSilenceDetectedRef.current = onSilenceDetected;
 
@@ -113,7 +126,14 @@ export const useSilenceAdvance = ({
     }
 
     samplesRef.current = null;
-    resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+    resetLineTracking(
+      hasDetectedVoiceRef,
+      lastVoiceTimestampRef,
+      silenceHandledRef,
+      awaitingQuietRef,
+      quietSinceRef,
+      speechStartRef
+    );
     lastUiUpdateRef.current = 0;
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
     setListeningError(null);
@@ -122,6 +142,7 @@ export const useSilenceAdvance = ({
     setIsSignalAboveThreshold(false);
     setSilenceElapsedMs(0);
     setVoiceThreshold(MIN_VOICE_THRESHOLD);
+    setLineStateLabel('esperando calma');
   }, [isListeningSupported]);
 
   useEffect(() => () => {
@@ -129,20 +150,36 @@ export const useSilenceAdvance = ({
   }, [stopListening]);
 
   useEffect(() => {
-    resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+    resetLineTracking(
+      hasDetectedVoiceRef,
+      lastVoiceTimestampRef,
+      silenceHandledRef,
+      awaitingQuietRef,
+      quietSinceRef,
+      speechStartRef
+    );
     setSignalLevel(0);
     setHasSpeechStarted(false);
     setIsSignalAboveThreshold(false);
     setSilenceElapsedMs(0);
+    setLineStateLabel('esperando calma');
   }, [lineKey]);
 
   useEffect(() => {
     if (!enabledForCurrentLine) {
-      resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+      resetLineTracking(
+        hasDetectedVoiceRef,
+        lastVoiceTimestampRef,
+        silenceHandledRef,
+        awaitingQuietRef,
+        quietSinceRef,
+        speechStartRef
+      );
       setSignalLevel(0);
       setHasSpeechStarted(false);
       setIsSignalAboveThreshold(false);
       setSilenceElapsedMs(0);
+      setLineStateLabel('esperando calma');
     }
   }, [enabledForCurrentLine]);
 
@@ -176,18 +213,43 @@ export const useSilenceAdvance = ({
     }
 
     if (enabledForCurrentLine) {
-      if (isAboveThreshold) {
-        hasDetectedVoiceRef.current = true;
+      if (awaitingQuietRef.current) {
+        if (!isAboveThreshold) {
+          if (quietSinceRef.current === 0) {
+            quietSinceRef.current = now;
+          }
+
+          if (now - quietSinceRef.current >= ARMING_SILENCE_MS) {
+            awaitingQuietRef.current = false;
+          }
+        } else {
+          quietSinceRef.current = 0;
+        }
+      } else if (isAboveThreshold) {
+        if (speechStartRef.current === 0) {
+          speechStartRef.current = now;
+        }
+
         lastVoiceTimestampRef.current = now;
         silenceHandledRef.current = false;
-      } else if (
-        hasDetectedVoiceRef.current &&
-        !silenceHandledRef.current &&
-        rms <= releaseThreshold &&
-        now - lastVoiceTimestampRef.current >= SILENCE_MS
-      ) {
-        silenceHandledRef.current = true;
-        onSilenceDetectedRef.current();
+
+        if (now - speechStartRef.current >= MIN_SPEECH_MS) {
+          hasDetectedVoiceRef.current = true;
+        }
+      } else {
+        if (!hasDetectedVoiceRef.current) {
+          speechStartRef.current = 0;
+        }
+
+        if (
+          hasDetectedVoiceRef.current &&
+          !silenceHandledRef.current &&
+          rms <= releaseThreshold &&
+          now - lastVoiceTimestampRef.current >= SILENCE_MS
+        ) {
+          silenceHandledRef.current = true;
+          onSilenceDetectedRef.current();
+        }
       }
     }
 
@@ -202,6 +264,17 @@ export const useSilenceAdvance = ({
           : 0
       );
       setVoiceThreshold(adaptiveThreshold);
+      setLineStateLabel(
+        awaitingQuietRef.current
+          ? 'esperando calma'
+          : isAboveThreshold
+            ? hasDetectedVoiceRef.current
+              ? 'hablando'
+              : 'armando voz'
+            : hasDetectedVoiceRef.current
+              ? 'silencio detectado'
+              : 'esperando voz'
+      );
     }
 
     frameRef.current = requestAnimationFrame(monitorSignal);
@@ -250,12 +323,20 @@ export const useSilenceAdvance = ({
       sourceNodeRef.current = sourceNode;
       analyserRef.current = analyser;
       samplesRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
-      resetLineTracking(hasDetectedVoiceRef, lastVoiceTimestampRef, silenceHandledRef);
+      resetLineTracking(
+        hasDetectedVoiceRef,
+        lastVoiceTimestampRef,
+        silenceHandledRef,
+        awaitingQuietRef,
+        quietSinceRef,
+        speechStartRef
+      );
       setSignalLevel(0);
       setHasSpeechStarted(false);
       setIsSignalAboveThreshold(false);
       setSilenceElapsedMs(0);
       setVoiceThreshold(MIN_VOICE_THRESHOLD);
+      setLineStateLabel('esperando calma');
       setListeningStatus('active');
       monitorSignal();
     } catch (error) {
@@ -284,6 +365,7 @@ export const useSilenceAdvance = ({
     isSignalAboveThreshold,
     silenceElapsedMs,
     voiceThreshold,
+    lineStateLabel,
     startListening,
     stopListening,
   };

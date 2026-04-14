@@ -90,6 +90,7 @@ export const RehearsalView: React.FC<Props> = ({
     isSignalAboveThreshold,
     silenceElapsedMs,
     voiceThreshold,
+    lineStateLabel,
     startListening,
     stopListening,
   } = useSilenceAdvance({
@@ -418,17 +419,17 @@ export const RehearsalView: React.FC<Props> = ({
                 </View>
                 <Text style={styles.listenDebugText}>
                   Nivel micro: {Math.round(signalLevel * 100)}% · Estado:{' '}
-                  {isSignalAboveThreshold
-                    ? 'hablando'
-                    : hasSpeechStarted
-                      ? 'silencio detectado'
-                      : 'esperando voz'}
+                  {lineStateLabel}
                 </Text>
                 <Text style={styles.listenDebugText}>
                   Silencio acumulado: {(silenceElapsedMs / 1000).toFixed(1)} s
                 </Text>
                 <Text style={styles.listenDebugText}>
                   Umbral de voz: {(voiceThreshold * 100).toFixed(1)}%
+                </Text>
+                <Text style={styles.listenDebugText}>
+                  Voz confirmada: {hasSpeechStarted ? 'si' : 'no'} · Sobre umbral:{' '}
+                  {isSignalAboveThreshold ? 'si' : 'no'}
                 </Text>
               </View>
             ) : null}
