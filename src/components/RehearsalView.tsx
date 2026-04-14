@@ -30,6 +30,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [autoListenEnabled, setAutoListenEnabled] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -58,6 +59,14 @@ export const RehearsalView: React.FC<Props> = ({
     : null;
   const currentDialogueKey =
     !isFinished && currentLine ? `${currentIndex}:${currentLine.p}:${currentLine.t}` : null;
+  const shouldArmListeningForCurrentLine =
+    autoListenEnabled &&
+    !isFinished &&
+    Boolean(currentLine) &&
+    !isSceneMarker(currentLine) &&
+    !isSongCue(currentLine) &&
+    isMyTurn &&
+    speakableLineText.length > 0;
 
   const isAutoplayBlockedError = useCallback((error: unknown) => {
     const errorName =
@@ -94,13 +103,7 @@ export const RehearsalView: React.FC<Props> = ({
     startListening,
     stopListening,
   } = useSilenceAdvance({
-    enabledForCurrentLine:
-      !isFinished &&
-      Boolean(currentLine) &&
-      !isSceneMarker(currentLine) &&
-      !isSongCue(currentLine) &&
-      isMyTurn &&
-      speakableLineText.length > 0,
+    enabledForCurrentLine: shouldArmListeningForCurrentLine,
     lineKey: currentDialogueKey,
     onSilenceDetected: advanceLine,
   });
@@ -134,6 +137,33 @@ export const RehearsalView: React.FC<Props> = ({
     setAudioError(null);
     setBlockedAutoplayAudio(null);
   }, [currentSongKey]);
+
+  useEffect(() => {
+    if (!autoListenEnabled) {
+      if (isListeningActive) {
+        stopListening();
+      }
+      return;
+    }
+
+    if (shouldArmListeningForCurrentLine) {
+      if (!isListeningActive && listeningStatus !== 'requesting' && listeningStatus !== 'error') {
+        void startListening();
+      }
+      return;
+    }
+
+    if (isListeningActive) {
+      stopListening();
+    }
+  }, [
+    autoListenEnabled,
+    isListeningActive,
+    listeningStatus,
+    shouldArmListeningForCurrentLine,
+    startListening,
+    stopListening,
+  ]);
 
   useEffect(() => {
     Speech.stop();
@@ -262,19 +292,22 @@ export const RehearsalView: React.FC<Props> = ({
         {isListeningSupported ? (
           <TouchableOpacity
             onPress={() => {
-              if (isListeningActive) {
+              if (autoListenEnabled) {
+                setAutoListenEnabled(false);
                 stopListening();
                 return;
               }
 
-              void startListening();
+              setAutoListenEnabled(true);
             }}
           >
-            <Text style={[styles.listenLink, isListeningActive && styles.listenLinkActive]}>
+            <Text style={[styles.listenLink, autoListenEnabled && styles.listenLinkActive]}>
               {listeningStatus === 'requesting'
                 ? 'Pidiendo micro...'
-                : isListeningActive
-                  ? 'Escucha activa'
+                : autoListenEnabled
+                  ? isListeningActive
+                    ? 'Escucha activa'
+                    : 'Escucha preparada'
                   : 'Activar escucha'}
             </Text>
           </TouchableOpacity>
@@ -282,7 +315,11 @@ export const RehearsalView: React.FC<Props> = ({
       </View>
       <View style={styles.headerStatus}>
         <Text style={styles.sceneName}>{title}</Text>
-        {isListeningActive ? <Text style={styles.listenStatus}>Autoavance por silencio activo</Text> : null}
+        {autoListenEnabled ? (
+          <Text style={styles.listenStatus}>
+            {isListeningActive ? 'Micro escuchando tu replica' : 'Escucha lista para tu proxima replica'}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -400,17 +437,18 @@ export const RehearsalView: React.FC<Props> = ({
             {isMyTurn && listeningStatus === 'error' && listeningError ? (
               <Text style={styles.listenError}>{listeningError}</Text>
             ) : null}
-            {isMyTurn && isListeningSupported && !isListeningActive ? (
+            {isMyTurn && isListeningSupported && !autoListenEnabled ? (
               <Text style={styles.listenHint}>
                 Activa la escucha una vez: a partir de ahi se armara sola en tus lineas y avanzara tras 1
                 segundo de silencio.
               </Text>
             ) : null}
-            {isMyTurn && isListeningActive ? (
+            {isMyTurn && autoListenEnabled ? (
               <View style={styles.listenMonitor}>
                 <Text style={styles.listenHint}>
-                  La escucha esta activa para todo el ensayo, pero solo se arma automaticamente cuando entra
-                  una linea tuya.
+                  {isListeningActive
+                    ? 'El micro esta abierto en esta replica: cuando termines y guardes silencio, pasaremos solos.'
+                    : 'La escucha esta activada para el ensayo y abriremos el micro automaticamente al entrar en tu replica.'}
                 </Text>
                 <View style={styles.listenMeterTrack}>
                   <View
