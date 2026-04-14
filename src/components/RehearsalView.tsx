@@ -30,6 +30,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoStartedSongKeyRef = useRef<string | null>(null);
 
   const currentLine = filteredGuion[currentIndex];
   const speakableLineText = useMemo(
@@ -47,6 +48,9 @@ export const RehearsalView: React.FC<Props> = ({
     () => findSharedSongForLine(sharedSongs, guion, currentLine),
     [currentLine, guion, sharedSongs]
   );
+  const currentSongKey = isSongCue(currentLine)
+    ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
+    : null;
 
   const advanceLine = useCallback(() => {
     setCurrentIndex((previousIndex) =>
@@ -122,7 +126,11 @@ export const RehearsalView: React.FC<Props> = ({
     onExit();
   };
 
-  const handlePlaySongAudio = useCallback((audioUrl: string, audioId: string) => {
+  const handlePlaySongAudio = useCallback((
+    audioUrl: string,
+    audioId: string,
+    options?: { advanceOnEnd?: boolean }
+  ) => {
     if (typeof Audio === 'undefined') {
       setAudioError('La reproduccion de audio solo esta disponible en la app web.');
       return;
@@ -140,6 +148,9 @@ export const RehearsalView: React.FC<Props> = ({
     nextAudio.onended = () => {
       setPlayingAudioId(null);
       audioRef.current = null;
+      if (options?.advanceOnEnd) {
+        advanceLine();
+      }
     };
     nextAudio.onerror = () => {
       setPlayingAudioId(null);
@@ -155,7 +166,26 @@ export const RehearsalView: React.FC<Props> = ({
       audioRef.current = null;
       setAudioError('No se pudo reproducir este audio.');
     });
-  }, [playingAudioId, stopSongAudio]);
+  }, [advanceLine, playingAudioId, stopSongAudio]);
+
+  useEffect(() => {
+    if (!currentSongKey) {
+      autoStartedSongKeyRef.current = null;
+      return;
+    }
+
+    if (!currentSongAsset || currentSongAsset.audios.length !== 1) {
+      return;
+    }
+
+    if (autoStartedSongKeyRef.current === currentSongKey) {
+      return;
+    }
+
+    autoStartedSongKeyRef.current = currentSongKey;
+    const [singleAudio] = currentSongAsset.audios;
+    handlePlaySongAudio(singleAudio.audioUrl, singleAudio.id, { advanceOnEnd: true });
+  }, [currentSongAsset, currentSongKey, handlePlaySongAudio]);
 
   const renderHeader = (title: string) => (
     <View style={styles.header}>
@@ -213,7 +243,7 @@ export const RehearsalView: React.FC<Props> = ({
                       </View>
                       <TouchableOpacity
                         style={[styles.songAudioButton, isPlaying && styles.songAudioButtonActive]}
-                        onPress={() => handlePlaySongAudio(audio.audioUrl, audio.id)}
+                        onPress={() => handlePlaySongAudio(audio.audioUrl, audio.id, { advanceOnEnd: true })}
                       >
                         <Text style={styles.songAudioButtonText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
                       </TouchableOpacity>
@@ -228,7 +258,9 @@ export const RehearsalView: React.FC<Props> = ({
             {audioError ? <Text style={styles.songErrorText}>{audioError}</Text> : null}
             <Text style={styles.songText}>{currentLine.t}</Text>
             <Text style={styles.songHint}>
-              La voz se pausa aqui para que podais seguir la letra manualmente.
+              {currentSongAsset?.audios.length === 1
+                ? 'La cancion se reproduce automaticamente y al terminar pasa a la linea siguiente.'
+                : 'La voz se pausa aqui para que podais seguir la letra manualmente.'}
             </Text>
           </View>
         </ScrollView>

@@ -19,7 +19,7 @@ import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScript
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { syncSharedSongsWithScript } from '../utils/sharedSongs';
-import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRoles } from '../utils/scriptScenes';
+import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRolesAndSongs } from '../utils/scriptScenes';
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   ALL: null,
@@ -234,11 +234,11 @@ export const HomeScreen = () => {
     }
 
     if (pendingResumeMode === 'MINE') {
-      return getScenesForRoles(displayScriptData.guion, myRoles);
+      return getScenesForRolesAndSongs(displayScriptData.guion, myRoles, sharedScript?.songs ?? []);
     }
 
     return selectedScenes;
-  }, [displayScriptData, myRoles, pendingResumeMode, selectedScenes]);
+  }, [displayScriptData, myRoles, pendingResumeMode, selectedScenes, sharedScript?.songs]);
 
   const pendingResumeTotalLines = useMemo(() => {
     if (!displayScriptData || pendingResumeScenes.length === 0) {
@@ -321,12 +321,12 @@ export const HomeScreen = () => {
       }
 
       if (mode === 'MINE') {
-        return getScenesForRoles(displayScriptData.guion, myRoles);
+        return getScenesForRolesAndSongs(displayScriptData.guion, myRoles, sharedScript?.songs ?? []);
       }
 
       return selectedScenes;
     },
-    [displayScriptData, myRoles, selectedScenes]
+    [displayScriptData, myRoles, selectedScenes, sharedScript?.songs]
   );
 
   const sortScenesByScriptOrder = useCallback(
