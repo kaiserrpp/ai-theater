@@ -44,6 +44,24 @@ const getUtteranceConstructor = () => {
   return scopedWindow.SpeechSynthesisUtterance ?? null;
 };
 
+export const isProblematicSpeechListeningEnvironment = () => {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent || '';
+  const platform = navigator.platform || '';
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+
+  const isIOSDevice =
+    /iPhone|iPad|iPod/i.test(userAgent) ||
+    (platform === 'MacIntel' && maxTouchPoints > 1);
+  const isSafariBrowser =
+    /Safari/i.test(userAgent) && !/CriOS|FxiOS|EdgiOS|OPiOS|Chrome/i.test(userAgent);
+
+  return isIOSDevice && isSafariBrowser;
+};
+
 const getPreferredVoice = (synth: SpeechSynthesis) => {
   const voices = synth.getVoices();
   if (!voices.length) {

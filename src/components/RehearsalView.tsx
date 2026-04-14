@@ -1,9 +1,15 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
+import { REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
 import { SharedSongAsset } from '../types/sharedScript';
-import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
+import {
+  isProblematicSpeechListeningEnvironment,
+  speakRehearsalSpeech,
+  stopRehearsalSpeech,
+} from '../utils/rehearsalSpeech';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
 
@@ -26,12 +32,14 @@ export const RehearsalView: React.FC<Props> = ({
   onProgressChange,
   onExit,
 }) => {
+  const shouldPreferSpeechCompatibilityMode = isProblematicSpeechListeningEnvironment();
   const filteredGuion = useMemo(() => filterScriptByScenes(guion, filterScenes), [filterScenes, guion]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
-  const [autoListenEnabled] = useState(true);
+  const [autoListenEnabled, setAutoListenEnabled] = useState(!shouldPreferSpeechCompatibilityMode);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
+  const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -109,6 +117,18 @@ export const RehearsalView: React.FC<Props> = ({
     onSilenceDetected: advanceLine,
   });
 
+  const disableAutoListenForDevice = useCallback(async (reasonMessage: string) => {
+    setAutoListenEnabled(false);
+    setCompatibilityMessage(reasonMessage);
+    stopListening();
+
+    try {
+      await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, 'disabled');
+    } catch (error) {
+      console.error('Error guardando compatibilidad de audio', error);
+    }
+  }, [stopListening]);
+
   const stopSongAudio = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
@@ -138,6 +158,54 @@ export const RehearsalView: React.FC<Props> = ({
     setAudioError(null);
     setBlockedAutoplayAudio(null);
   }, [currentSongKey]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAudioCompatibility = async () => {
+      try {
+        const storedMode = await AsyncStorage.getItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY);
+        if (!isMounted) {
+          return;
+        }
+
+        if (storedMode === 'disabled') {
+          setAutoListenEnabled(false);
+          setCompatibilityMessage(
+            'En este dispositivo hemos desactivado la escucha automatica para no bloquear la voz del resto.'
+          );
+          return;
+        }
+
+        if (storedMode === 'enabled') {
+          setAutoListenEnabled(true);
+          setCompatibilityMessage(null);
+          return;
+        }
+
+        if (shouldPreferSpeechCompatibilityMode) {
+          setAutoListenEnabled(false);
+          setCompatibilityMessage(
+            'Compatibilidad iPhone/Safari: la escucha automatica queda desactivada para que las lineas del resto se oigan bien.'
+          );
+          await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, 'disabled');
+          return;
+        }
+
+        setAutoListenEnabled(true);
+        setCompatibilityMessage(null);
+        await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, 'enabled');
+      } catch (error) {
+        console.error('Error cargando compatibilidad de audio', error);
+      }
+    };
+
+    void loadAudioCompatibility();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [shouldPreferSpeechCompatibilityMode]);
 
   useEffect(() => {
     if (isMyTurn || isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine)) {
@@ -222,6 +290,9 @@ export const RehearsalView: React.FC<Props> = ({
           setSpeechStatusMessage(
             `Siri ha fallado al reproducir esta linea (${error.message}).`
           );
+          void disableAutoListenForDevice(
+            'Hemos desactivado la escucha automatica en este dispositivo porque la voz del resto no se ha podido reproducir correctamente.'
+          );
           advanceLine();
         },
       });
@@ -241,6 +312,7 @@ export const RehearsalView: React.FC<Props> = ({
     listeningStatus,
     isMyTurn,
     speakableLineText,
+    disableAutoListenForDevice,
     stopListening,
     stopSongAudio,
   ]);
@@ -342,7 +414,9 @@ export const RehearsalView: React.FC<Props> = ({
               ? 'Pidiendo micro...'
               : isListeningActive
                 ? 'Escucha activa'
-                : 'Escucha automatica'}
+                : autoListenEnabled
+                  ? 'Escucha automatica'
+                  : 'Escucha desactivada'}
           </Text>
         ) : null}
       </View>
@@ -352,6 +426,8 @@ export const RehearsalView: React.FC<Props> = ({
           <Text style={styles.listenStatus}>
             {isListeningActive ? 'Micro escuchando tu replica' : 'Escucha lista para tu proxima replica'}
           </Text>
+        ) : compatibilityMessage ? (
+          <Text style={styles.listenStatusMuted}>Compatibilidad activada en este dispositivo</Text>
         ) : null}
       </View>
     </View>
@@ -470,6 +546,9 @@ export const RehearsalView: React.FC<Props> = ({
             {isMyTurn && listeningStatus === 'error' && listeningError ? (
               <Text style={styles.listenError}>{listeningError}</Text>
             ) : null}
+            {compatibilityMessage ? (
+              <Text style={styles.compatibilityHint}>{compatibilityMessage}</Text>
+            ) : null}
             {isMyTurn && autoListenEnabled ? (
               <View style={styles.listenMonitor}>
                 <Text style={styles.listenHint}>
@@ -550,6 +629,7 @@ const styles = StyleSheet.create({
   listenLinkActive: { color: '#2b9348' },
   sceneName: { fontSize: 12, color: '#666' },
   listenStatus: { fontSize: 12, color: '#2b9348', fontWeight: '600' },
+  listenStatusMuted: { fontSize: 12, color: '#8a5a00', fontWeight: '600' },
   center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
@@ -688,6 +768,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
     color: '#b3261e',
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  compatibilityHint: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#8a5a00',
     fontWeight: '600',
     textAlign: 'center',
     lineHeight: 20,
