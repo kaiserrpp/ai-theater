@@ -29,6 +29,10 @@ export const RehearsalView: React.FC<Props> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
+    audioId: string;
+    audioUrl: string;
+  } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoStartedSongKeyRef = useRef<string | null>(null);
 
@@ -52,27 +56,20 @@ export const RehearsalView: React.FC<Props> = ({
     ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
     : null;
 
-  const getSongPlaybackErrorMessage = useCallback(
-    (error: unknown, isAutomaticAttempt: boolean) => {
-      const errorName =
-        error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-      const errorMessage =
-        error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
-      const normalizedText = `${errorName} ${errorMessage}`.toLowerCase();
-      const isAutoplayBlocked =
-        normalizedText.includes('notallowed') ||
-        normalizedText.includes('not allowed') ||
-        normalizedText.includes('user gesture') ||
-        normalizedText.includes('gesture');
+  const isAutoplayBlockedError = useCallback((error: unknown) => {
+    const errorName =
+      error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+    const errorMessage =
+      error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
+    const normalizedText = `${errorName} ${errorMessage}`.toLowerCase();
 
-      if (isAutomaticAttempt && isAutoplayBlocked) {
-        return 'En iPhone o Safari puede hacer falta pulsar Reproducir para iniciar la cancion.';
-      }
-
-      return 'No se pudo reproducir este audio.';
-    },
-    []
-  );
+    return (
+      normalizedText.includes('notallowed') ||
+      normalizedText.includes('not allowed') ||
+      normalizedText.includes('user gesture') ||
+      normalizedText.includes('gesture')
+    );
+  }, []);
 
   const advanceLine = useCallback(() => {
     setCurrentIndex((previousIndex) =>
@@ -104,6 +101,11 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     onProgressChange?.(Math.min(currentIndex, filteredGuion.length), filteredGuion.length);
   }, [currentIndex, filteredGuion.length, onProgressChange]);
+
+  useEffect(() => {
+    setAudioError(null);
+    setBlockedAutoplayAudio(null);
+  }, [currentSongKey]);
 
   useEffect(() => {
     Speech.stop();
@@ -164,6 +166,7 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     setAudioError(null);
+    setBlockedAutoplayAudio(null);
     stopSongAudio();
 
     const nextAudio = new Audio(audioUrl);
@@ -186,9 +189,15 @@ export const RehearsalView: React.FC<Props> = ({
     void nextAudio.play().catch((error: unknown) => {
       setPlayingAudioId(null);
       audioRef.current = null;
-      setAudioError(getSongPlaybackErrorMessage(error, options?.autoStart === true));
+      if (options?.autoStart && isAutoplayBlockedError(error)) {
+        setBlockedAutoplayAudio({ audioId, audioUrl });
+        setAudioError('Safari o iPhone necesita que actives el audio manualmente para esta cancion.');
+        return;
+      }
+
+      setAudioError('No se pudo reproducir este audio.');
     });
-  }, [advanceLine, getSongPlaybackErrorMessage, playingAudioId, stopSongAudio]);
+  }, [advanceLine, isAutoplayBlockedError, playingAudioId, stopSongAudio]);
 
   useEffect(() => {
     if (!currentSongKey) {
@@ -254,6 +263,23 @@ export const RehearsalView: React.FC<Props> = ({
             {currentSongAsset?.audios.length ? (
               <View style={styles.songAudioList}>
                 <Text style={styles.songSectionTitle}>Audios disponibles</Text>
+                {blockedAutoplayAudio ? (
+                  <View style={styles.songActivationCard}>
+                    <Text style={styles.songActivationText}>
+                      Safari ha bloqueado el arranque automatico de esta cancion.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.songActivationButton}
+                      onPress={() =>
+                        handlePlaySongAudio(blockedAutoplayAudio.audioUrl, blockedAutoplayAudio.audioId, {
+                          advanceOnEnd: true,
+                        })
+                      }
+                    >
+                      <Text style={styles.songActivationButtonText}>Activar audio y reproducir</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
                 {currentSongAsset.audios.map((audio) => {
                   const isPlaying = playingAudioId === audio.id;
 
@@ -398,6 +424,30 @@ const styles = StyleSheet.create({
   },
   songAudioList: {
     gap: 10,
+  },
+  songActivationCard: {
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(95, 58, 0, 0.08)',
+    borderWidth: 1,
+    borderColor: '#d3b26f',
+    gap: 10,
+  },
+  songActivationText: {
+    textAlign: 'center',
+    color: '#5f3a00',
+    lineHeight: 20,
+  },
+  songActivationButton: {
+    alignSelf: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#b06d00',
+  },
+  songActivationButtonText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   songAudioCard: {
     marginTop: 4,
