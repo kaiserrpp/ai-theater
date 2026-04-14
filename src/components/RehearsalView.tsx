@@ -36,6 +36,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [autoListenEnabled, setAutoListenEnabled] = useState(true);
+  const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
   const [showCompatibilityInfo, setShowCompatibilityInfo] = useState(false);
@@ -67,8 +68,9 @@ export const RehearsalView: React.FC<Props> = ({
     : null;
   const currentDialogueKey =
     !isFinished && currentLine ? `${currentIndex}:${currentLine.p}:${currentLine.t}` : null;
+  const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
   const shouldArmListeningForCurrentLine =
-    autoListenEnabled &&
+    effectiveAutoListenEnabled &&
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
@@ -119,6 +121,7 @@ export const RehearsalView: React.FC<Props> = ({
   const disableAutoListenForDevice = useCallback(
     async (reasonMessage: string, storedValue = 'manual-disabled') => {
       setAutoListenEnabled(false);
+      setTemporarilySuspendingAutoListen(false);
       setCompatibilityMessage(reasonMessage);
       setShowCompatibilityInfo(false);
       await stopListening();
@@ -181,6 +184,7 @@ export const RehearsalView: React.FC<Props> = ({
 
         if (storedMode === 'manual-disabled') {
           setAutoListenEnabled(false);
+          setTemporarilySuspendingAutoListen(false);
           setCompatibilityMessage(
             'En este dispositivo has desactivado la escucha automatica porque la voz del resto no se escuchaba bien.'
           );
@@ -188,6 +192,7 @@ export const RehearsalView: React.FC<Props> = ({
         }
 
         setAutoListenEnabled(true);
+        setTemporarilySuspendingAutoListen(false);
         setCompatibilityMessage(null);
 
         if (storedMode === 'disabled' || storedMode === 'enabled') {
@@ -208,11 +213,12 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     if (isMyTurn || isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine)) {
       setSpeechStatusMessage(null);
+      setTemporarilySuspendingAutoListen(false);
     }
   }, [currentLine, isFinished, isMyTurn]);
 
   useEffect(() => {
-    if (!autoListenEnabled) {
+    if (!effectiveAutoListenEnabled) {
       if (isListeningActive) {
         void stopListening();
       }
@@ -230,7 +236,7 @@ export const RehearsalView: React.FC<Props> = ({
       void stopListening();
     }
   }, [
-    autoListenEnabled,
+    effectiveAutoListenEnabled,
     isListeningActive,
     listeningStatus,
     shouldArmListeningForCurrentLine,
@@ -263,18 +269,28 @@ export const RehearsalView: React.FC<Props> = ({
       };
     }
 
+    if (autoListenEnabled && !temporarilySuspendingAutoListen) {
+      setSpeechStatusMessage('Preparando la voz de Siri para la siguiente linea...');
+      setTemporarilySuspendingAutoListen(true);
+      return;
+    }
+
+    if (temporarilySuspendingAutoListen && (isListeningActive || listeningStatus === 'requesting')) {
+      setSpeechStatusMessage('Liberando el micro para reproducir la siguiente linea...');
+      return;
+    }
+
     const playOtherLine = async () => {
-      if (autoListenEnabled) {
-        setSpeechStatusMessage('Liberando el micro para reproducir la siguiente linea...');
+      if (temporarilySuspendingAutoListen) {
         await stopListening();
         if (isCancelled) {
           return;
         }
       }
 
-      const speechDelayMs = autoListenEnabled ? 420 : 0;
+      const speechDelayMs = temporarilySuspendingAutoListen ? 0 : autoListenEnabled ? 120 : 0;
       setSpeechStatusMessage(
-        autoListenEnabled
+        temporarilySuspendingAutoListen || autoListenEnabled
           ? 'Micro liberado. Preparando la voz de Siri para la siguiente linea...'
           : 'Preparando la voz de Siri para la siguiente linea...'
       );
@@ -325,6 +341,7 @@ export const RehearsalView: React.FC<Props> = ({
     advanceLine,
     autoListenEnabled,
     currentLine,
+    temporarilySuspendingAutoListen,
     isFinished,
     isListeningActive,
     listeningStatus,
