@@ -21,7 +21,7 @@ interface UseSilenceAdvanceResult {
   voiceThreshold: number;
   lineStateLabel: string;
   startListening: () => Promise<void>;
-  stopListening: () => void;
+  stopListening: () => Promise<void>;
 }
 
 const MIN_VOICE_THRESHOLD = 0.012;
@@ -140,7 +140,7 @@ export const useSilenceAdvance = ({
     setLineStateLabel('preparando linea');
   }, []);
 
-  const stopListening = useCallback(() => {
+  const stopListening = useCallback(async () => {
     requestVersionRef.current += 1;
 
     if (frameRef.current !== null && typeof cancelAnimationFrame === 'function') {
@@ -164,8 +164,9 @@ export const useSilenceAdvance = ({
     }
 
     if (audioContextRef.current) {
-      void audioContextRef.current.close().catch(() => undefined);
+      const context = audioContextRef.current;
       audioContextRef.current = null;
+      await context.close().catch(() => undefined);
     }
 
     samplesRef.current = null;
@@ -176,7 +177,7 @@ export const useSilenceAdvance = ({
   }, [isListeningSupported, resetTrackingState]);
 
   useEffect(() => () => {
-    stopListening();
+    void stopListening();
   }, [stopListening]);
 
   useEffect(() => {

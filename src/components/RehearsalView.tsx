@@ -118,7 +118,7 @@ export const RehearsalView: React.FC<Props> = ({
       setAutoListenEnabled(false);
       setCompatibilityMessage(reasonMessage);
       setShowCompatibilityInfo(false);
-      stopListening();
+      await stopListening();
 
       try {
         await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, storedValue);
@@ -204,7 +204,7 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     if (!autoListenEnabled) {
       if (isListeningActive) {
-        stopListening();
+        void stopListening();
       }
       return;
     }
@@ -217,7 +217,7 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     if (isListeningActive) {
-      stopListening();
+      void stopListening();
     }
   }, [
     autoListenEnabled,
@@ -231,6 +231,9 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     stopRehearsalSpeech();
     stopSongAudio();
+    let isCancelled = false;
+    let advanceTimeout: ReturnType<typeof setTimeout> | null = null;
+    let speechStartTimeout: ReturnType<typeof setTimeout> | null = null;
 
     if (isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine) || isMyTurn) {
       return () => {
@@ -240,54 +243,71 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     if (!speakableLineText) {
-      setTimeout(advanceLine, 200);
+      advanceTimeout = setTimeout(advanceLine, 200);
       return () => {
+        if (advanceTimeout) {
+          clearTimeout(advanceTimeout);
+        }
         stopRehearsalSpeech();
         stopSongAudio();
       };
     }
 
-    if (autoListenEnabled && (isListeningActive || listeningStatus === 'requesting')) {
-      setSpeechStatusMessage('Esperando a liberar el micro para reproducir la siguiente linea...');
-      if (isListeningActive || listeningStatus === 'requesting') {
-        stopListening();
+    const playOtherLine = async () => {
+      if (autoListenEnabled) {
+        setSpeechStatusMessage('Liberando el micro para reproducir la siguiente linea...');
+        await stopListening();
+        if (isCancelled) {
+          return;
+        }
       }
-      return () => {
-        stopRehearsalSpeech();
-        stopSongAudio();
-      };
-    }
 
-    const speechDelayMs = autoListenEnabled ? 220 : 0;
-    setSpeechStatusMessage(
-      autoListenEnabled
-        ? 'Micro liberado. Preparando la voz de Siri para la siguiente linea...'
-        : 'Preparando la voz de Siri para la siguiente linea...'
-    );
-    const startSpeech = setTimeout(() => {
-      setSpeechStatusMessage('Lanzando la linea con Siri...');
-      speakRehearsalSpeech(speakableLineText, {
-        onStart: () => {
-          setSpeechStatusMessage('Reproduciendo la linea con Siri...');
-        },
-        onDone: () => {
-          setSpeechStatusMessage('Linea reproducida. Avanzando...');
-          setTimeout(advanceLine, 500);
-        },
-        onError: (error) => {
-          setSpeechStatusMessage(
-            `Siri ha fallado al reproducir esta linea (${error.message}).`
-          );
-          void disableAutoListenForDevice(
-            'Hemos desactivado la escucha automatica en este dispositivo porque la voz del resto no se ha podido reproducir correctamente.'
-          );
-          advanceLine();
-        },
-      });
-    }, speechDelayMs);
+      const speechDelayMs = autoListenEnabled ? 420 : 0;
+      setSpeechStatusMessage(
+        autoListenEnabled
+          ? 'Micro liberado. Preparando la voz de Siri para la siguiente linea...'
+          : 'Preparando la voz de Siri para la siguiente linea...'
+      );
+
+      speechStartTimeout = setTimeout(() => {
+        setSpeechStatusMessage('Lanzando la linea con Siri...');
+        speakRehearsalSpeech(speakableLineText, {
+          onStart: () => {
+            if (isCancelled) {
+              return;
+            }
+            setSpeechStatusMessage('Reproduciendo la linea con Siri...');
+          },
+          onDone: () => {
+            if (isCancelled) {
+              return;
+            }
+            setSpeechStatusMessage('Linea reproducida. Avanzando...');
+            advanceTimeout = setTimeout(advanceLine, 500);
+          },
+          onError: (error) => {
+            if (isCancelled) {
+              return;
+            }
+            setSpeechStatusMessage(
+              `Siri ha fallado al reproducir esta linea (${error.message}).`
+            );
+          },
+        });
+      }, speechDelayMs);
+    };
+
+    void playOtherLine();
 
     return () => {
-      clearTimeout(startSpeech);
+      isCancelled = true;
+      if (advanceTimeout) {
+        clearTimeout(advanceTimeout);
+      }
+      if (speechStartTimeout) {
+        clearTimeout(speechStartTimeout);
+      }
+      void stopListening();
       stopRehearsalSpeech();
       stopSongAudio();
     };
@@ -300,7 +320,6 @@ export const RehearsalView: React.FC<Props> = ({
     listeningStatus,
     isMyTurn,
     speakableLineText,
-    disableAutoListenForDevice,
     stopListening,
     stopSongAudio,
   ]);
@@ -312,7 +331,7 @@ export const RehearsalView: React.FC<Props> = ({
   const handleExit = () => {
     stopRehearsalSpeech();
     stopSongAudio();
-    stopListening();
+    void stopListening();
     onExit();
   };
 
