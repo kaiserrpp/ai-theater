@@ -1,6 +1,7 @@
 import * as Speech from 'expo-speech';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
 import { Dialogue } from '../types/script';
 import { SharedSongAsset } from '../types/sharedScript';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
@@ -55,6 +56,8 @@ export const RehearsalView: React.FC<Props> = ({
   const currentSongKey = isSongCue(currentLine)
     ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
     : null;
+  const currentDialogueKey =
+    !isFinished && currentLine ? `${currentIndex}:${currentLine.p}:${currentLine.t}` : null;
 
   const isAutoplayBlockedError = useCallback((error: unknown) => {
     const errorName =
@@ -76,6 +79,25 @@ export const RehearsalView: React.FC<Props> = ({
       previousIndex < filteredGuion.length ? previousIndex + 1 : previousIndex
     );
   }, [filteredGuion.length]);
+
+  const {
+    listeningStatus,
+    listeningError,
+    isListeningActive,
+    isListeningSupported,
+    startListening,
+    stopListening,
+  } = useSilenceAdvance({
+    enabledForCurrentLine:
+      !isFinished &&
+      Boolean(currentLine) &&
+      !isSceneMarker(currentLine) &&
+      !isSongCue(currentLine) &&
+      isMyTurn &&
+      speakableLineText.length > 0,
+    lineKey: currentDialogueKey,
+    onSilenceDetected: advanceLine,
+  });
 
   const stopSongAudio = useCallback(() => {
     if (audioRef.current) {
@@ -147,6 +169,7 @@ export const RehearsalView: React.FC<Props> = ({
   const handleExit = () => {
     Speech.stop();
     stopSongAudio();
+    stopListening();
     onExit();
   };
 
@@ -230,8 +253,31 @@ export const RehearsalView: React.FC<Props> = ({
         <TouchableOpacity onPress={goBackLine} disabled={!canGoBack}>
           <Text style={[styles.backLink, !canGoBack && styles.backLinkDisabled]}>{'<'} Linea anterior</Text>
         </TouchableOpacity>
+        {isListeningSupported ? (
+          <TouchableOpacity
+            onPress={() => {
+              if (isListeningActive) {
+                stopListening();
+                return;
+              }
+
+              void startListening();
+            }}
+          >
+            <Text style={[styles.listenLink, isListeningActive && styles.listenLinkActive]}>
+              {listeningStatus === 'requesting'
+                ? 'Pidiendo micro...'
+                : isListeningActive
+                  ? 'Escucha activa'
+                  : 'Activar escucha'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
-      <Text style={styles.sceneName}>{title}</Text>
+      <View style={styles.headerStatus}>
+        <Text style={styles.sceneName}>{title}</Text>
+        {isListeningActive ? <Text style={styles.listenStatus}>Autoavance por silencio activo</Text> : null}
+      </View>
     </View>
   );
 
@@ -341,6 +387,19 @@ export const RehearsalView: React.FC<Props> = ({
             {currentLine?.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
             <Text style={[styles.text, isMyTurn && styles.myText]}>{currentLine?.t}</Text>
             {isMyTurn && <Text style={styles.myTurnHint}>Tu turno: lee y pulsa siguiente</Text>}
+            {isMyTurn && listeningStatus === 'error' && listeningError ? (
+              <Text style={styles.listenError}>{listeningError}</Text>
+            ) : null}
+            {isMyTurn && isListeningSupported && !isListeningActive ? (
+              <Text style={styles.listenHint}>
+                Activa la escucha una vez para que la app avance sola tras 1 segundo de silencio.
+              </Text>
+            ) : null}
+            {isMyTurn && isListeningActive ? (
+              <Text style={styles.listenHint}>
+                La escucha esta activa: cuando termines y guardes silencio, pasaremos a la siguiente linea.
+              </Text>
+            ) : null}
           </View>
         )}
       </ScrollView>
@@ -368,10 +427,17 @@ const styles = StyleSheet.create({
   headerActions: {
     gap: 8,
   },
+  headerStatus: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
   blue: { color: '#007AFF', fontWeight: 'bold' },
   backLink: { color: '#007AFF', fontWeight: '600' },
   backLinkDisabled: { color: '#9fb9d3' },
+  listenLink: { color: '#8a5a00', fontWeight: '700' },
+  listenLinkActive: { color: '#2b9348' },
   sceneName: { fontSize: 12, color: '#666' },
+  listenStatus: { fontSize: 12, color: '#2b9348', fontWeight: '600' },
   center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
@@ -498,6 +564,22 @@ const styles = StyleSheet.create({
   text: { fontSize: 26, textAlign: 'center', lineHeight: 38 },
   myText: { color: '#d32f2f', fontWeight: '500' },
   myTurnHint: { marginTop: 20, fontSize: 14, color: '#d32f2f', fontWeight: 'bold' },
+  listenHint: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#4f6274',
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  listenError: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#b3261e',
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   footer: { backgroundColor: '#007AFF', padding: 25, alignItems: 'center' },
   footerActive: { backgroundColor: 'red' },
   songFooter: { backgroundColor: '#d98a00' },
