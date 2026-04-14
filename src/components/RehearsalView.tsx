@@ -1,9 +1,9 @@
-import * as Speech from 'expo-speech';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
 import { Dialogue } from '../types/script';
 import { SharedSongAsset } from '../types/sharedScript';
+import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
 
@@ -120,7 +120,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, []);
 
   const goBackLine = useCallback(() => {
-    Speech.stop();
+    stopRehearsalSpeech();
     stopSongAudio();
     setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
   }, [stopSongAudio]);
@@ -173,12 +173,12 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
-    Speech.stop();
+    stopRehearsalSpeech();
     stopSongAudio();
 
     if (isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine) || isMyTurn) {
       return () => {
-        void Speech.stop();
+        stopRehearsalSpeech();
         stopSongAudio();
       };
     }
@@ -186,7 +186,7 @@ export const RehearsalView: React.FC<Props> = ({
     if (!speakableLineText) {
       setTimeout(advanceLine, 200);
       return () => {
-        void Speech.stop();
+        stopRehearsalSpeech();
         stopSongAudio();
       };
     }
@@ -197,7 +197,7 @@ export const RehearsalView: React.FC<Props> = ({
         stopListening();
       }
       return () => {
-        void Speech.stop();
+        stopRehearsalSpeech();
         stopSongAudio();
       };
     }
@@ -209,15 +209,19 @@ export const RehearsalView: React.FC<Props> = ({
         : 'Preparando la voz de Siri para la siguiente linea...'
     );
     const startSpeech = setTimeout(() => {
-      setSpeechStatusMessage('Reproduciendo la linea con Siri...');
-      Speech.speak(speakableLineText, {
-        language: 'es-ES',
+      setSpeechStatusMessage('Lanzando la linea con Siri...');
+      speakRehearsalSpeech(speakableLineText, {
+        onStart: () => {
+          setSpeechStatusMessage('Reproduciendo la linea con Siri...');
+        },
         onDone: () => {
           setSpeechStatusMessage('Linea reproducida. Avanzando...');
           setTimeout(advanceLine, 500);
         },
-        onError: () => {
-          setSpeechStatusMessage('Siri ha devuelto un error al reproducir esta linea.');
+        onError: (error) => {
+          setSpeechStatusMessage(
+            `Siri ha fallado al reproducir esta linea (${error.message}).`
+          );
           advanceLine();
         },
       });
@@ -225,7 +229,7 @@ export const RehearsalView: React.FC<Props> = ({
 
     return () => {
       clearTimeout(startSpeech);
-      void Speech.stop();
+      stopRehearsalSpeech();
       stopSongAudio();
     };
   }, [
@@ -246,7 +250,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, [stopSongAudio]);
 
   const handleExit = () => {
-    Speech.stop();
+    stopRehearsalSpeech();
     stopSongAudio();
     stopListening();
     onExit();
