@@ -184,19 +184,40 @@ export const RehearsalView: React.FC<Props> = ({
       };
     }
 
-    Speech.speak(speakableLineText, {
-      language: 'es-ES',
-      onDone: () => {
-        setTimeout(advanceLine, 500);
-      },
-      onError: () => advanceLine(),
-    });
+    if (autoListenEnabled && (isListeningActive || listeningStatus === 'requesting')) {
+      return () => {
+        void Speech.stop();
+        stopSongAudio();
+      };
+    }
+
+    const speechDelayMs = autoListenEnabled ? 220 : 0;
+    const startSpeech = setTimeout(() => {
+      Speech.speak(speakableLineText, {
+        language: 'es-ES',
+        onDone: () => {
+          setTimeout(advanceLine, 500);
+        },
+        onError: () => advanceLine(),
+      });
+    }, speechDelayMs);
 
     return () => {
+      clearTimeout(startSpeech);
       void Speech.stop();
       stopSongAudio();
     };
-  }, [advanceLine, currentLine, isFinished, isMyTurn, speakableLineText, stopSongAudio]);
+  }, [
+    advanceLine,
+    autoListenEnabled,
+    currentLine,
+    isFinished,
+    isListeningActive,
+    listeningStatus,
+    isMyTurn,
+    speakableLineText,
+    stopSongAudio,
+  ]);
 
   useEffect(() => () => {
     stopSongAudio();
