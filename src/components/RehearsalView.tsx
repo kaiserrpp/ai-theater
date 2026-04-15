@@ -40,6 +40,10 @@ export const RehearsalView: React.FC<Props> = ({
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
   const [showCompatibilityInfo, setShowCompatibilityInfo] = useState(false);
+  const [isRehearsalMediaReady, setIsRehearsalMediaReady] = useState(true);
+  const [isPreparingRehearsalMedia, setIsPreparingRehearsalMedia] = useState(false);
+  const [rehearsalMediaStatus, setRehearsalMediaStatus] = useState<string | null>(null);
+  const [hasPreparedRehearsalMedia, setHasPreparedRehearsalMedia] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -71,6 +75,7 @@ export const RehearsalView: React.FC<Props> = ({
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
   const shouldArmListeningForCurrentLine =
     effectiveAutoListenEnabled &&
+    isRehearsalMediaReady &&
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
@@ -122,6 +127,10 @@ export const RehearsalView: React.FC<Props> = ({
     async (reasonMessage: string, storedValue = 'manual-disabled') => {
       setAutoListenEnabled(false);
       setTemporarilySuspendingAutoListen(false);
+      setIsRehearsalMediaReady(true);
+      setIsPreparingRehearsalMedia(false);
+      setHasPreparedRehearsalMedia(false);
+      setRehearsalMediaStatus(null);
       setCompatibilityMessage(reasonMessage);
       setShowCompatibilityInfo(false);
       await stopListening();
@@ -138,6 +147,10 @@ export const RehearsalView: React.FC<Props> = ({
   const enableAutoListenForDevice = useCallback(async () => {
     setAutoListenEnabled(true);
     setTemporarilySuspendingAutoListen(false);
+    setIsRehearsalMediaReady(false);
+    setIsPreparingRehearsalMedia(false);
+    setHasPreparedRehearsalMedia(false);
+    setRehearsalMediaStatus('Antes de empezar, vamos a preparar micro y voz.');
     setCompatibilityMessage(null);
     setShowCompatibilityInfo(false);
 
@@ -150,6 +163,21 @@ export const RehearsalView: React.FC<Props> = ({
       console.error('Error reseteando compatibilidad de audio', error);
     }
   }, []);
+
+  useEffect(() => {
+    if (!autoListenEnabled || !isListeningSupported) {
+      setIsRehearsalMediaReady(true);
+      setIsPreparingRehearsalMedia(false);
+      setHasPreparedRehearsalMedia(false);
+      setRehearsalMediaStatus(null);
+      return;
+    }
+
+    setIsRehearsalMediaReady(false);
+    setIsPreparingRehearsalMedia(false);
+    setHasPreparedRehearsalMedia(false);
+    setRehearsalMediaStatus('Antes de empezar, vamos a preparar micro y voz.');
+  }, [autoListenEnabled, isListeningSupported]);
 
   const stopSongAudio = useCallback(() => {
     if (audioRef.current) {
@@ -378,6 +406,62 @@ export const RehearsalView: React.FC<Props> = ({
     onExit();
   };
 
+  const prepareRehearsalMedia = useCallback(async () => {
+    setIsPreparingRehearsalMedia(true);
+    setHasPreparedRehearsalMedia(false);
+    setRehearsalMediaStatus('Abriendo el micro de prueba...');
+
+    try {
+      await startListening();
+      await new Promise((resolve) => setTimeout(resolve, 450));
+
+      setRehearsalMediaStatus('Liberando el micro para probar la voz...');
+      await stopListening();
+      await new Promise((resolve) => setTimeout(resolve, 220));
+
+      setRehearsalMediaStatus('Escucha la frase de prueba de Siri.');
+
+      await new Promise<void>((resolve) => {
+        let isResolved = false;
+
+        speakRehearsalSpeech('Prueba de audio lista. Vamos a ensayar.', {
+          onStart: () => {
+            setRehearsalMediaStatus('Reproduciendo frase de prueba...');
+          },
+          onDone: () => {
+            if (isResolved) {
+              return;
+            }
+            isResolved = true;
+            resolve();
+          },
+          onError: () => {
+            if (isResolved) {
+              return;
+            }
+            isResolved = true;
+            resolve();
+          },
+        });
+
+        setTimeout(() => {
+          if (isResolved) {
+            return;
+          }
+          isResolved = true;
+          resolve();
+        }, 2600);
+      });
+
+      setHasPreparedRehearsalMedia(true);
+      setRehearsalMediaStatus('Si has oido la frase, ya podemos empezar el ensayo.');
+    } catch {
+      setRehearsalMediaStatus('No se pudo preparar el micro. Puedes volver a intentarlo.');
+    } finally {
+      setIsPreparingRehearsalMedia(false);
+    }
+  }, [startListening, stopListening]);
+
   const handlePlaySongAudio = useCallback((
     audioUrl: string,
     audioId: string,
@@ -510,6 +594,58 @@ export const RehearsalView: React.FC<Props> = ({
       </View>
     </View>
   );
+
+  if (!isRehearsalMediaReady) {
+    return (
+      <View style={styles.container}>
+        {renderHeader('Preparando audio y micro')}
+        <View style={styles.intro}>
+          <View style={styles.preflightCard}>
+            <Text style={styles.preflightTitle}>Preparar ensayo</Text>
+            <Text style={styles.preflightText}>
+              Vamos a probar primero el micro y una frase corta de Siri para que el ensayo no arranque a medias.
+            </Text>
+            {rehearsalMediaStatus ? (
+              <Text style={styles.preflightStatus}>{rehearsalMediaStatus}</Text>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.btnNext, isPreparingRehearsalMedia && styles.buttonDisabled]}
+              onPress={() => void prepareRehearsalMedia()}
+              disabled={isPreparingRehearsalMedia}
+            >
+              <Text style={styles.btnText}>
+                {isPreparingRehearsalMedia
+                  ? 'Preparando...'
+                  : hasPreparedRehearsalMedia
+                    ? 'Repetir prueba'
+                    : 'Preparar audio y micro'}
+              </Text>
+            </TouchableOpacity>
+            {hasPreparedRehearsalMedia ? (
+              <View style={styles.preflightActions}>
+                <TouchableOpacity
+                  style={[styles.preflightActionButton, styles.preflightConfirmButton]}
+                  onPress={() => setIsRehearsalMediaReady(true)}
+                >
+                  <Text style={styles.preflightConfirmText}>He oido la prueba</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.preflightActionButton, styles.preflightFallbackButton]}
+                  onPress={() =>
+                    void disableAutoListenForDevice(
+                      'Has indicado que la voz de prueba no se escuchaba bien en este dispositivo.'
+                    ).then(() => setIsRehearsalMediaReady(true))
+                  }
+                >
+                  <Text style={styles.preflightFallbackText}>No he oido la voz</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   if (isSceneMarker(currentLine)) {
     return (
@@ -757,6 +893,62 @@ const styles = StyleSheet.create({
   center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
+  preflightCard: {
+    width: '100%',
+    maxWidth: 540,
+    padding: 24,
+    borderRadius: 20,
+    backgroundColor: '#f8fbff',
+    borderWidth: 1,
+    borderColor: '#d7e6f5',
+    gap: 16,
+  },
+  preflightTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
+    color: '#17324c',
+  },
+  preflightText: {
+    textAlign: 'center',
+    lineHeight: 22,
+    color: '#47604f',
+  },
+  preflightStatus: {
+    textAlign: 'center',
+    lineHeight: 22,
+    color: '#1e6091',
+    fontWeight: '600',
+  },
+  preflightActions: {
+    gap: 10,
+    marginTop: 4,
+  },
+  preflightActionButton: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  preflightConfirmButton: {
+    backgroundColor: 'rgba(43, 147, 72, 0.84)',
+    borderColor: 'rgba(43, 147, 72, 0.95)',
+  },
+  preflightFallbackButton: {
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderColor: '#f1c8c8',
+  },
+  preflightConfirmText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  preflightFallbackText: {
+    color: '#c62828',
+    fontWeight: '700',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
   finishedBox: { alignItems: 'center' },
   finishedTitle: { fontSize: 20, fontWeight: 'bold' },
   box: { padding: 30, borderRadius: 20, backgroundColor: '#f8f9fa', alignItems: 'center' },
