@@ -17,6 +17,7 @@ import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
 import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScriptConfig } from '../types/script';
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
+import { getScriptIdentity } from '../utils/scriptIdentity';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
 import { syncSharedSongsWithScript } from '../utils/sharedSongs';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRolesAndSongs } from '../utils/scriptScenes';
@@ -75,6 +76,18 @@ const formatSharedScriptTimestamp = (value: string) => {
     timeStyle: 'short',
   })}`;
 };
+
+const cloneSavedScriptConfig = (config: SavedScriptConfig): SavedScriptConfig => ({
+  myRoles: [...config.myRoles],
+  selectedScenes: [...config.selectedScenes],
+  lastRehearsalMode: config.lastRehearsalMode,
+  rehearsalCheckpoints: {
+    ALL: config.rehearsalCheckpoints.ALL ? { ...config.rehearsalCheckpoints.ALL, sceneFilter: [...config.rehearsalCheckpoints.ALL.sceneFilter] } : null,
+    MINE: config.rehearsalCheckpoints.MINE ? { ...config.rehearsalCheckpoints.MINE, sceneFilter: [...config.rehearsalCheckpoints.MINE.sceneFilter] } : null,
+    SELECTED: config.rehearsalCheckpoints.SELECTED ? { ...config.rehearsalCheckpoints.SELECTED, sceneFilter: [...config.rehearsalCheckpoints.SELECTED.sceneFilter] } : null,
+  },
+  sharedScriptId: config.sharedScriptId,
+});
 
 export const HomeScreen = () => {
   const {
@@ -440,6 +453,29 @@ export const HomeScreen = () => {
         ...remoteManifest,
         songs: syncSharedSongsWithScript(remoteManifest.scriptData.guion, remoteManifest.songs),
       };
+      const localSnapshotConfig =
+        sharedScript?.shareId === shareId && scriptData
+          ? {
+              myRoles,
+              selectedScenes,
+              lastRehearsalMode,
+              rehearsalCheckpoints,
+              sharedScriptId: shareId,
+            }
+          : null;
+      const persistedConfig =
+        savedScripts.find((savedScript) => savedScript.config.sharedScriptId === shareId)?.config ??
+        savedScripts.find(
+          (savedScript) => savedScript.scriptId === getScriptIdentity(manifest.scriptData)
+        )?.config ??
+        null;
+      const resolvedSavedConfig = savedConfig
+        ? cloneSavedScriptConfig(savedConfig)
+        : localSnapshotConfig
+          ? cloneSavedScriptConfig(localSnapshotConfig)
+          : persistedConfig
+            ? cloneSavedScriptConfig(persistedConfig)
+            : null;
 
       resetSelectionState();
       setIsHydratingSharedMergeMap(true);
@@ -449,11 +485,11 @@ export const HomeScreen = () => {
       setSharedStatusText('');
       setSharedError(null);
       replaceSharedScriptIdInUrl(manifest.shareId);
-      if (savedConfig) {
-        setMyRoles(savedConfig.myRoles);
-        setSelectedScenes(savedConfig.selectedScenes);
-        setLastRehearsalMode(savedConfig.lastRehearsalMode);
-        setRehearsalCheckpoints(savedConfig.rehearsalCheckpoints);
+      if (resolvedSavedConfig) {
+        setMyRoles(resolvedSavedConfig.myRoles);
+        setSelectedScenes(resolvedSavedConfig.selectedScenes);
+        setLastRehearsalMode(resolvedSavedConfig.lastRehearsalMode);
+        setRehearsalCheckpoints(resolvedSavedConfig.rehearsalCheckpoints);
       }
       loadSavedScript(manifest.scriptData);
     } catch (loadError) {
@@ -463,7 +499,16 @@ export const HomeScreen = () => {
     } finally {
       setIsLoadingSharedScript(false);
     }
-  }, [loadSavedScript]);
+  }, [
+    lastRehearsalMode,
+    loadSavedScript,
+    myRoles,
+    rehearsalCheckpoints,
+    savedScripts,
+    scriptData,
+    selectedScenes,
+    sharedScript?.shareId,
+  ]);
 
   const handlePublishSharedScript = useCallback(async () => {
     if (!scriptData) {
