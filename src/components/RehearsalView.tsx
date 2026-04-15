@@ -24,6 +24,58 @@ interface Props {
 
 type RehearsalPreflightPhase = 'auto-initial' | 'manual-check' | 'auto-final' | null;
 
+const createSilentWavObjectUrl = () => {
+  if (typeof Blob === 'undefined' || typeof URL === 'undefined') {
+    return null;
+  }
+
+  const sampleRate = 8000;
+  const durationMs = 120;
+  const sampleCount = Math.max(1, Math.floor((sampleRate * durationMs) / 1000));
+  const bytesPerSample = 2;
+  const dataSize = sampleCount * bytesPerSample;
+  const wavBuffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(wavBuffer);
+  let offset = 0;
+
+  const writeString = (value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset, value.charCodeAt(index));
+      offset += 1;
+    }
+  };
+
+  writeString('RIFF');
+  view.setUint32(offset, 36 + dataSize, true);
+  offset += 4;
+  writeString('WAVE');
+  writeString('fmt ');
+  view.setUint32(offset, 16, true);
+  offset += 4;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint32(offset, sampleRate, true);
+  offset += 4;
+  view.setUint32(offset, sampleRate * bytesPerSample, true);
+  offset += 4;
+  view.setUint16(offset, bytesPerSample, true);
+  offset += 2;
+  view.setUint16(offset, 16, true);
+  offset += 2;
+  writeString('data');
+  view.setUint32(offset, dataSize, true);
+  offset += 4;
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    view.setInt16(offset, 0, true);
+    offset += 2;
+  }
+
+  return URL.createObjectURL(new Blob([wavBuffer], { type: 'audio/wav' }));
+};
+
 export const RehearsalView: React.FC<Props> = ({
   guion,
   myRoles,
@@ -48,6 +100,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [hasPreparedRehearsalMedia, setHasPreparedRehearsalMedia] = useState(false);
   const [hasCompletedRehearsalPreflight, setHasCompletedRehearsalPreflight] = useState(false);
   const [rehearsalPreflightPhase, setRehearsalPreflightPhase] = useState<RehearsalPreflightPhase>(null);
+  const [isSongPlaybackUnlocked, setIsSongPlaybackUnlocked] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -220,14 +273,82 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   const stopSongAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+    const player = audioRef.current;
+    if (player) {
+      player.pause();
+      player.currentTime = 0;
+      player.onended = null;
+      player.onerror = null;
+    }
+
+    setPlayingAudioId(null);
+  }, []);
+
+  const disposeSongAudio = useCallback(() => {
+    const player = audioRef.current;
+    if (player) {
+      player.pause();
+      player.currentTime = 0;
+      player.onended = null;
+      player.onerror = null;
+      player.removeAttribute('src');
+      player.load();
       audioRef.current = null;
     }
 
     setPlayingAudioId(null);
   }, []);
+
+  const getSongAudioPlayer = useCallback(() => {
+    if (typeof Audio === 'undefined') {
+      return null;
+    }
+
+    if (!audioRef.current) {
+      const nextPlayer = new Audio();
+      nextPlayer.preload = 'auto';
+      nextPlayer.crossOrigin = 'anonymous';
+      nextPlayer.setAttribute('playsinline', 'true');
+      audioRef.current = nextPlayer;
+    }
+
+    return audioRef.current;
+  }, []);
+
+  const primeSongPlayback = useCallback(async () => {
+    const player = getSongAudioPlayer();
+    if (!player) {
+      return false;
+    }
+
+    const silentObjectUrl = createSilentWavObjectUrl();
+    if (!silentObjectUrl) {
+      return false;
+    }
+
+    try {
+      player.pause();
+      player.currentTime = 0;
+      player.onended = null;
+      player.onerror = null;
+      player.muted = true;
+      player.src = silentObjectUrl;
+      player.load();
+      await player.play();
+      player.pause();
+      player.currentTime = 0;
+      player.removeAttribute('src');
+      player.load();
+      player.muted = false;
+      setIsSongPlaybackUnlocked(true);
+      return true;
+    } catch {
+      player.muted = false;
+      return false;
+    } finally {
+      URL.revokeObjectURL(silentObjectUrl);
+    }
+  }, [getSongAudioPlayer]);
 
   const goBackLine = useCallback(() => {
     stopRehearsalSpeech();
@@ -441,18 +562,19 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => () => {
-    stopSongAudio();
-  }, [stopSongAudio]);
+    disposeSongAudio();
+  }, [disposeSongAudio]);
 
   const handleExit = () => {
     stopRehearsalSpeech();
-    stopSongAudio();
+    disposeSongAudio();
     void stopListening();
     onExit();
   };
 
   const prepareRehearsalMedia = useCallback(async (phase = rehearsalPreflightPhase ?? 'auto-initial') => {
     const shouldUseAutoListen = phase !== 'manual-check';
+    const primeSongPlaybackPromise = primeSongPlayback();
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false);
@@ -520,12 +642,13 @@ export const RehearsalView: React.FC<Props> = ({
             ? 'Si has oido esta ultima frase, empezaremos el ensayo con micro automatico.'
             : 'Si has oido la frase, ya podemos empezar el ensayo.'
       );
+      await primeSongPlaybackPromise;
     } catch {
       setRehearsalMediaStatus('No se pudo preparar el micro. Puedes volver a intentarlo.');
     } finally {
       setIsPreparingRehearsalMedia(false);
     }
-  }, [rehearsalPreflightPhase, startListening, stopListening]);
+  }, [primeSongPlayback, rehearsalPreflightPhase, startListening, stopListening]);
 
   const handlePreflightHeardVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'manual-check') {
@@ -533,12 +656,13 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
+    void primeSongPlayback();
     setIsRehearsalMediaReady(true);
     setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(true);
     setRehearsalPreflightPhase(null);
     setRehearsalMediaStatus(null);
-  }, [prepareRehearsalMedia, rehearsalPreflightPhase]);
+  }, [prepareRehearsalMedia, primeSongPlayback, rehearsalPreflightPhase]);
 
   const handlePreflightMissedVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'auto-initial') {
@@ -571,12 +695,13 @@ export const RehearsalView: React.FC<Props> = ({
     audioId: string,
     options?: { advanceOnEnd?: boolean; autoStart?: boolean }
   ) => {
-    if (typeof Audio === 'undefined') {
+    const player = getSongAudioPlayer();
+    if (!player) {
       setAudioError('La reproduccion de audio solo esta disponible en la app web.');
       return;
     }
 
-    if (playingAudioId === audioId && audioRef.current) {
+    if (playingAudioId === audioId && !player.paused) {
       stopSongAudio();
       return;
     }
@@ -585,35 +710,43 @@ export const RehearsalView: React.FC<Props> = ({
     setBlockedAutoplayAudio(null);
     stopSongAudio();
 
-    const nextAudio = new Audio(audioUrl);
-    nextAudio.onended = () => {
+    player.onended = () => {
       setPlayingAudioId(null);
-      audioRef.current = null;
       if (options?.advanceOnEnd) {
         advanceLine();
       }
     };
-    nextAudio.onerror = () => {
+    player.onerror = () => {
       setPlayingAudioId(null);
-      audioRef.current = null;
       setAudioError('No se pudo reproducir este audio.');
     };
 
-    audioRef.current = nextAudio;
+    player.src = audioUrl;
+    player.load();
     setPlayingAudioId(audioId);
 
-    void nextAudio.play().catch((error: unknown) => {
+    void player.play().catch((error: unknown) => {
       setPlayingAudioId(null);
-      audioRef.current = null;
       if (options?.autoStart && isAutoplayBlockedError(error)) {
         setBlockedAutoplayAudio({ audioId, audioUrl });
-        setAudioError('Safari o iPhone necesita que actives el audio manualmente para esta cancion.');
+        setAudioError(
+          isSongPlaybackUnlocked
+            ? 'Safari ha vuelto a bloquear el audio automatico de esta cancion.'
+            : 'Safari o iPhone necesita que actives el audio manualmente para esta cancion.'
+        );
         return;
       }
 
       setAudioError('No se pudo reproducir este audio.');
     });
-  }, [advanceLine, isAutoplayBlockedError, playingAudioId, stopSongAudio]);
+  }, [
+    advanceLine,
+    getSongAudioPlayer,
+    isAutoplayBlockedError,
+    isSongPlaybackUnlocked,
+    playingAudioId,
+    stopSongAudio,
+  ]);
 
   useEffect(() => {
     if (!currentSongKey) {
