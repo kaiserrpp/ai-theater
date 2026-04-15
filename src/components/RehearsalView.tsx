@@ -24,13 +24,20 @@ interface Props {
 
 type RehearsalPreflightPhase = 'auto-initial' | 'manual-check' | 'auto-final' | null;
 
-const createSilentWavObjectUrl = () => {
+const createWavObjectUrl = ({
+  frequencyHz = 0,
+  durationMs = 120,
+  volume = 0,
+}: {
+  frequencyHz?: number;
+  durationMs?: number;
+  volume?: number;
+}) => {
   if (typeof Blob === 'undefined' || typeof URL === 'undefined') {
     return null;
   }
 
   const sampleRate = 8000;
-  const durationMs = 120;
   const sampleCount = Math.max(1, Math.floor((sampleRate * durationMs) / 1000));
   const bytesPerSample = 2;
   const dataSize = sampleCount * bytesPerSample;
@@ -69,11 +76,31 @@ const createSilentWavObjectUrl = () => {
   offset += 4;
 
   for (let index = 0; index < sampleCount; index += 1) {
-    view.setInt16(offset, 0, true);
+    const time = index / sampleRate;
+    const sampleValue =
+      frequencyHz > 0
+        ? Math.sin(2 * Math.PI * frequencyHz * time) * Math.max(0, Math.min(volume, 1))
+        : 0;
+    view.setInt16(offset, Math.round(sampleValue * 32767), true);
     offset += 2;
   }
 
   return URL.createObjectURL(new Blob([wavBuffer], { type: 'audio/wav' }));
+};
+
+const createSilentWavObjectUrl = () => createWavObjectUrl({ durationMs: 120 });
+
+const createProbeToneObjectUrl = () =>
+  createWavObjectUrl({ frequencyHz: 660, durationMs: 380, volume: 0.28 });
+
+const formatPlaybackProbeError = (error: unknown) => {
+  const errorName =
+    error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+  const errorMessage =
+    error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
+  const normalizedMessage = [errorName, errorMessage].filter(Boolean).join(': ');
+
+  return normalizedMessage || 'error-desconocido';
 };
 
 export const RehearsalView: React.FC<Props> = ({
@@ -101,6 +128,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [hasCompletedRehearsalPreflight, setHasCompletedRehearsalPreflight] = useState(false);
   const [rehearsalPreflightPhase, setRehearsalPreflightPhase] = useState<RehearsalPreflightPhase>(null);
   const [isSongPlaybackUnlocked, setIsSongPlaybackUnlocked] = useState(false);
+  const [songPlaybackProbeStatus, setSongPlaybackProbeStatus] = useState<string | null>(null);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -350,6 +378,71 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, [getSongAudioPlayer]);
 
+  const probeSongPlayback = useCallback(async () => {
+    const player = getSongAudioPlayer();
+    if (!player) {
+      return 'No hay reproductor web para probar las canciones.';
+    }
+
+    const toneObjectUrl = createProbeToneObjectUrl();
+    if (!toneObjectUrl) {
+      return 'No se pudo generar el audio de prueba.';
+    }
+
+    const playToneOnce = async (attemptLabel: string) => {
+      player.pause();
+      player.currentTime = 0;
+      player.onended = null;
+      player.onerror = null;
+      player.muted = false;
+      player.src = toneObjectUrl;
+      player.load();
+
+      try {
+        await player.play();
+      } catch (error) {
+        throw new Error(`${attemptLabel}:${formatPlaybackProbeError(error)}`);
+      }
+
+      await new Promise<void>((resolve) => {
+        let isResolved = false;
+
+        const finish = () => {
+          if (isResolved) {
+            return;
+          }
+          isResolved = true;
+          player.onended = null;
+          player.onerror = null;
+          resolve();
+        };
+
+        player.onended = finish;
+        player.onerror = finish;
+        setTimeout(finish, 900);
+      });
+    };
+
+    try {
+      setSongPlaybackProbeStatus('Prueba de canciones 1/2: reproduciendo el audio con tu aprobacion...');
+      await playToneOnce('primer-intento');
+      setSongPlaybackProbeStatus('Prueba de canciones 2/2: relanzando el mismo audio automaticamente...');
+      await playToneOnce('segundo-intento');
+      setIsSongPlaybackUnlocked(true);
+      return 'Canciones: la primera y la segunda reproduccion de prueba han arrancado bien.';
+    } catch (error) {
+      return `Canciones: la segunda reproduccion automatica se ha bloqueado (${error instanceof Error ? error.message : 'error-desconocido'}).`;
+    } finally {
+      player.pause();
+      player.currentTime = 0;
+      player.onended = null;
+      player.onerror = null;
+      player.removeAttribute('src');
+      player.load();
+      URL.revokeObjectURL(toneObjectUrl);
+    }
+  }, [getSongAudioPlayer]);
+
   const goBackLine = useCallback(() => {
     stopRehearsalSpeech();
     stopSongAudio();
@@ -578,6 +671,7 @@ export const RehearsalView: React.FC<Props> = ({
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false);
+    setSongPlaybackProbeStatus(null);
     setRehearsalPreflightPhase(phase);
     setAutoListenEnabled(shouldUseAutoListen);
     setTemporarilySuspendingAutoListen(false);
@@ -634,7 +728,10 @@ export const RehearsalView: React.FC<Props> = ({
         }, 2600);
       });
 
+      await primeSongPlaybackPromise;
+      const songProbeResult = await probeSongPlayback();
       setHasPreparedRehearsalMedia(true);
+      setSongPlaybackProbeStatus(songProbeResult);
       setRehearsalMediaStatus(
         phase === 'manual-check'
           ? 'Si ahora has oido la frase, volveremos a activar el micro y haremos una comprobacion final.'
@@ -642,13 +739,12 @@ export const RehearsalView: React.FC<Props> = ({
             ? 'Si has oido esta ultima frase, empezaremos el ensayo con micro automatico.'
             : 'Si has oido la frase, ya podemos empezar el ensayo.'
       );
-      await primeSongPlaybackPromise;
     } catch {
       setRehearsalMediaStatus('No se pudo preparar el micro. Puedes volver a intentarlo.');
     } finally {
       setIsPreparingRehearsalMedia(false);
     }
-  }, [primeSongPlayback, rehearsalPreflightPhase, startListening, stopListening]);
+  }, [primeSongPlayback, probeSongPlayback, rehearsalPreflightPhase, startListening, stopListening]);
 
   const handlePreflightHeardVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'manual-check') {
@@ -844,6 +940,9 @@ export const RehearsalView: React.FC<Props> = ({
             </Text>
             {rehearsalMediaStatus ? (
               <Text style={styles.preflightStatus}>{rehearsalMediaStatus}</Text>
+            ) : null}
+            {songPlaybackProbeStatus ? (
+              <Text style={styles.preflightStatusSecondary}>{songPlaybackProbeStatus}</Text>
             ) : null}
             {!hasPreparedRehearsalMedia ? (
               <TouchableOpacity
@@ -1159,6 +1258,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
     color: '#1e6091',
+    fontWeight: '600',
+  },
+  preflightStatusSecondary: {
+    textAlign: 'center',
+    lineHeight: 22,
+    color: '#7a4d00',
     fontWeight: '600',
   },
   preflightActions: {
