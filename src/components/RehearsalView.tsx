@@ -86,6 +86,11 @@ export const RehearsalView: React.FC<Props> = ({
     !isSongCue(currentLine) &&
     isMyTurn &&
     speakableLineText.length > 0;
+  const shouldKeepListeningWarmDuringSong =
+    effectiveAutoListenEnabled &&
+    isRehearsalMediaReady &&
+    Boolean(currentLine) &&
+    isSongCue(currentLine);
 
   const isAutoplayBlockedError = useCallback((error: unknown) => {
     const errorName =
@@ -311,6 +316,10 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
+    if (shouldKeepListeningWarmDuringSong) {
+      return;
+    }
+
     if (isListeningActive) {
       void stopListening();
     }
@@ -318,6 +327,7 @@ export const RehearsalView: React.FC<Props> = ({
     effectiveAutoListenEnabled,
     isListeningActive,
     listeningStatus,
+    shouldKeepListeningWarmDuringSong,
     shouldArmListeningForCurrentLine,
     startListening,
     stopListening,
