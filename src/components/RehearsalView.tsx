@@ -46,6 +46,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [isPreparingRehearsalMedia, setIsPreparingRehearsalMedia] = useState(false);
   const [rehearsalMediaStatus, setRehearsalMediaStatus] = useState<string | null>(null);
   const [hasPreparedRehearsalMedia, setHasPreparedRehearsalMedia] = useState(false);
+  const [hasCompletedRehearsalPreflight, setHasCompletedRehearsalPreflight] = useState(false);
   const [rehearsalPreflightPhase, setRehearsalPreflightPhase] = useState<RehearsalPreflightPhase>(null);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
@@ -133,6 +134,7 @@ export const RehearsalView: React.FC<Props> = ({
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(false);
+      setHasCompletedRehearsalPreflight(true);
       setRehearsalPreflightPhase(null);
       setRehearsalMediaStatus(null);
       setCompatibilityMessage(reasonMessage);
@@ -154,6 +156,7 @@ export const RehearsalView: React.FC<Props> = ({
     setIsRehearsalMediaReady(false);
     setIsPreparingRehearsalMedia(false);
     setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(false);
     setRehearsalPreflightPhase('auto-initial');
     setRehearsalMediaStatus('Antes de empezar, vamos a preparar micro y voz.');
     setCompatibilityMessage(null);
@@ -174,6 +177,7 @@ export const RehearsalView: React.FC<Props> = ({
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(false);
+      setHasCompletedRehearsalPreflight(true);
       setRehearsalPreflightPhase(null);
       setRehearsalMediaStatus(null);
       return;
@@ -183,8 +187,16 @@ export const RehearsalView: React.FC<Props> = ({
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(false);
+      setHasCompletedRehearsalPreflight(true);
       setRehearsalPreflightPhase(null);
       setRehearsalMediaStatus(null);
+      return;
+    }
+
+    if (hasCompletedRehearsalPreflight) {
+      setIsRehearsalMediaReady(true);
+      setIsPreparingRehearsalMedia(false);
+      setHasPreparedRehearsalMedia(false);
       return;
     }
 
@@ -195,7 +207,12 @@ export const RehearsalView: React.FC<Props> = ({
       setRehearsalPreflightPhase('auto-initial');
     }
     setRehearsalMediaStatus((previousStatus) => previousStatus ?? 'Antes de empezar, vamos a preparar micro y voz.');
-  }, [autoListenEnabled, isListeningSupported, rehearsalPreflightPhase]);
+  }, [
+    autoListenEnabled,
+    hasCompletedRehearsalPreflight,
+    isListeningSupported,
+    rehearsalPreflightPhase,
+  ]);
 
   const stopSongAudio = useCallback(() => {
     if (audioRef.current) {
@@ -428,6 +445,7 @@ export const RehearsalView: React.FC<Props> = ({
     const shouldUseAutoListen = phase !== 'manual-check';
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(false);
     setRehearsalPreflightPhase(phase);
     setAutoListenEnabled(shouldUseAutoListen);
     setTemporarilySuspendingAutoListen(false);
@@ -507,6 +525,7 @@ export const RehearsalView: React.FC<Props> = ({
 
     setIsRehearsalMediaReady(true);
     setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(true);
     setRehearsalPreflightPhase(null);
     setRehearsalMediaStatus(null);
   }, [prepareRehearsalMedia, rehearsalPreflightPhase]);
@@ -522,6 +541,7 @@ export const RehearsalView: React.FC<Props> = ({
         'La voz de prueba no se escuchaba bien con la escucha automatica. Empezamos el ensayo en modo manual.'
       ).then(() => {
         setIsRehearsalMediaReady(true);
+        setHasCompletedRehearsalPreflight(true);
         setRehearsalPreflightPhase(null);
       });
       return;
@@ -531,6 +551,7 @@ export const RehearsalView: React.FC<Props> = ({
       'La voz solo funcionaba bien sin escucha automatica. Empezamos el ensayo en modo manual.'
     ).then(() => {
       setIsRehearsalMediaReady(true);
+      setHasCompletedRehearsalPreflight(true);
       setRehearsalPreflightPhase(null);
     });
   }, [disableAutoListenForDevice, prepareRehearsalMedia, rehearsalPreflightPhase]);
@@ -681,19 +702,15 @@ export const RehearsalView: React.FC<Props> = ({
             {rehearsalMediaStatus ? (
               <Text style={styles.preflightStatus}>{rehearsalMediaStatus}</Text>
             ) : null}
-            <TouchableOpacity
-              style={[styles.btnNext, isPreparingRehearsalMedia && styles.buttonDisabled]}
-              onPress={() => void prepareRehearsalMedia()}
-              disabled={isPreparingRehearsalMedia}
-            >
-              <Text style={styles.btnText}>
-                {isPreparingRehearsalMedia
-                  ? 'Preparando...'
-                  : hasPreparedRehearsalMedia
-                    ? 'Repetir prueba'
-                    : 'Preparar audio y micro'}
-              </Text>
-            </TouchableOpacity>
+            {!hasPreparedRehearsalMedia ? (
+              <TouchableOpacity
+                style={[styles.btnNext, isPreparingRehearsalMedia && styles.buttonDisabled]}
+                onPress={() => void prepareRehearsalMedia()}
+                disabled={isPreparingRehearsalMedia}
+              >
+                <Text style={styles.btnText}>{isPreparingRehearsalMedia ? 'Preparando...' : 'Preparar audio y micro'}</Text>
+              </TouchableOpacity>
+            ) : null}
             {hasPreparedRehearsalMedia ? (
               <View style={styles.preflightActions}>
                 <TouchableOpacity
