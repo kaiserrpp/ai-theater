@@ -22,6 +22,8 @@ interface Props {
   onExit: () => void;
 }
 
+type RehearsalPreflightPhase = 'auto-initial' | 'manual-check' | 'auto-final' | null;
+
 export const RehearsalView: React.FC<Props> = ({
   guion,
   myRoles,
@@ -44,6 +46,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [isPreparingRehearsalMedia, setIsPreparingRehearsalMedia] = useState(false);
   const [rehearsalMediaStatus, setRehearsalMediaStatus] = useState<string | null>(null);
   const [hasPreparedRehearsalMedia, setHasPreparedRehearsalMedia] = useState(false);
+  const [rehearsalPreflightPhase, setRehearsalPreflightPhase] = useState<RehearsalPreflightPhase>(null);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -130,6 +133,7 @@ export const RehearsalView: React.FC<Props> = ({
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(false);
+      setRehearsalPreflightPhase(null);
       setRehearsalMediaStatus(null);
       setCompatibilityMessage(reasonMessage);
       setShowCompatibilityInfo(false);
@@ -150,6 +154,7 @@ export const RehearsalView: React.FC<Props> = ({
     setIsRehearsalMediaReady(false);
     setIsPreparingRehearsalMedia(false);
     setHasPreparedRehearsalMedia(false);
+    setRehearsalPreflightPhase('auto-initial');
     setRehearsalMediaStatus('Antes de empezar, vamos a preparar micro y voz.');
     setCompatibilityMessage(null);
     setShowCompatibilityInfo(false);
@@ -165,10 +170,20 @@ export const RehearsalView: React.FC<Props> = ({
   }, []);
 
   useEffect(() => {
-    if (!autoListenEnabled || !isListeningSupported) {
+    if (!isListeningSupported) {
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(false);
+      setRehearsalPreflightPhase(null);
+      setRehearsalMediaStatus(null);
+      return;
+    }
+
+    if (!autoListenEnabled && rehearsalPreflightPhase !== 'manual-check') {
+      setIsRehearsalMediaReady(true);
+      setIsPreparingRehearsalMedia(false);
+      setHasPreparedRehearsalMedia(false);
+      setRehearsalPreflightPhase(null);
       setRehearsalMediaStatus(null);
       return;
     }
@@ -176,8 +191,11 @@ export const RehearsalView: React.FC<Props> = ({
     setIsRehearsalMediaReady(false);
     setIsPreparingRehearsalMedia(false);
     setHasPreparedRehearsalMedia(false);
-    setRehearsalMediaStatus('Antes de empezar, vamos a preparar micro y voz.');
-  }, [autoListenEnabled, isListeningSupported]);
+    if (!rehearsalPreflightPhase) {
+      setRehearsalPreflightPhase('auto-initial');
+    }
+    setRehearsalMediaStatus((previousStatus) => previousStatus ?? 'Antes de empezar, vamos a preparar micro y voz.');
+  }, [autoListenEnabled, isListeningSupported, rehearsalPreflightPhase]);
 
   const stopSongAudio = useCallback(() => {
     if (audioRef.current) {
@@ -406,14 +424,27 @@ export const RehearsalView: React.FC<Props> = ({
     onExit();
   };
 
-  const prepareRehearsalMedia = useCallback(async () => {
+  const prepareRehearsalMedia = useCallback(async (phase = rehearsalPreflightPhase ?? 'auto-initial') => {
+    const shouldUseAutoListen = phase !== 'manual-check';
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
-    setRehearsalMediaStatus('Abriendo el micro de prueba...');
+    setRehearsalPreflightPhase(phase);
+    setAutoListenEnabled(shouldUseAutoListen);
+    setTemporarilySuspendingAutoListen(false);
+
+    if (phase === 'manual-check') {
+      setRehearsalMediaStatus('Probando la voz con el micro desactivado...');
+    } else if (phase === 'auto-final') {
+      setRehearsalMediaStatus('Reactivando el micro para una comprobacion final...');
+    } else {
+      setRehearsalMediaStatus('Abriendo el micro de prueba...');
+    }
 
     try {
-      await startListening();
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      if (shouldUseAutoListen) {
+        await startListening();
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      }
 
       setRehearsalMediaStatus('Liberando el micro para probar la voz...');
       await stopListening();
@@ -454,13 +485,55 @@ export const RehearsalView: React.FC<Props> = ({
       });
 
       setHasPreparedRehearsalMedia(true);
-      setRehearsalMediaStatus('Si has oido la frase, ya podemos empezar el ensayo.');
+      setRehearsalMediaStatus(
+        phase === 'manual-check'
+          ? 'Si ahora has oido la frase, volveremos a activar el micro y haremos una comprobacion final.'
+          : phase === 'auto-final'
+            ? 'Si has oido esta ultima frase, empezaremos el ensayo con micro automatico.'
+            : 'Si has oido la frase, ya podemos empezar el ensayo.'
+      );
     } catch {
       setRehearsalMediaStatus('No se pudo preparar el micro. Puedes volver a intentarlo.');
     } finally {
       setIsPreparingRehearsalMedia(false);
     }
-  }, [startListening, stopListening]);
+  }, [rehearsalPreflightPhase, startListening, stopListening]);
+
+  const handlePreflightHeardVoice = useCallback(() => {
+    if (rehearsalPreflightPhase === 'manual-check') {
+      void prepareRehearsalMedia('auto-final');
+      return;
+    }
+
+    setIsRehearsalMediaReady(true);
+    setHasPreparedRehearsalMedia(false);
+    setRehearsalPreflightPhase(null);
+    setRehearsalMediaStatus(null);
+  }, [prepareRehearsalMedia, rehearsalPreflightPhase]);
+
+  const handlePreflightMissedVoice = useCallback(() => {
+    if (rehearsalPreflightPhase === 'auto-initial') {
+      void prepareRehearsalMedia('manual-check');
+      return;
+    }
+
+    if (rehearsalPreflightPhase === 'manual-check') {
+      void disableAutoListenForDevice(
+        'La voz de prueba no se escuchaba bien con la escucha automatica. Empezamos el ensayo en modo manual.'
+      ).then(() => {
+        setIsRehearsalMediaReady(true);
+        setRehearsalPreflightPhase(null);
+      });
+      return;
+    }
+
+    void disableAutoListenForDevice(
+      'La voz solo funcionaba bien sin escucha automatica. Empezamos el ensayo en modo manual.'
+    ).then(() => {
+      setIsRehearsalMediaReady(true);
+      setRehearsalPreflightPhase(null);
+    });
+  }, [disableAutoListenForDevice, prepareRehearsalMedia, rehearsalPreflightPhase]);
 
   const handlePlaySongAudio = useCallback((
     audioUrl: string,
@@ -603,7 +676,7 @@ export const RehearsalView: React.FC<Props> = ({
           <View style={styles.preflightCard}>
             <Text style={styles.preflightTitle}>Preparar ensayo</Text>
             <Text style={styles.preflightText}>
-              Vamos a probar primero el micro y una frase corta de Siri para que el ensayo no arranque a medias.
+              Vamos a reproducir una frase corta antes de empezar. Si no se oye a la primera, probaremos automaticamente la combinacion auto, manual y auto otra vez.
             </Text>
             {rehearsalMediaStatus ? (
               <Text style={styles.preflightStatus}>{rehearsalMediaStatus}</Text>
@@ -625,19 +698,27 @@ export const RehearsalView: React.FC<Props> = ({
               <View style={styles.preflightActions}>
                 <TouchableOpacity
                   style={[styles.preflightActionButton, styles.preflightConfirmButton]}
-                  onPress={() => setIsRehearsalMediaReady(true)}
+                  onPress={handlePreflightHeardVoice}
                 >
-                  <Text style={styles.preflightConfirmText}>He oido la prueba</Text>
+                  <Text style={styles.preflightConfirmText}>
+                    {rehearsalPreflightPhase === 'manual-check'
+                      ? 'Ahora si la oigo'
+                      : rehearsalPreflightPhase === 'auto-final'
+                        ? 'Perfecto, se oye'
+                        : 'Si, la oigo'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.preflightActionButton, styles.preflightFallbackButton]}
-                  onPress={() =>
-                    void disableAutoListenForDevice(
-                      'Has indicado que la voz de prueba no se escuchaba bien en este dispositivo.'
-                    ).then(() => setIsRehearsalMediaReady(true))
-                  }
+                  onPress={handlePreflightMissedVoice}
                 >
-                  <Text style={styles.preflightFallbackText}>No he oido la voz</Text>
+                  <Text style={styles.preflightFallbackText}>
+                    {rehearsalPreflightPhase === 'manual-check'
+                      ? 'Sigue sin oirse'
+                      : rehearsalPreflightPhase === 'auto-final'
+                        ? 'No se oye con micro'
+                        : 'No la oigo'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : null}
