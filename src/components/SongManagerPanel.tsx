@@ -146,6 +146,22 @@ export const SongManagerPanel: React.FC<Props> = ({
     return songsForCurrentView.find((song) => song.id === selectedSongId) ?? null;
   }, [selectedSongId, songsForCurrentView]);
 
+  const activePlaylistDescription = useMemo(() => {
+    if (!activePlaylistMode || (viewMode !== 'my-songs' && viewMode !== 'all-songs')) {
+      return null;
+    }
+
+    const scope = viewMode === 'my-songs' ? 'de tus personajes' : 'del musical';
+    const modeLabel =
+      activePlaylistMode === 'karaoke'
+        ? 'karaokes'
+        : activePlaylistMode === 'vocal_guide'
+          ? 'vocal guides'
+          : 'todas las canciones';
+
+    return `Reproduciendo ${modeLabel} ${scope}.`;
+  }, [activePlaylistMode, viewMode]);
+
   const editingAudio = useMemo<SharedSongAudioAsset | null>(() => {
     if (!selectedSong || !editingAudioId) {
       return null;
@@ -831,7 +847,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                           size={17}
                           color="#fff7dc"
                         />
-                        <Text style={styles.playlistButtonText}>Karaokes</Text>
+                        <Text style={styles.playlistButtonText}>Karaoke</Text>
                       </View>
                     </TouchableOpacity>
 
@@ -850,7 +866,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                           size={17}
                           color="#f4ebff"
                         />
-                        <Text style={styles.playlistButtonText}>Vocal guides</Text>
+                        <Text style={styles.playlistButtonText}>V. Guide</Text>
                       </View>
                     </TouchableOpacity>
 
@@ -873,6 +889,10 @@ export const SongManagerPanel: React.FC<Props> = ({
                       </View>
                     </TouchableOpacity>
                   </View>
+
+                  {activePlaylistDescription ? (
+                    <Text style={styles.playlistStatusText}>{activePlaylistDescription}</Text>
+                  ) : null}
 
                   {songsForCurrentView.length > 0 ? (
                     <>
@@ -1291,14 +1311,14 @@ const styles = StyleSheet.create({
   },
   playlistActions: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   playlistButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 12,
     borderRadius: 14,
     borderWidth: 1,
@@ -1328,10 +1348,17 @@ const styles = StyleSheet.create({
   playlistButtonText: {
     color: '#fff',
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 11.5,
     lineHeight: 14,
     textAlign: 'center',
     flexShrink: 1,
+  },
+  playlistStatusText: {
+    textAlign: 'center',
+    color: '#6b5b49',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
   },
   infoText: {
     textAlign: 'center',
