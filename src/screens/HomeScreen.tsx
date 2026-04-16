@@ -1499,8 +1499,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(165, 37, 88, 0.84)',
     borderColor: 'rgba(255, 231, 164, 0.44)',
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    position: 'relative',
   },
   songLaunchContent: {
     flexDirection: 'row',
@@ -1508,6 +1509,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   songLaunchBadge: {
+    position: 'absolute',
+    right: 18,
     minWidth: 34,
     paddingHorizontal: 10,
     paddingVertical: 6,
