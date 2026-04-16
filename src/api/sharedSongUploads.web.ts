@@ -28,6 +28,12 @@ interface BlobUploadResponse {
   contentType: string;
 }
 
+interface SharedStorageContextResponse {
+  namespace: string;
+}
+
+let sharedStorageNamespacePromise: Promise<string> | null = null;
+
 const sanitizeFileName = (value: string) =>
   value
     .normalize('NFD')
@@ -35,6 +41,36 @@ const sanitizeFileName = (value: string) =>
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
+
+const fetchSharedStorageNamespace = async () => {
+  if (!sharedStorageNamespacePromise) {
+    sharedStorageNamespacePromise = fetch('/api/shared-script/storage-context', {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error || 'No se pudo preparar el contexto de almacenamiento.');
+        }
+
+        const payload = (await response.json()) as SharedStorageContextResponse;
+        if (typeof payload.namespace !== 'string' || !payload.namespace.trim()) {
+          throw new Error('La respuesta de almacenamiento no incluye un namespace valido.');
+        }
+
+        return payload.namespace.trim();
+      })
+      .catch((error) => {
+        sharedStorageNamespacePromise = null;
+        throw error;
+      });
+  }
+
+  return sharedStorageNamespacePromise;
+};
 
 const fetchClientToken = async ({
   pathname,
@@ -147,7 +183,8 @@ export const uploadSharedSongAudio = async ({
       : `audio-${Date.now()}.mp3`;
   const safeFileName = sanitizeFileName(originalFileName) || `audio-${Date.now()}.mp3`;
   const targetFolder = targetType === 'musical-number' ? 'musical-numbers' : 'songs';
-  const pathname = `shared-scripts/${shareId}/${targetFolder}/${targetId}/${Date.now()}-${safeFileName}`;
+  const storageNamespace = await fetchSharedStorageNamespace();
+  const pathname = `shared-scripts/${storageNamespace}/${shareId}/${targetFolder}/${targetId}/${Date.now()}-${safeFileName}`;
   const contentType =
     typeof namedFile.type === 'string' && namedFile.type.trim().length > 0
       ? namedFile.type

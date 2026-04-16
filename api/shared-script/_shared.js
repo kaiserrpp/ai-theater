@@ -5,7 +5,32 @@ const EMPTY_SONGS = [];
 const EMPTY_MUSICAL_NUMBERS = [];
 const SONG_AUDIO_KINDS = new Set(['karaoke', 'vocal_guide']);
 
-const buildManifestPath = (shareId) => `shared-scripts/${shareId}/manifest.json`;
+const sanitizeNamespace = (value) =>
+  String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-|-$/g, '') || 'default';
+
+const getStorageNamespace = () => {
+  if (typeof process.env.SHARED_STORAGE_NAMESPACE === 'string' && process.env.SHARED_STORAGE_NAMESPACE.trim()) {
+    return sanitizeNamespace(process.env.SHARED_STORAGE_NAMESPACE);
+  }
+
+  if (process.env.VERCEL_ENV === 'production') {
+    return 'production';
+  }
+
+  if (process.env.VERCEL_ENV === 'preview') {
+    return 'preview';
+  }
+
+  return 'development';
+};
+
+const buildSharedScriptsPrefix = () => `shared-scripts/${getStorageNamespace()}`;
+
+const buildManifestPath = (shareId) => `${buildSharedScriptsPrefix()}/${shareId}/manifest.json`;
 
 const createShareId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
@@ -295,7 +320,7 @@ const buildManifestSummary = (manifest) => ({
 
 const listSharedScriptSummaries = async () => {
   const result = await list({
-    prefix: 'shared-scripts/',
+    prefix: `${buildSharedScriptsPrefix()}/`,
     limit: 200,
   });
 
@@ -321,6 +346,7 @@ module.exports = {
   MANIFEST_VERSION,
   buildShareUrl,
   createShareId,
+  getStorageNamespace,
   getSongAdminPasswordFromRequest,
   hasSongAdminPasswordConfigured,
   isValidScriptData,
