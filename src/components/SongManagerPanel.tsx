@@ -105,6 +105,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [deletingAudioId, setDeletingAudioId] = useState<string | null>(null);
   const [musicalNumberTitle, setMusicalNumberTitle] = useState('');
   const [musicalNumberSongIds, setMusicalNumberSongIds] = useState<string[]>([]);
+  const [expandedMusicalNumberFormSongId, setExpandedMusicalNumberFormSongId] = useState<string | null>(null);
   const [isMusicalNumberFormVisible, setIsMusicalNumberFormVisible] = useState(false);
   const [editingMusicalNumberId, setEditingMusicalNumberId] = useState<string | null>(null);
   const [isSavingMusicalNumber, setIsSavingMusicalNumber] = useState(false);
@@ -305,6 +306,13 @@ export const SongManagerPanel: React.FC<Props> = ({
 
       return sortedSongIds;
     });
+  };
+
+  const toggleMusicalNumberFormSongSelection = (song: SharedSongAsset) => {
+    setExpandedMusicalNumberFormSongId((previousSongId) =>
+      previousSongId === song.id ? null : song.id
+    );
+    toggleMusicalNumberSong(song.id);
   };
 
   const pickPlaylistAudio = useCallback(
@@ -545,6 +553,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const resetMusicalNumberForm = useCallback(() => {
     setMusicalNumberTitle('');
     setMusicalNumberSongIds([]);
+    setExpandedMusicalNumberFormSongId(null);
     setIsMusicalNumberFormVisible(false);
     setEditingMusicalNumberId(null);
   }, []);
@@ -743,6 +752,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setEditingMusicalNumberId(null);
     setMusicalNumberTitle('');
     setMusicalNumberSongIds([]);
+    setExpandedMusicalNumberFormSongId(null);
     setIsMusicalNumberFormVisible(true);
   };
 
@@ -751,6 +761,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setEditingMusicalNumberId(musicalNumber.id);
     setMusicalNumberTitle(musicalNumber.title);
     setMusicalNumberSongIds(musicalNumber.songIds);
+    setExpandedMusicalNumberFormSongId(musicalNumber.songIds[0] ?? null);
     setSelectedMusicalNumberId(musicalNumber.id);
     setIsMusicalNumberFormVisible(true);
   };
@@ -1018,6 +1029,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsMusicalNumberFormVisible(false);
     setEditingMusicalNumberId(null);
     setMusicalNumberSongIds([]);
+    setExpandedMusicalNumberFormSongId(null);
     setMusicalNumberTitle('');
     setIsMusicalNumberAudioFormVisible(false);
     setEditingMusicalNumberAudioId(null);
@@ -1230,6 +1242,61 @@ export const SongManagerPanel: React.FC<Props> = ({
           </View>
         );
       })}
+    </View>
+  );
+
+  const renderMusicalNumberSongSelectionList = () => (
+    <View style={styles.songList}>
+      {sharedScript?.songs.map((song) => {
+        const isSelected = musicalNumberSongIds.includes(song.id);
+        const isExpanded = expandedMusicalNumberFormSongId === song.id;
+        const primaryLabel = song.sceneTitle || song.title || 'Bloque de cancion';
+        const secondaryLabel =
+          song.sceneTitle && song.title && song.title !== song.sceneTitle
+            ? song.title
+            : song.audios.length > 0
+              ? `${song.audios.length} audio${song.audios.length === 1 ? '' : 's'} cargado${song.audios.length === 1 ? '' : 's'}`
+              : 'Sin audios cargados';
+
+        return (
+          <View key={`musical-number-form-song-${song.id}`} style={styles.songListItem}>
+            <TouchableOpacity
+              style={[styles.songRow, isSelected && styles.songRowSelected]}
+              onPress={() => toggleMusicalNumberFormSongSelection(song)}
+            >
+              <View style={styles.songRowMain}>
+                <View style={styles.songRowText}>
+                  <Text style={[styles.songRowTitle, isSelected && styles.songRowTitleSelected]}>
+                    {primaryLabel}
+                  </Text>
+                  <Text style={styles.songRowMeta}>{secondaryLabel}</Text>
+                </View>
+                <View style={[styles.selectionCheck, isSelected && styles.selectionCheckSelected]}>
+                  <MaterialCommunityIcons
+                    name={isSelected ? 'check-bold' : 'plus'}
+                    size={18}
+                    color={isSelected ? '#fff' : '#7a4d13'}
+                  />
+                </View>
+              </View>
+            </TouchableOpacity>
+            {isExpanded ? (
+              <View style={styles.songDetailBox}>
+                <Text style={styles.songDetailTitle}>{song.title}</Text>
+                <Text style={styles.songDetailMeta}>
+                  {song.sceneTitle || 'Sin escena asociada'}
+                </Text>
+                <Text style={styles.selectionSummary}>
+                  {isSelected
+                    ? 'Incluido en este numero musical.'
+                    : 'Toca arriba para incluir este bloque en el numero musical.'}
+                </Text>
+                <Text style={styles.songLyrics}>{song.lyrics}</Text>
+              </View>
+            ) : null}
+          </View>
+        );
+      }) ?? null}
     </View>
   );
 
@@ -1779,27 +1846,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                             style={styles.textInput}
                           />
                           <Text style={styles.formLabel}>Bloques de cancion incluidos</Text>
-                          <View style={styles.roleTags}>
-                            {sharedScript.songs.map((song) => {
-                              const isSelected = musicalNumberSongIds.includes(song.id);
-                              return (
-                                <TouchableOpacity
-                                  key={`number-song-${song.id}`}
-                                  style={[styles.roleTag, isSelected && styles.roleTagSelected]}
-                                  onPress={() => toggleMusicalNumberSong(song.id)}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.roleTagText,
-                                      isSelected && styles.roleTagTextSelected,
-                                    ]}
-                                  >
-                                    {song.title}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </View>
+                          {renderMusicalNumberSongSelectionList()}
                           {selectedMusicalNumberFormSongs.length > 0 ? (
                             <Text style={styles.selectionSummary}>
                               Tramo: {selectedMusicalNumberFormSongs[0].title} ·{' '}
@@ -2271,12 +2318,19 @@ const styles = StyleSheet.create({
     borderColor: '#eadfca',
     backgroundColor: 'rgba(255,255,255,0.92)',
   },
+  songRowMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   songRowSelected: {
     borderColor: '#c29557',
     backgroundColor: '#fff8ef',
   },
   songRowText: {
     gap: 4,
+    flex: 1,
   },
   songRowTitle: {
     fontWeight: '700',
@@ -2288,6 +2342,21 @@ const styles = StyleSheet.create({
   songRowMeta: {
     color: '#6b5b49',
     lineHeight: 20,
+  },
+  selectionCheck: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#d8cbb6',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  selectionCheckSelected: {
+    backgroundColor: '#7a4d13',
+    borderColor: '#7a4d13',
   },
   songDetailBox: {
     gap: 12,
