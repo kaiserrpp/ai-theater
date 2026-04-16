@@ -1,5 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { uploadSharedSongAudio } from '../api/sharedSongUploads';
 import {
@@ -77,6 +77,8 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [previewAudioElement] = useState<HTMLAudioElement | null>(
     typeof Audio === 'undefined' ? null : new Audio()
   );
+  const replayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const replayCycleRef = useRef(0);
   const totalAudioCount = useMemo(
     () => sharedScript?.songs.reduce((count, song) => count + song.audios.length, 0) ?? 0,
     [sharedScript]
@@ -149,17 +151,70 @@ export const SongManagerPanel: React.FC<Props> = ({
     );
   };
 
-  const stopPreviewAudio = useCallback(() => {
-    if (!previewAudioElement) {
-      return;
+  const cancelQueuedReplay = useCallback(() => {
+    if (replayTimeoutRef.current) {
+      clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
     }
 
-    previewAudioElement.pause();
-    previewAudioElement.currentTime = 0;
-    previewAudioElement.onended = null;
-    previewAudioElement.onerror = null;
-    setPlayingPreviewAudioId(null);
-  }, [previewAudioElement]);
+    replayCycleRef.current += 1;
+  }, []);
+
+  const stopPreviewAudio = useCallback(
+    (options?: { cancelLoop?: boolean }) => {
+      if (options?.cancelLoop !== false) {
+        cancelQueuedReplay();
+      }
+
+      if (!previewAudioElement) {
+        return;
+      }
+
+      previewAudioElement.pause();
+      previewAudioElement.currentTime = 0;
+      previewAudioElement.onended = null;
+      previewAudioElement.onerror = null;
+      setPlayingPreviewAudioId(null);
+    },
+    [cancelQueuedReplay, previewAudioElement]
+  );
+
+  const startPreviewPlayback = useCallback(
+    async (audio: SharedSongAudioAsset, cycleId: number) => {
+      if (!previewAudioElement) {
+        setPreviewAudioError('La reproduccion de audio solo esta disponible en la app web.');
+        return;
+      }
+
+      previewAudioElement.src = audio.audioUrl;
+      previewAudioElement.load();
+      previewAudioElement.onended = () => {
+        setPlayingPreviewAudioId(null);
+        replayTimeoutRef.current = setTimeout(() => {
+          replayTimeoutRef.current = null;
+          if (replayCycleRef.current !== cycleId) {
+            return;
+          }
+
+          void startPreviewPlayback(audio, cycleId);
+        }, 3000);
+      };
+      previewAudioElement.onerror = () => {
+        setPlayingPreviewAudioId(null);
+        setPreviewAudioError('No se pudo reproducir este audio.');
+      };
+
+      try {
+        previewAudioElement.currentTime = 0;
+        setPlayingPreviewAudioId(audio.id);
+        await previewAudioElement.play();
+      } catch {
+        setPlayingPreviewAudioId(null);
+        setPreviewAudioError('No se pudo reproducir este audio.');
+      }
+    },
+    [previewAudioElement]
+  );
 
   const handlePlayPreviewAudio = useCallback(
     async (audio: SharedSongAudioAsset) => {
@@ -174,27 +229,13 @@ export const SongManagerPanel: React.FC<Props> = ({
       }
 
       setPreviewAudioError(null);
-      stopPreviewAudio();
+      cancelQueuedReplay();
+      stopPreviewAudio({ cancelLoop: false });
 
-      previewAudioElement.src = audio.audioUrl;
-      previewAudioElement.load();
-      previewAudioElement.onended = () => {
-        setPlayingPreviewAudioId(null);
-      };
-      previewAudioElement.onerror = () => {
-        setPlayingPreviewAudioId(null);
-        setPreviewAudioError('No se pudo reproducir este audio.');
-      };
-
-      try {
-        setPlayingPreviewAudioId(audio.id);
-        await previewAudioElement.play();
-      } catch {
-        setPlayingPreviewAudioId(null);
-        setPreviewAudioError('No se pudo reproducir este audio.');
-      }
+      const cycleId = replayCycleRef.current;
+      await startPreviewPlayback(audio, cycleId);
     },
-    [playingPreviewAudioId, previewAudioElement, stopPreviewAudio]
+    [cancelQueuedReplay, playingPreviewAudioId, previewAudioElement, startPreviewPlayback, stopPreviewAudio]
   );
 
   useEffect(() => () => {
@@ -224,12 +265,14 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const handleSelectSong = (songId: string) => {
+    stopPreviewAudio();
     setSelectedSongId(songId);
     setIsSongPickerVisible(false);
     setPreviewAudioError(null);
   };
 
   const resetAudioForm = () => {
+    stopPreviewAudio();
     setAudioLabel('');
     setAudioKind(DEFAULT_UPLOAD_KIND);
     setGuideRoles([]);
@@ -240,6 +283,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const startEditingAudio = (audio: SharedSongAudioAsset) => {
+    stopPreviewAudio();
     setEditingAudioId(audio.id);
     setAudioLabel(audio.label);
     setAudioKind(audio.kind);
