@@ -780,6 +780,7 @@ export const HomeScreen = () => {
             <SongManagerPanel
               sharedScript={sharedScript}
               availableRoles={displayScriptData.personajes}
+              myRoles={myRoles}
               onManifestUpdated={handleSharedScriptManifestUpdate}
               standalone
             />

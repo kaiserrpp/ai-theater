@@ -1,5 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { uploadSharedSongAudio } from '../api/sharedSongUploads';
 import {
@@ -19,11 +19,14 @@ import { formatSongAudioKind } from '../utils/sharedSongs';
 interface Props {
   sharedScript: SharedScriptManifest | null;
   availableRoles: string[];
+  myRoles: string[];
   onManifestUpdated: (manifest: SharedScriptManifest) => void;
   standalone?: boolean;
 }
 
 const DEFAULT_UPLOAD_KIND: SharedSongAudioKind = 'karaoke';
+type SongManagerViewMode = 'menu' | 'my-songs' | 'all-songs' | 'manage';
+let cachedSongAdminPassword: string | null = null;
 
 const buildDefaultAudioLabel = (kind: SharedSongAudioKind, guideRoles: string[]) => {
   if (kind === 'vocal_guide') {
@@ -47,12 +50,14 @@ const resolveAssetBlob = async (asset: DocumentPicker.DocumentPickerAsset) => {
 export const SongManagerPanel: React.FC<Props> = ({
   sharedScript,
   availableRoles,
+  myRoles,
   onManifestUpdated,
   standalone = false,
 }) => {
   const [isVisible, setIsVisible] = useState(false);
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [password, setPassword] = useState('');
+  const [viewMode, setViewMode] = useState<SongManagerViewMode>('menu');
+  const [isUnlocked, setIsUnlocked] = useState(Boolean(cachedSongAdminPassword));
+  const [password, setPassword] = useState(cachedSongAdminPassword ?? '');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
@@ -67,19 +72,48 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [editingAudioId, setEditingAudioId] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [deletingAudioId, setDeletingAudioId] = useState<string | null>(null);
+  const [playingPreviewAudioId, setPlayingPreviewAudioId] = useState<string | null>(null);
+  const [previewAudioError, setPreviewAudioError] = useState<string | null>(null);
+  const [previewAudioElement] = useState<HTMLAudioElement | null>(
+    typeof Audio === 'undefined' ? null : new Audio()
+  );
+  const totalAudioCount = useMemo(
+    () => sharedScript?.songs.reduce((count, song) => count + song.audios.length, 0) ?? 0,
+    [sharedScript]
+  );
+
+  const mySongs = useMemo(
+    () =>
+      sharedScript?.songs.filter((song) =>
+        song.audios.some((audio) => audio.guideRoles.some((role) => myRoles.includes(role)))
+      ) ?? [],
+    [myRoles, sharedScript]
+  );
+
+  const songsForCurrentView = useMemo(() => {
+    if (!sharedScript) {
+      return [];
+    }
+
+    if (viewMode === 'my-songs') {
+      return mySongs;
+    }
+
+    return sharedScript.songs;
+  }, [mySongs, sharedScript, viewMode]);
 
   useEffect(() => {
-    if (!sharedScript?.songs.length) {
+    if (!songsForCurrentView.length) {
       setSelectedSongId(null);
       return;
     }
 
     setSelectedSongId((previousSongId) =>
-      previousSongId && sharedScript.songs.some((song) => song.id === previousSongId)
+      previousSongId && songsForCurrentView.some((song) => song.id === previousSongId)
         ? previousSongId
-        : sharedScript.songs[0].id
+        : songsForCurrentView[0].id
     );
-  }, [sharedScript]);
+  }, [songsForCurrentView]);
 
   useEffect(() => {
     setAudioLabel('');
@@ -92,12 +126,12 @@ export const SongManagerPanel: React.FC<Props> = ({
   }, [selectedSongId]);
 
   const selectedSong = useMemo<SharedSongAsset | null>(() => {
-    if (!sharedScript || !selectedSongId) {
+    if (!selectedSongId) {
       return null;
     }
 
-    return sharedScript.songs.find((song) => song.id === selectedSongId) ?? null;
-  }, [selectedSongId, sharedScript]);
+    return songsForCurrentView.find((song) => song.id === selectedSongId) ?? null;
+  }, [selectedSongId, songsForCurrentView]);
 
   const editingAudio = useMemo<SharedSongAudioAsset | null>(() => {
     if (!selectedSong || !editingAudioId) {
@@ -107,11 +141,6 @@ export const SongManagerPanel: React.FC<Props> = ({
     return selectedSong.audios.find((audio) => audio.id === editingAudioId) ?? null;
   }, [editingAudioId, selectedSong]);
 
-  const totalAudioCount = useMemo(
-    () => sharedScript?.songs.reduce((count, song) => count + song.audios.length, 0) ?? 0,
-    [sharedScript]
-  );
-
   const toggleGuideRole = (role: string) => {
     setGuideRoles((previousRoles) =>
       previousRoles.includes(role)
@@ -119,6 +148,58 @@ export const SongManagerPanel: React.FC<Props> = ({
         : [...previousRoles, role]
     );
   };
+
+  const stopPreviewAudio = useCallback(() => {
+    if (!previewAudioElement) {
+      return;
+    }
+
+    previewAudioElement.pause();
+    previewAudioElement.currentTime = 0;
+    previewAudioElement.onended = null;
+    previewAudioElement.onerror = null;
+    setPlayingPreviewAudioId(null);
+  }, [previewAudioElement]);
+
+  const handlePlayPreviewAudio = useCallback(
+    async (audio: SharedSongAudioAsset) => {
+      if (!previewAudioElement) {
+        setPreviewAudioError('La reproduccion de audio solo esta disponible en la app web.');
+        return;
+      }
+
+      if (playingPreviewAudioId === audio.id) {
+        stopPreviewAudio();
+        return;
+      }
+
+      setPreviewAudioError(null);
+      stopPreviewAudio();
+
+      previewAudioElement.src = audio.audioUrl;
+      previewAudioElement.load();
+      previewAudioElement.onended = () => {
+        setPlayingPreviewAudioId(null);
+      };
+      previewAudioElement.onerror = () => {
+        setPlayingPreviewAudioId(null);
+        setPreviewAudioError('No se pudo reproducir este audio.');
+      };
+
+      try {
+        setPlayingPreviewAudioId(audio.id);
+        await previewAudioElement.play();
+      } catch {
+        setPlayingPreviewAudioId(null);
+        setPreviewAudioError('No se pudo reproducir este audio.');
+      }
+    },
+    [playingPreviewAudioId, previewAudioElement, stopPreviewAudio]
+  );
+
+  useEffect(() => () => {
+    stopPreviewAudio();
+  }, [stopPreviewAudio]);
 
   const handleUnlock = async () => {
     if (!password.trim()) {
@@ -131,6 +212,8 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     try {
       await verifySongAdminPassword(password.trim());
+      cachedSongAdminPassword = password.trim();
+      setPassword(cachedSongAdminPassword);
       setIsUnlocked(true);
       setManagerError(null);
     } catch (error) {
@@ -143,6 +226,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const handleSelectSong = (songId: string) => {
     setSelectedSongId(songId);
     setIsSongPickerVisible(false);
+    setPreviewAudioError(null);
   };
 
   const resetAudioForm = () => {
@@ -328,6 +412,109 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const isDisabled = !sharedScript;
   const isPanelVisible = standalone || isVisible;
+  const canManageSongs = Platform.OS === 'web';
+
+  const resetManagerPanels = useCallback(() => {
+    setIsSongPickerVisible(false);
+    setIsUploadFormVisible(false);
+    setEditingAudioId(null);
+    setManagerError(null);
+    setPasswordError(null);
+    setPreviewAudioError(null);
+    stopPreviewAudio();
+  }, [stopPreviewAudio]);
+
+  const openViewMode = useCallback(
+    (nextViewMode: SongManagerViewMode) => {
+      resetManagerPanels();
+      setViewMode(nextViewMode);
+      if (nextViewMode === 'manage') {
+        setIsSongPickerVisible(true);
+      }
+    },
+    [resetManagerPanels]
+  );
+
+  const goBackToSongMenu = useCallback(() => {
+    resetManagerPanels();
+    setViewMode('menu');
+  }, [resetManagerPanels]);
+
+  const renderSongList = (songs: SharedSongAsset[]) => (
+    <View style={styles.songList}>
+      {songs.map((song) => {
+        const isSelected = selectedSong?.id === song.id;
+
+        return (
+          <TouchableOpacity
+            key={song.id}
+            style={[styles.songRow, isSelected && styles.songRowSelected]}
+            onPress={() => handleSelectSong(song.id)}
+          >
+            <View style={styles.songRowText}>
+              <Text style={[styles.songRowTitle, isSelected && styles.songRowTitleSelected]}>
+                {song.title}
+              </Text>
+              <Text style={styles.songRowMeta}>
+                {song.sceneTitle || 'Sin escena'} · {song.audios.length} audio
+                {song.audios.length === 1 ? '' : 's'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  const renderSongPracticeDetail = () => {
+    if (!selectedSong) {
+      return null;
+    }
+
+    return (
+      <View style={styles.songDetailBox}>
+        <Text style={styles.songDetailTitle}>{selectedSong.title}</Text>
+        <Text style={styles.songDetailMeta}>
+          {selectedSong.sceneTitle || 'Sin escena asociada'}
+        </Text>
+
+        {selectedSong.audios.length > 0 ? (
+          <View style={styles.audioList}>
+            <Text style={styles.sectionTitle}>Audios disponibles</Text>
+            {selectedSong.audios.map((audio) => {
+              const isPlaying = playingPreviewAudioId === audio.id;
+
+              return (
+                <View key={audio.id} style={styles.audioChip}>
+                  <Text style={styles.audioChipTitle}>{audio.label}</Text>
+                  <Text style={styles.audioChipMeta}>
+                    {formatSongAudioKind(audio.kind)}
+                    {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
+                  </Text>
+                  {audio.audioFileName ? (
+                    <Text style={styles.audioChipMeta}>{audio.audioFileName}</Text>
+                  ) : null}
+                  <View style={styles.audioActions}>
+                    <TouchableOpacity
+                      style={[styles.audioActionButton, styles.audioPlayButton]}
+                      onPress={() => void handlePlayPreviewAudio(audio)}
+                    >
+                      <Text style={styles.audioPlayText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <Text style={styles.infoText}>Todavía no hay audios para esta canción.</Text>
+        )}
+
+        {previewAudioError ? <Text style={styles.errorText}>{previewAudioError}</Text> : null}
+        <Text style={styles.songLyrics}>{selectedSong.lyrics}</Text>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.wrapper}>
@@ -356,35 +543,114 @@ export const SongManagerPanel: React.FC<Props> = ({
                 {totalAudioCount === 1 ? '' : 's'} cargado{totalAudioCount === 1 ? '' : 's'}
               </Text>
 
-              {Platform.OS !== 'web' ? (
-                <Text style={styles.infoText}>
-                  La subida de canciones esta disponible en la app web.
-                </Text>
-              ) : !isUnlocked ? (
-                <View style={styles.authBox}>
-                  <Text style={styles.authTitle}>Password de gestion</Text>
-                  <TextInput
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder="Introduce la password"
-                    secureTextEntry
-                    style={styles.passwordInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+              {viewMode === 'menu' ? (
+                <View style={styles.modeMenu}>
                   <TouchableOpacity
-                    style={[styles.primaryAction, isVerifyingPassword && styles.buttonDisabled]}
-                    onPress={() => void handleUnlock()}
-                    disabled={isVerifyingPassword}
+                    style={[styles.modeCard, styles.modeCardBlue]}
+                    onPress={() => openViewMode('my-songs')}
                   >
-                    <Text style={styles.primaryActionText}>
-                      {isVerifyingPassword ? 'Validando...' : 'Entrar'}
+                    <Text style={styles.modeCardTitle}>Mis canciones</Text>
+                    <Text style={styles.modeCardText}>
+                      {mySongs.length === 0
+                        ? 'Todavia no hay canciones etiquetadas para tus personajes.'
+                        : `${mySongs.length} canciones donde canta tu reparto.`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modeCard, styles.modeCardPurple]}
+                    onPress={() => openViewMode('all-songs')}
+                  >
+                    <Text style={styles.modeCardTitle}>Todas las canciones</Text>
+                    <Text style={styles.modeCardText}>
+                      {sharedScript.songs.length} canciones disponibles para practicar.
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modeCard,
+                      styles.modeCardBrown,
+                      !canManageSongs && styles.modeCardDisabled,
+                    ]}
+                    onPress={() => openViewMode('manage')}
+                    disabled={!canManageSongs}
+                  >
+                    <Text style={styles.modeCardTitle}>Anadir/modificar canciones</Text>
+                    <Text style={styles.modeCardText}>
+                      {canManageSongs
+                        ? `${totalAudioCount} audio${totalAudioCount === 1 ? '' : 's'} para revisar o ampliar.`
+                        : 'Disponible en la app web.'}
                     </Text>
                   </TouchableOpacity>
                 </View>
+              ) : viewMode === 'my-songs' || viewMode === 'all-songs' ? (
+                <>
+                  <TouchableOpacity style={styles.secondaryAction} onPress={goBackToSongMenu}>
+                    <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.selectionSummary}>
+                    {viewMode === 'my-songs'
+                      ? 'Canciones etiquetadas para tus personajes.'
+                      : 'Listado completo de canciones de la obra.'}
+                  </Text>
+
+                  {songsForCurrentView.length > 0 ? (
+                    <>
+                      {renderSongList(songsForCurrentView)}
+                      {renderSongPracticeDetail()}
+                    </>
+                  ) : (
+                    <Text style={styles.infoText}>
+                      {viewMode === 'my-songs'
+                        ? 'Todavia no hay canciones etiquetadas para los personajes seleccionados.'
+                        : 'Esta obra todavia no tiene canciones detectadas.'}
+                    </Text>
+                  )}
+                </>
+              ) : Platform.OS !== 'web' ? (
+                <>
+                  <TouchableOpacity style={styles.secondaryAction} onPress={goBackToSongMenu}>
+                    <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.infoText}>
+                    La subida de canciones esta disponible en la app web.
+                  </Text>
+                </>
+              ) : !isUnlocked ? (
+                <>
+                  <TouchableOpacity style={styles.secondaryAction} onPress={goBackToSongMenu}>
+                    <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
+                  </TouchableOpacity>
+                  <View style={styles.authBox}>
+                    <Text style={styles.authTitle}>Password de gestion</Text>
+                    <TextInput
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder="Introduce la password"
+                      secureTextEntry
+                      style={styles.passwordInput}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+                    <TouchableOpacity
+                      style={[styles.primaryAction, isVerifyingPassword && styles.buttonDisabled]}
+                      onPress={() => void handleUnlock()}
+                      disabled={isVerifyingPassword}
+                    >
+                      <Text style={styles.primaryActionText}>
+                        {isVerifyingPassword ? 'Validando...' : 'Entrar'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
               ) : (
                 <>
+                  <TouchableOpacity style={styles.secondaryAction} onPress={goBackToSongMenu}>
+                    <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
+                  </TouchableOpacity>
                   <Text style={styles.successText}>Sesion de gestion activa.</Text>
                   <TouchableOpacity
                     style={styles.secondaryAction}
@@ -643,6 +909,40 @@ const styles = StyleSheet.create({
     color: '#6b5b49',
     lineHeight: 20,
   },
+  modeMenu: {
+    gap: 12,
+  },
+  modeCard: {
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  modeCardBlue: {
+    backgroundColor: 'rgba(24, 78, 119, 0.1)',
+    borderColor: 'rgba(24, 78, 119, 0.24)',
+  },
+  modeCardPurple: {
+    backgroundColor: 'rgba(104, 67, 160, 0.1)',
+    borderColor: 'rgba(104, 67, 160, 0.24)',
+  },
+  modeCardBrown: {
+    backgroundColor: 'rgba(111, 76, 25, 0.1)',
+    borderColor: 'rgba(111, 76, 25, 0.24)',
+  },
+  modeCardDisabled: {
+    opacity: 0.55,
+  },
+  modeCardTitle: {
+    color: '#432818',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  modeCardText: {
+    color: '#6b5b49',
+    lineHeight: 20,
+  },
   authBox: {
     gap: 12,
   },
@@ -808,6 +1108,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
+  },
+  audioPlayButton: {
+    backgroundColor: 'rgba(24, 78, 119, 0.1)',
+    borderColor: 'rgba(24, 78, 119, 0.24)',
+  },
+  audioPlayText: {
+    color: '#184e77',
+    fontWeight: '700',
   },
   audioEditButton: {
     backgroundColor: '#f5ede3',
