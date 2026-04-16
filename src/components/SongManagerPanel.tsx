@@ -1,4 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { uploadSharedSongAudio } from '../api/sharedSongUploads';
@@ -26,6 +27,14 @@ interface Props {
 
 const DEFAULT_UPLOAD_KIND: SharedSongAudioKind = 'karaoke';
 type SongManagerViewMode = 'menu' | 'my-songs' | 'all-songs' | 'manage';
+type SongPlaybackMode = SharedSongAudioKind | 'all';
+type PlaylistEntry = {
+  song: SharedSongAsset;
+  audio: SharedSongAudioAsset;
+};
+type PlaybackSession =
+  | { kind: 'single'; audio: SharedSongAudioAsset }
+  | { kind: 'playlist'; mode: SongPlaybackMode; entries: PlaylistEntry[]; index: number };
 let cachedSongAdminPassword: string | null = null;
 
 const buildDefaultAudioLabel = (kind: SharedSongAudioKind, guideRoles: string[]) => {
@@ -79,6 +88,8 @@ export const SongManagerPanel: React.FC<Props> = ({
   );
   const replayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const replayCycleRef = useRef(0);
+  const playbackSessionRef = useRef<PlaybackSession | null>(null);
+  const [activePlaylistMode, setActivePlaylistMode] = useState<SongPlaybackMode | null>(null);
   const totalAudioCount = useMemo(
     () => sharedScript?.songs.reduce((count, song) => count + song.audios.length, 0) ?? 0,
     [sharedScript]
@@ -151,13 +162,43 @@ export const SongManagerPanel: React.FC<Props> = ({
     );
   };
 
-  const cancelQueuedReplay = useCallback(() => {
+  const pickPlaylistAudio = useCallback(
+    (song: SharedSongAsset, mode: SongPlaybackMode): SharedSongAudioAsset | null => {
+      const candidates =
+        mode === 'all' ? song.audios : song.audios.filter((audio) => audio.kind === mode);
+
+      if (!candidates.length) {
+        return null;
+      }
+
+      const roleMatchedAudio = candidates.find((audio) =>
+        audio.guideRoles.some((role) => myRoles.includes(role))
+      );
+
+      if (mode === 'vocal_guide' && roleMatchedAudio) {
+        return roleMatchedAudio;
+      }
+
+      if (mode === 'all') {
+        return candidates.find((audio) => audio.kind === 'karaoke') ?? roleMatchedAudio ?? candidates[0];
+      }
+
+      return candidates[0];
+    },
+    [myRoles]
+  );
+
+  const cancelQueuedReplay = useCallback((resetSession = true) => {
     if (replayTimeoutRef.current) {
       clearTimeout(replayTimeoutRef.current);
       replayTimeoutRef.current = null;
     }
 
     replayCycleRef.current += 1;
+    if (resetSession) {
+      playbackSessionRef.current = null;
+      setActivePlaylistMode(null);
+    }
   }, []);
 
   const stopPreviewAudio = useCallback(
@@ -196,7 +237,21 @@ export const SongManagerPanel: React.FC<Props> = ({
             return;
           }
 
-          void startPreviewPlayback(audio, cycleId);
+          const session = playbackSessionRef.current;
+          if (!session) {
+            return;
+          }
+
+          if (session.kind === 'single') {
+            void startPreviewPlayback(session.audio, cycleId);
+            return;
+          }
+
+          const nextIndex = (session.index + 1) % session.entries.length;
+          const nextEntry = session.entries[nextIndex];
+          playbackSessionRef.current = { ...session, index: nextIndex };
+          setSelectedSongId(nextEntry.song.id);
+          void startPreviewPlayback(nextEntry.audio, cycleId);
         }, 3000);
       };
       previewAudioElement.onerror = () => {
@@ -229,13 +284,73 @@ export const SongManagerPanel: React.FC<Props> = ({
       }
 
       setPreviewAudioError(null);
-      cancelQueuedReplay();
+      cancelQueuedReplay(false);
       stopPreviewAudio({ cancelLoop: false });
+      playbackSessionRef.current = { kind: 'single', audio };
+      setActivePlaylistMode(null);
 
       const cycleId = replayCycleRef.current;
       await startPreviewPlayback(audio, cycleId);
     },
     [cancelQueuedReplay, playingPreviewAudioId, previewAudioElement, startPreviewPlayback, stopPreviewAudio]
+  );
+
+  const handleStartPlaylist = useCallback(
+    async (mode: SongPlaybackMode) => {
+      if (!previewAudioElement) {
+        setPreviewAudioError('La reproduccion de audio solo esta disponible en la app web.');
+        return;
+      }
+
+      if (activePlaylistMode === mode) {
+        stopPreviewAudio();
+        return;
+      }
+
+      const entries = songsForCurrentView
+        .map((song) => {
+          const audio = pickPlaylistAudio(song, mode);
+          return audio ? { song, audio } : null;
+        })
+        .filter((entry): entry is PlaylistEntry => Boolean(entry));
+
+      if (!entries.length) {
+        setPreviewAudioError(
+          mode === 'karaoke'
+            ? 'No hay karaokes disponibles para este listado.'
+            : mode === 'vocal_guide'
+              ? 'No hay vocal guides disponibles para este listado.'
+              : 'No hay audios disponibles para este listado.'
+        );
+        return;
+      }
+
+      const preferredIndex = selectedSong
+        ? entries.findIndex((entry) => entry.song.id === selectedSong.id)
+        : 0;
+      const nextIndex = preferredIndex >= 0 ? preferredIndex : 0;
+      const nextEntry = entries[nextIndex];
+
+      setPreviewAudioError(null);
+      cancelQueuedReplay(false);
+      stopPreviewAudio({ cancelLoop: false });
+      playbackSessionRef.current = { kind: 'playlist', mode, entries, index: nextIndex };
+      setActivePlaylistMode(mode);
+      setSelectedSongId(nextEntry.song.id);
+
+      const cycleId = replayCycleRef.current;
+      await startPreviewPlayback(nextEntry.audio, cycleId);
+    },
+    [
+      activePlaylistMode,
+      cancelQueuedReplay,
+      pickPlaylistAudio,
+      previewAudioElement,
+      selectedSong,
+      songsForCurrentView,
+      startPreviewPlayback,
+      stopPreviewAudio,
+    ]
   );
 
   useEffect(() => () => {
@@ -517,7 +632,14 @@ export const SongManagerPanel: React.FC<Props> = ({
                       style={[styles.audioActionButton, styles.audioPlayButton]}
                       onPress={() => void handlePlayPreviewAudio(audio)}
                     >
-                      <Text style={styles.audioPlayText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
+                      <View style={styles.audioButtonContent}>
+                        <MaterialCommunityIcons
+                          name={isPlaying ? 'stop-circle-outline' : 'play-circle-outline'}
+                          size={18}
+                          color="#184e77"
+                        />
+                        <Text style={styles.audioPlayText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
+                      </View>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -692,6 +814,52 @@ export const SongManagerPanel: React.FC<Props> = ({
                       ? 'Canciones etiquetadas para tus personajes.'
                       : 'Listado completo de canciones de la obra.'}
                   </Text>
+
+                  <View style={styles.playlistActions}>
+                    <TouchableOpacity
+                      style={[
+                        styles.playlistButton,
+                        styles.playlistKaraokeButton,
+                        activePlaylistMode === 'karaoke' && styles.playlistButtonActive,
+                      ]}
+                      onPress={() => void handleStartPlaylist('karaoke')}
+                    >
+                      <MaterialCommunityIcons name="microphone-variant" size={18} color="#fff" />
+                      <Text style={styles.playlistButtonText}>
+                        {activePlaylistMode === 'karaoke' ? 'Detener karaokes' : 'Reproducir karaokes'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.playlistButton,
+                        styles.playlistGuideButton,
+                        activePlaylistMode === 'vocal_guide' && styles.playlistButtonActive,
+                      ]}
+                      onPress={() => void handleStartPlaylist('vocal_guide')}
+                    >
+                      <MaterialCommunityIcons name="account-voice" size={18} color="#fff" />
+                      <Text style={styles.playlistButtonText}>
+                        {activePlaylistMode === 'vocal_guide'
+                          ? 'Detener vocal guides'
+                          : 'Reproducir vocal guides'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.playlistButton,
+                        styles.playlistAllButton,
+                        activePlaylistMode === 'all' && styles.playlistButtonActive,
+                      ]}
+                      onPress={() => void handleStartPlaylist('all')}
+                    >
+                      <MaterialCommunityIcons name="playlist-music" size={18} color="#fff" />
+                      <Text style={styles.playlistButtonText}>
+                        {activePlaylistMode === 'all' ? 'Detener lista completa' : 'Reproducir todas'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
                   {songsForCurrentView.length > 0 ? (
                     <>
@@ -1108,6 +1276,38 @@ const styles = StyleSheet.create({
     color: '#6b5b49',
     lineHeight: 20,
   },
+  playlistActions: {
+    gap: 10,
+  },
+  playlistButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  playlistKaraokeButton: {
+    backgroundColor: 'rgba(165, 37, 88, 0.9)',
+    borderColor: 'rgba(165, 37, 88, 0.96)',
+  },
+  playlistGuideButton: {
+    backgroundColor: 'rgba(91, 63, 140, 0.9)',
+    borderColor: 'rgba(91, 63, 140, 0.96)',
+  },
+  playlistAllButton: {
+    backgroundColor: 'rgba(24, 78, 119, 0.9)',
+    borderColor: 'rgba(24, 78, 119, 0.96)',
+  },
+  playlistButtonActive: {
+    opacity: 0.75,
+  },
+  playlistButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
   infoText: {
     textAlign: 'center',
     color: '#6b5b49',
@@ -1200,6 +1400,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginTop: 10,
+  },
+  audioButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   audioActionButton: {
     flex: 1,

@@ -837,10 +837,13 @@ export const HomeScreen = () => {
                   style={[styles.btnMenu, styles.roleToggleButton]}
                   onPress={() => setIsRolePanelVisible((previousValue) => !previousValue)}
                 >
-                  <Text style={styles.btnText}>
-                    {isRolePanelVisible ? 'Ocultar seleccion de personajes' : 'Seleccion de personajes'}
-                    {myRoles.length > 0 ? ` (${myRoles.length})` : ''}
-                  </Text>
+                  <View style={styles.menuButtonContent}>
+                    <MaterialCommunityIcons name="account-star-outline" size={22} color="#fff" />
+                    <Text style={styles.btnText}>
+                      {isRolePanelVisible ? 'Ocultar seleccion de personajes' : 'Seleccion de personajes'}
+                      {myRoles.length > 0 ? ` (${myRoles.length})` : ''}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
                 <Text style={styles.selectionPreview}>{selectedRolesSummary}</Text>
 
@@ -875,10 +878,13 @@ export const HomeScreen = () => {
                   style={[styles.btnMenu, styles.sceneToggleButton]}
                   onPress={() => setIsScenePanelVisible((previousValue) => !previousValue)}
                 >
-                  <Text style={styles.btnText}>
-                    {isScenePanelVisible ? 'Ocultar seleccion de escenas' : 'Seleccion de escenas'}
-                    {selectedScenes.length > 0 ? ` (${selectedScenes.length})` : ''}
-                  </Text>
+                  <View style={styles.menuButtonContent}>
+                    <MaterialCommunityIcons name="movie-open-play-outline" size={22} color="#fff" />
+                    <Text style={styles.btnText}>
+                      {isScenePanelVisible ? 'Ocultar seleccion de escenas' : 'Seleccion de escenas'}
+                      {selectedScenes.length > 0 ? ` (${selectedScenes.length})` : ''}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
                 <Text style={styles.selectionPreview}>{selectedScenesSummary}</Text>
 
@@ -940,7 +946,10 @@ export const HomeScreen = () => {
                     onPress={() => requestRehearsalStart('ALL')}
                     disabled={myRoles.length === 0}
                   >
-                    <Text style={styles.btnText}>Ensayar obra completa</Text>
+                    <View style={styles.menuButtonContent}>
+                      <MaterialCommunityIcons name="theater" size={22} color="#fff" />
+                      <Text style={styles.btnText}>Ensayar obra completa</Text>
+                    </View>
                   </TouchableOpacity>
                   {renderResumeChoiceForMode('ALL')}
                 </View>
@@ -950,7 +959,10 @@ export const HomeScreen = () => {
                     onPress={() => requestRehearsalStart('MINE')}
                     disabled={myRoles.length === 0}
                   >
-                    <Text style={styles.btnText}>Ensayar mis escenas</Text>
+                    <View style={styles.menuButtonContent}>
+                      <MaterialCommunityIcons name="account-voice" size={22} color="#fff" />
+                      <Text style={styles.btnText}>Ensayar mis escenas</Text>
+                    </View>
                   </TouchableOpacity>
                   {renderResumeChoiceForMode('MINE')}
                 </View>
@@ -960,7 +972,10 @@ export const HomeScreen = () => {
                     onPress={() => requestRehearsalStart('SELECTED')}
                     disabled={selectedScenes.length === 0}
                   >
-                    <Text style={styles.btnText}>Ensayar escenas seleccionadas</Text>
+                    <View style={styles.menuButtonContent}>
+                      <MaterialCommunityIcons name="playlist-play" size={22} color="#fff" />
+                      <Text style={styles.btnText}>Ensayar escenas seleccionadas</Text>
+                    </View>
                   </TouchableOpacity>
                   {renderResumeChoiceForMode('SELECTED')}
                 </View>
@@ -972,10 +987,13 @@ export const HomeScreen = () => {
                     style={[styles.btnMenu, styles.mergeToggleButton]}
                     onPress={() => setIsMergePanelVisible((previousValue) => !previousValue)}
                   >
-                    <Text style={styles.btnText}>
-                      {isMergePanelVisible ? 'Ocultar fusion de personajes' : 'Fusion de personajes'}
-                      {mergeEntries.length > 0 ? ` (${mergeEntries.length})` : ''}
-                    </Text>
+                    <View style={styles.menuButtonContent}>
+                      <MaterialCommunityIcons name="account-group-outline" size={22} color="#fff" />
+                      <Text style={styles.btnText}>
+                        {isMergePanelVisible ? 'Ocultar fusion de personajes' : 'Fusion de personajes'}
+                        {mergeEntries.length > 0 ? ` (${mergeEntries.length})` : ''}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
 
                   {isMergePanelVisible ? (
@@ -1502,6 +1520,12 @@ const styles = StyleSheet.create({
   songLaunchBadgeText: {
     color: '#fff7dc',
     fontWeight: '800',
+  },
+  menuButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
   },
   btnMenu: {
     backgroundColor: 'rgba(0, 122, 255, 0.78)',
