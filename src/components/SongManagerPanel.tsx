@@ -824,10 +824,15 @@ export const SongManagerPanel: React.FC<Props> = ({
                       ]}
                       onPress={() => void handleStartPlaylist('karaoke')}
                     >
-                      <MaterialCommunityIcons name="microphone-variant" size={18} color="#fff" />
-                      <Text style={styles.playlistButtonText}>
-                        {activePlaylistMode === 'karaoke' ? 'Detener karaokes' : 'Reproducir karaokes'}
-                      </Text>
+                      <View style={styles.playlistButtonContent}>
+                        <MaterialCommunityIcons name="microphone-variant" size={17} color="#fff" />
+                        <MaterialCommunityIcons
+                          name={activePlaylistMode === 'karaoke' ? 'stop-circle' : 'play-circle'}
+                          size={17}
+                          color="#fff7dc"
+                        />
+                        <Text style={styles.playlistButtonText}>Karaokes</Text>
+                      </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -838,12 +843,15 @@ export const SongManagerPanel: React.FC<Props> = ({
                       ]}
                       onPress={() => void handleStartPlaylist('vocal_guide')}
                     >
-                      <MaterialCommunityIcons name="account-voice" size={18} color="#fff" />
-                      <Text style={styles.playlistButtonText}>
-                        {activePlaylistMode === 'vocal_guide'
-                          ? 'Detener vocal guides'
-                          : 'Reproducir vocal guides'}
-                      </Text>
+                      <View style={styles.playlistButtonContent}>
+                        <MaterialCommunityIcons name="account-voice" size={17} color="#fff" />
+                        <MaterialCommunityIcons
+                          name={activePlaylistMode === 'vocal_guide' ? 'stop-circle' : 'play-circle'}
+                          size={17}
+                          color="#f4ebff"
+                        />
+                        <Text style={styles.playlistButtonText}>Vocal guides</Text>
+                      </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -854,10 +862,15 @@ export const SongManagerPanel: React.FC<Props> = ({
                       ]}
                       onPress={() => void handleStartPlaylist('all')}
                     >
-                      <MaterialCommunityIcons name="playlist-music" size={18} color="#fff" />
-                      <Text style={styles.playlistButtonText}>
-                        {activePlaylistMode === 'all' ? 'Detener lista completa' : 'Reproducir todas'}
-                      </Text>
+                      <View style={styles.playlistButtonContent}>
+                        <MaterialCommunityIcons name="playlist-music" size={17} color="#fff" />
+                        <MaterialCommunityIcons
+                          name={activePlaylistMode === 'all' ? 'stop-circle' : 'play-circle'}
+                          size={17}
+                          color="#dff3ff"
+                        />
+                        <Text style={styles.playlistButtonText}>Todas</Text>
+                      </View>
                     </TouchableOpacity>
                   </View>
 
@@ -1277,17 +1290,25 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   playlistActions: {
+    flexDirection: 'row',
     gap: 10,
   },
   playlistButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 10,
     paddingVertical: 12,
     borderRadius: 14,
     borderWidth: 1,
+  },
+  playlistButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minWidth: 0,
   },
   playlistKaraokeButton: {
     backgroundColor: 'rgba(165, 37, 88, 0.9)',
@@ -1307,6 +1328,10 @@ const styles = StyleSheet.create({
   playlistButtonText: {
     color: '#fff',
     fontWeight: '700',
+    fontSize: 12,
+    lineHeight: 14,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   infoText: {
     textAlign: 'center',
