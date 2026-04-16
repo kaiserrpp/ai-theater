@@ -894,6 +894,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       const manifest = await registerSharedMusicalNumberAudio({
         shareId: sharedScript.shareId,
         musicalNumberId: selectedMusicalNumber.id,
+        musicalNumberTitle: selectedMusicalNumber.title,
+        songIds: selectedMusicalNumber.songIds,
         password: password.trim(),
         label:
           musicalNumberAudioLabel.trim() ||
@@ -927,6 +929,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       const manifest = await updateSharedMusicalNumberAudio({
         shareId: sharedScript.shareId,
         musicalNumberId: selectedMusicalNumber.id,
+        musicalNumberTitle: selectedMusicalNumber.title,
+        songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
         password: password.trim(),
         label:
@@ -964,6 +968,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       const manifest = await updateSharedMusicalNumberAudio({
         shareId: sharedScript.shareId,
         musicalNumberId: selectedMusicalNumber.id,
+        musicalNumberTitle: selectedMusicalNumber.title,
+        songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
         password: password.trim(),
         label:
@@ -1000,6 +1006,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       const manifest = await deleteSharedMusicalNumberAudio({
         shareId: sharedScript.shareId,
         musicalNumberId: selectedMusicalNumber.id,
+        musicalNumberTitle: selectedMusicalNumber.title,
+        songIds: selectedMusicalNumber.songIds,
         audioId,
         password: password.trim(),
       });

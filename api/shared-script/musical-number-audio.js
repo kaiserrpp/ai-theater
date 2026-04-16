@@ -30,6 +30,72 @@ const resolveLabel = (label, kind, fallbackLabel) => {
   return kind === 'vocal_guide' ? 'Vocal guide' : 'Karaoke';
 };
 
+const normalizeSongIds = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(value.filter((songId) => typeof songId === 'string' && songId.trim()))
+  );
+};
+
+const areSongIdsEqual = (leftSongIds, rightSongIds) => {
+  if (leftSongIds.length !== rightSongIds.length) {
+    return false;
+  }
+
+  const normalizedLeft = [...leftSongIds].sort();
+  const normalizedRight = [...rightSongIds].sort();
+
+  return normalizedLeft.every((songId, index) => songId === normalizedRight[index]);
+};
+
+const resolveMusicalNumber = (manifest, payload) => {
+  const allMusicalNumbers = Array.isArray(manifest.musicalNumbers) ? manifest.musicalNumbers : [];
+  const musicalNumberId =
+    typeof payload.musicalNumberId === 'string' ? payload.musicalNumberId.trim() : '';
+
+  if (musicalNumberId) {
+    const exactMatch = allMusicalNumbers.find((candidate) => candidate.id === musicalNumberId);
+    if (exactMatch) {
+      return exactMatch;
+    }
+  }
+
+  const title =
+    typeof payload.musicalNumberTitle === 'string' && payload.musicalNumberTitle.trim()
+      ? payload.musicalNumberTitle.trim()
+      : '';
+  const songIds = normalizeSongIds(payload.songIds);
+
+  if (!title && songIds.length === 0) {
+    return null;
+  }
+
+  const matchingCandidates = allMusicalNumbers.filter((candidate) => {
+    if (title && candidate.title !== title) {
+      return false;
+    }
+
+    if (songIds.length > 0 && !areSongIdsEqual(candidate.songIds || [], songIds)) {
+      return false;
+    }
+
+    return true;
+  });
+
+  if (matchingCandidates.length === 1) {
+    return matchingCandidates[0];
+  }
+
+  if (songIds.length > 0) {
+    return allMusicalNumbers.find((candidate) => areSongIdsEqual(candidate.songIds || [], songIds)) ?? null;
+  }
+
+  return title ? allMusicalNumbers.find((candidate) => candidate.title === title) ?? null : null;
+};
+
 const resolveKind = (value, fallbackKind = 'karaoke') =>
   AUDIO_KINDS.has(value) ? value : fallbackKind;
 
@@ -68,23 +134,23 @@ module.exports = async (request, response) => {
     }
 
     const shareId = typeof payload.shareId === 'string' ? payload.shareId.trim() : '';
-    const musicalNumberId =
+    const requestedMusicalNumberId =
       typeof payload.musicalNumberId === 'string' ? payload.musicalNumberId.trim() : '';
 
-    if (!shareId || !musicalNumberId) {
+    if (!shareId || !requestedMusicalNumberId) {
       response.status(400).json({ error: 'Faltan datos del numero musical.' });
       return;
     }
 
     const manifest = await readManifest(shareId);
-    const musicalNumber = (manifest.musicalNumbers || []).find(
-      (candidate) => candidate.id === musicalNumberId
-    );
+    const musicalNumber = resolveMusicalNumber(manifest, payload);
 
     if (!musicalNumber) {
       response.status(404).json({ error: 'No existe ese numero musical en la obra compartida.' });
       return;
     }
+
+    const musicalNumberId = musicalNumber.id;
 
     const now = new Date().toISOString();
 

@@ -126,6 +126,8 @@ export interface SharedMusicalNumberDeleteInput {
 export interface SharedMusicalNumberAudioRegistrationInput {
   shareId: string;
   musicalNumberId: string;
+  musicalNumberTitle?: string;
+  songIds?: string[];
   password: string;
   label: string;
   kind: SharedSongAudioKind;
@@ -139,6 +141,8 @@ export interface SharedMusicalNumberAudioRegistrationInput {
 export interface SharedMusicalNumberAudioUpdateInput {
   shareId: string;
   musicalNumberId: string;
+  musicalNumberTitle?: string;
+  songIds?: string[];
   audioId: string;
   password: string;
   label: string;
@@ -153,6 +157,8 @@ export interface SharedMusicalNumberAudioUpdateInput {
 export interface SharedMusicalNumberAudioDeleteInput {
   shareId: string;
   musicalNumberId: string;
+  musicalNumberTitle?: string;
+  songIds?: string[];
   audioId: string;
   password: string;
 }
