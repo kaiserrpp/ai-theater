@@ -25,6 +25,17 @@ export interface SharedSongAsset {
   updatedAt: string;
 }
 
+export interface SharedMusicalNumberAsset {
+  id: string;
+  title: string;
+  sceneTitle: string | null;
+  startLineIndex: number;
+  endLineIndex: number;
+  songIds: string[];
+  audios: SharedSongAudioAsset[];
+  updatedAt: string;
+}
+
 export interface SharedScriptManifest {
   version: number;
   shareId: string;
@@ -32,6 +43,7 @@ export interface SharedScriptManifest {
   scriptData: ScriptData;
   mergeMap: CharacterMergeMap;
   songs: SharedSongAsset[];
+  musicalNumbers: SharedMusicalNumberAsset[];
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +54,7 @@ export interface SharedScriptListItem {
   fileName: string;
   mergeCount: number;
   songCount: number;
+  musicalNumberCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -52,6 +65,7 @@ export interface SharedScriptPublishInput {
   scriptData: ScriptData;
   mergeMap: CharacterMergeMap;
   songs?: SharedSongAsset[];
+  musicalNumbers?: SharedMusicalNumberAsset[];
 }
 
 export interface SharedSongAudioRegistrationInput {
@@ -84,6 +98,61 @@ export interface SharedSongAudioUpdateInput {
 export interface SharedSongAudioDeleteInput {
   shareId: string;
   songId: string;
+  audioId: string;
+  password: string;
+}
+
+export interface SharedMusicalNumberCreateInput {
+  shareId: string;
+  password: string;
+  title: string;
+  songIds: string[];
+}
+
+export interface SharedMusicalNumberUpdateInput {
+  shareId: string;
+  musicalNumberId: string;
+  password: string;
+  title: string;
+  songIds: string[];
+}
+
+export interface SharedMusicalNumberDeleteInput {
+  shareId: string;
+  musicalNumberId: string;
+  password: string;
+}
+
+export interface SharedMusicalNumberAudioRegistrationInput {
+  shareId: string;
+  musicalNumberId: string;
+  password: string;
+  label: string;
+  kind: SharedSongAudioKind;
+  guideRoles: string[];
+  audioUrl: string;
+  audioFileName?: string | null;
+  contentType?: string | null;
+  size?: number | null;
+}
+
+export interface SharedMusicalNumberAudioUpdateInput {
+  shareId: string;
+  musicalNumberId: string;
+  audioId: string;
+  password: string;
+  label: string;
+  kind: SharedSongAudioKind;
+  guideRoles: string[];
+  audioUrl?: string | null;
+  audioFileName?: string | null;
+  contentType?: string | null;
+  size?: number | null;
+}
+
+export interface SharedMusicalNumberAudioDeleteInput {
+  shareId: string;
+  musicalNumberId: string;
   audioId: string;
   password: string;
 }

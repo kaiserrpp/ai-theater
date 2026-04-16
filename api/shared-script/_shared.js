@@ -1,7 +1,8 @@
 const { head, list, put } = require('@vercel/blob');
 
-const MANIFEST_VERSION = 2;
+const MANIFEST_VERSION = 3;
 const EMPTY_SONGS = [];
+const EMPTY_MUSICAL_NUMBERS = [];
 const SONG_AUDIO_KINDS = new Set(['karaoke', 'vocal_guide']);
 
 const buildManifestPath = (shareId) => `shared-scripts/${shareId}/manifest.json`;
@@ -116,29 +117,105 @@ const normalizeSongs = (value) => {
     }));
 };
 
-const normalizeManifest = (value) => ({
-  version: MANIFEST_VERSION,
-  shareId: typeof value?.shareId === 'string' ? value.shareId : createShareId(),
-  fileName:
-    typeof value?.fileName === 'string' && value.fileName.trim()
-      ? value.fileName.trim()
-      : isValidScriptData(value?.scriptData)
-        ? value.scriptData.obra
-        : 'Obra compartida',
-  scriptData: isValidScriptData(value?.scriptData)
-    ? value.scriptData
-    : { obra: 'Obra compartida', personajes: [], guion: [] },
-  mergeMap: normalizeMergeMap(value?.mergeMap),
-  songs: normalizeSongs(value?.songs),
-  createdAt:
-    typeof value?.createdAt === 'string' && value.createdAt.trim()
-      ? value.createdAt
-      : new Date().toISOString(),
-  updatedAt:
-    typeof value?.updatedAt === 'string' && value.updatedAt.trim()
-      ? value.updatedAt
-      : new Date().toISOString(),
-});
+const resolveMusicalNumberIndexes = (songIds, songs) => {
+  const referencedSongs = songs.filter((song) => songIds.includes(song.id));
+  const sortedIndexes = referencedSongs
+    .map((song) => song.lineIndex)
+    .filter((lineIndex) => typeof lineIndex === 'number' && lineIndex >= 0)
+    .sort((leftIndex, rightIndex) => leftIndex - rightIndex);
+
+  return {
+    startLineIndex: sortedIndexes[0] ?? -1,
+    endLineIndex: sortedIndexes[sortedIndexes.length - 1] ?? -1,
+    sceneTitle: referencedSongs[0]?.sceneTitle ?? null,
+  };
+};
+
+const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
+  if (!Array.isArray(value)) {
+    return EMPTY_MUSICAL_NUMBERS;
+  }
+
+  return value
+    .filter(
+      (musicalNumber) =>
+        isObject(musicalNumber) &&
+        typeof musicalNumber.id === 'string' &&
+        typeof musicalNumber.title === 'string'
+    )
+    .map((musicalNumber) => {
+      const songIds = Array.isArray(musicalNumber.songIds)
+        ? Array.from(
+            new Set(
+              musicalNumber.songIds.filter(
+                (songId) =>
+                  typeof songId === 'string' &&
+                  songId.trim() &&
+                  songs.some((song) => song.id === songId)
+              )
+            )
+          )
+        : [];
+      const resolvedIndexes = resolveMusicalNumberIndexes(songIds, songs);
+
+      return {
+        id: musicalNumber.id.trim(),
+        title: musicalNumber.title.trim() || 'Numero musical',
+        sceneTitle:
+          typeof musicalNumber.sceneTitle === 'string' && musicalNumber.sceneTitle.trim()
+            ? musicalNumber.sceneTitle.trim()
+            : resolvedIndexes.sceneTitle,
+        startLineIndex:
+          typeof musicalNumber.startLineIndex === 'number' && musicalNumber.startLineIndex >= 0
+            ? musicalNumber.startLineIndex
+            : resolvedIndexes.startLineIndex,
+        endLineIndex:
+          typeof musicalNumber.endLineIndex === 'number' && musicalNumber.endLineIndex >= 0
+            ? musicalNumber.endLineIndex
+            : resolvedIndexes.endLineIndex,
+        songIds,
+        audios: Array.isArray(musicalNumber.audios)
+          ? musicalNumber.audios
+              .map((audio, index) => normalizeSongAudio(audio, index))
+              .filter(Boolean)
+          : [],
+        updatedAt:
+          typeof musicalNumber.updatedAt === 'string' && musicalNumber.updatedAt.trim()
+            ? musicalNumber.updatedAt
+            : new Date().toISOString(),
+      };
+    })
+    .filter((musicalNumber) => musicalNumber.songIds.length > 0);
+};
+
+const normalizeManifest = (value) => {
+  const songs = normalizeSongs(value?.songs);
+
+  return {
+    version: MANIFEST_VERSION,
+    shareId: typeof value?.shareId === 'string' ? value.shareId : createShareId(),
+    fileName:
+      typeof value?.fileName === 'string' && value.fileName.trim()
+        ? value.fileName.trim()
+        : isValidScriptData(value?.scriptData)
+          ? value.scriptData.obra
+          : 'Obra compartida',
+    scriptData: isValidScriptData(value?.scriptData)
+      ? value.scriptData
+      : { obra: 'Obra compartida', personajes: [], guion: [] },
+    mergeMap: normalizeMergeMap(value?.mergeMap),
+    songs,
+    musicalNumbers: normalizeMusicalNumbers(value?.musicalNumbers, songs),
+    createdAt:
+      typeof value?.createdAt === 'string' && value.createdAt.trim()
+        ? value.createdAt
+        : new Date().toISOString(),
+    updatedAt:
+      typeof value?.updatedAt === 'string' && value.updatedAt.trim()
+        ? value.updatedAt
+        : new Date().toISOString(),
+  };
+};
 
 const getSongAdminPasswordFromRequest = (request) => {
   const headerValue = request.headers['x-song-admin-password'];
@@ -211,6 +288,7 @@ const buildManifestSummary = (manifest) => ({
   fileName: manifest.fileName,
   mergeCount: Object.keys(normalizeMergeMap(manifest.mergeMap)).length,
   songCount: normalizeSongs(manifest.songs).length,
+  musicalNumberCount: normalizeMusicalNumbers(manifest.musicalNumbers, normalizeSongs(manifest.songs)).length,
   createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : new Date().toISOString(),
   updatedAt: typeof manifest.updatedAt === 'string' ? manifest.updatedAt : new Date().toISOString(),
 });
@@ -250,6 +328,7 @@ module.exports = {
   listSharedScriptSummaries,
   normalizeManifest,
   normalizeMergeMap,
+  normalizeMusicalNumbers,
   normalizeSongs,
   parseJsonBody,
   readManifest,

@@ -8,7 +8,8 @@ export interface SharedSongUploadResult {
 
 interface UploadSharedSongAudioInput {
   shareId: string;
-  songId: string;
+  targetId: string;
+  targetType?: 'song' | 'musical-number';
   file: Blob;
   password: string;
   onUploadProgress?: (percentage: number) => void;

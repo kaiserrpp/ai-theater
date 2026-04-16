@@ -1,5 +1,6 @@
 import { Dialogue } from '../types/script';
 import {
+  SharedMusicalNumberAsset,
   SharedSongAsset,
   SharedSongAudioAsset,
   SharedSongAudioKind,
@@ -181,6 +182,63 @@ export const syncSharedSongsWithScript = (
       audios: normalizeSongAudios(existingSong),
     };
   });
+};
+
+export const syncSharedMusicalNumbersWithScript = (
+  songs: SharedSongAsset[],
+  existingMusicalNumbers: unknown
+): SharedMusicalNumberAsset[] => {
+  if (!Array.isArray(existingMusicalNumbers)) {
+    return [];
+  }
+
+  return existingMusicalNumbers
+    .filter(
+      (musicalNumber): musicalNumber is Partial<SharedMusicalNumberAsset> =>
+        Boolean(musicalNumber) && typeof musicalNumber === 'object'
+    )
+    .map((musicalNumber, index) => {
+      const songIds = Array.isArray(musicalNumber.songIds)
+        ? Array.from(
+            new Set(
+              musicalNumber.songIds.filter(
+                (songId): songId is string =>
+                  typeof songId === 'string' && songs.some((song) => song.id === songId)
+              )
+            )
+          )
+        : [];
+
+      const linkedSongs = songIds
+        .map((songId) => songs.find((song) => song.id === songId) ?? null)
+        .filter((song): song is SharedSongAsset => Boolean(song))
+        .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex);
+
+      if (linkedSongs.length === 0) {
+        return null;
+      }
+
+      return {
+        id:
+          typeof musicalNumber.id === 'string' && musicalNumber.id.trim().length > 0
+            ? musicalNumber.id.trim()
+            : `musical-number-${index + 1}`,
+        title:
+          typeof musicalNumber.title === 'string' && musicalNumber.title.trim().length > 0
+            ? musicalNumber.title.trim()
+            : linkedSongs[0].title,
+        sceneTitle: linkedSongs[0].sceneTitle ?? null,
+        startLineIndex: linkedSongs[0].lineIndex,
+        endLineIndex: linkedSongs[linkedSongs.length - 1].lineIndex,
+        songIds,
+        audios: normalizeSongAudios(musicalNumber),
+        updatedAt:
+          typeof musicalNumber.updatedAt === 'string' && musicalNumber.updatedAt.trim().length > 0
+            ? musicalNumber.updatedAt
+            : new Date().toISOString(),
+      };
+    })
+    .filter((musicalNumber): musicalNumber is SharedMusicalNumberAsset => Boolean(musicalNumber));
 };
 
 export const findSharedSongForLine = (

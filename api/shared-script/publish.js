@@ -4,6 +4,7 @@ const {
   createShareId,
   isValidScriptData,
   normalizeMergeMap,
+  normalizeMusicalNumbers,
   normalizeSongs,
   parseJsonBody,
   readManifest,
@@ -47,6 +48,8 @@ module.exports = async (request, response) => {
       }
     }
 
+    const normalizedSongs = normalizeSongs(payload.songs);
+
     const manifest = {
       version: MANIFEST_VERSION,
       shareId,
@@ -56,7 +59,8 @@ module.exports = async (request, response) => {
           : payload.scriptData.obra,
       scriptData: payload.scriptData,
       mergeMap: normalizeMergeMap(payload.mergeMap),
-      songs: normalizeSongs(payload.songs),
+      songs: normalizedSongs,
+      musicalNumbers: normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs),
       createdAt,
       updatedAt: now,
     };

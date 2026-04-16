@@ -11,7 +11,8 @@ export interface SharedSongUploadResult {
 
 interface UploadSharedSongAudioInput {
   shareId: string;
-  songId: string;
+  targetId: string;
+  targetType?: 'song' | 'musical-number';
   file: Blob;
   password: string;
   onUploadProgress?: (percentage: number) => void;
@@ -39,12 +40,14 @@ const fetchClientToken = async ({
   pathname,
   password,
   shareId,
-  songId,
+  targetId,
+  targetType,
 }: {
   pathname: string;
   password: string;
   shareId: string;
-  songId: string;
+  targetId: string;
+  targetType: 'song' | 'musical-number';
 }) => {
   const response = await fetch('/api/shared-script/song-upload', {
     method: 'POST',
@@ -56,7 +59,7 @@ const fetchClientToken = async ({
       type: 'blob.generate-client-token',
       payload: {
         pathname,
-        clientPayload: JSON.stringify({ shareId, songId }),
+        clientPayload: JSON.stringify({ shareId, targetId, targetType }),
         multipart: false,
       },
     }),
@@ -131,7 +134,8 @@ const uploadBlobWithClientToken = ({
 
 export const uploadSharedSongAudio = async ({
   shareId,
-  songId,
+  targetId,
+  targetType = 'song',
   file,
   password,
   onUploadProgress,
@@ -142,7 +146,8 @@ export const uploadSharedSongAudio = async ({
       ? namedFile.name
       : `audio-${Date.now()}.mp3`;
   const safeFileName = sanitizeFileName(originalFileName) || `audio-${Date.now()}.mp3`;
-  const pathname = `shared-scripts/${shareId}/songs/${songId}/${Date.now()}-${safeFileName}`;
+  const targetFolder = targetType === 'musical-number' ? 'musical-numbers' : 'songs';
+  const pathname = `shared-scripts/${shareId}/${targetFolder}/${targetId}/${Date.now()}-${safeFileName}`;
   const contentType =
     typeof namedFile.type === 'string' && namedFile.type.trim().length > 0
       ? namedFile.type
@@ -153,7 +158,8 @@ export const uploadSharedSongAudio = async ({
     pathname,
     password,
     shareId,
-    songId,
+    targetId,
+    targetType,
   });
 
   const blob = await uploadBlobWithClientToken({

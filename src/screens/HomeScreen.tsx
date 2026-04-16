@@ -20,7 +20,7 @@ import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScript
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { getScriptIdentity } from '../utils/scriptIdentity';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
-import { syncSharedSongsWithScript } from '../utils/sharedSongs';
+import { syncSharedMusicalNumbersWithScript, syncSharedSongsWithScript } from '../utils/sharedSongs';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRolesAndSongs } from '../utils/scriptScenes';
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
@@ -431,6 +431,10 @@ export const HomeScreen = () => {
     const normalizedManifest = {
       ...manifest,
       songs: syncSharedSongsWithScript(manifest.scriptData.guion, manifest.songs),
+      musicalNumbers: syncSharedMusicalNumbersWithScript(
+        syncSharedSongsWithScript(manifest.scriptData.guion, manifest.songs),
+        manifest.musicalNumbers
+      ),
     };
 
     setSharedScript(normalizedManifest);
@@ -453,6 +457,10 @@ export const HomeScreen = () => {
       const manifest = {
         ...remoteManifest,
         songs: syncSharedSongsWithScript(remoteManifest.scriptData.guion, remoteManifest.songs),
+        musicalNumbers: syncSharedMusicalNumbersWithScript(
+          syncSharedSongsWithScript(remoteManifest.scriptData.guion, remoteManifest.songs),
+          remoteManifest.musicalNumbers
+        ),
       };
       const localSnapshotConfig =
         sharedScript?.shareId === shareId && scriptData
@@ -527,11 +535,19 @@ export const HomeScreen = () => {
         scriptData,
         mergeMap,
         songs: syncSharedSongsWithScript(scriptData.guion, sharedScript?.songs),
+        musicalNumbers: syncSharedMusicalNumbersWithScript(
+          syncSharedSongsWithScript(scriptData.guion, sharedScript?.songs),
+          sharedScript?.musicalNumbers
+        ),
       });
 
       const manifest = {
         ...response.manifest,
         songs: syncSharedSongsWithScript(response.manifest.scriptData.guion, response.manifest.songs),
+        musicalNumbers: syncSharedMusicalNumbersWithScript(
+          syncSharedSongsWithScript(response.manifest.scriptData.guion, response.manifest.songs),
+          response.manifest.musicalNumbers
+        ),
       };
 
       setSharedScript(manifest);

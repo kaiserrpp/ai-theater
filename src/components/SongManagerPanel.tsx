@@ -4,12 +4,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { uploadSharedSongAudio } from '../api/sharedSongUploads';
 import {
+  createSharedMusicalNumber,
+  deleteSharedMusicalNumber,
+  deleteSharedMusicalNumberAudio,
   deleteSharedSongAudio,
   registerSharedSongAudio,
+  registerSharedMusicalNumberAudio,
+  updateSharedMusicalNumber,
+  updateSharedMusicalNumberAudio,
   updateSharedSongAudio,
   verifySongAdminPassword,
 } from '../api/sharedScripts';
 import {
+  SharedMusicalNumberAsset,
   SharedScriptManifest,
   SharedSongAudioAsset,
   SharedSongAsset,
@@ -28,6 +35,7 @@ interface Props {
 const DEFAULT_UPLOAD_KIND: SharedSongAudioKind = 'karaoke';
 type SongManagerViewMode = 'menu' | 'my-songs' | 'all-songs' | 'manage';
 type SongPlaybackMode = SharedSongAudioKind | 'all';
+type ManageSection = 'song-blocks' | 'musical-numbers';
 type PlaylistEntry = {
   song: SharedSongAsset;
   audio: SharedSongAudioAsset;
@@ -43,6 +51,18 @@ const buildDefaultAudioLabel = (kind: SharedSongAudioKind, guideRoles: string[])
   }
 
   return 'Karaoke';
+};
+
+const buildDefaultMusicalNumberTitle = (songs: SharedSongAsset[]) => {
+  if (songs.length === 0) {
+    return 'Numero musical';
+  }
+
+  if (songs.length === 1) {
+    return songs[0].title;
+  }
+
+  return `${songs[0].title} -> ${songs[songs.length - 1].title}`;
 };
 
 const resolveAssetBlob = async (asset: DocumentPicker.DocumentPickerAsset) => {
@@ -69,7 +89,9 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [password, setPassword] = useState(cachedSongAdminPassword ?? '');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
+  const [manageSection, setManageSection] = useState<ManageSection>('song-blocks');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
+  const [selectedMusicalNumberId, setSelectedMusicalNumberId] = useState<string | null>(null);
   const [audioLabel, setAudioLabel] = useState('');
   const [audioKind, setAudioKind] = useState<SharedSongAudioKind>(DEFAULT_UPLOAD_KIND);
   const [guideRoles, setGuideRoles] = useState<string[]>([]);
@@ -81,6 +103,22 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [editingAudioId, setEditingAudioId] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [deletingAudioId, setDeletingAudioId] = useState<string | null>(null);
+  const [musicalNumberTitle, setMusicalNumberTitle] = useState('');
+  const [musicalNumberSongIds, setMusicalNumberSongIds] = useState<string[]>([]);
+  const [isMusicalNumberFormVisible, setIsMusicalNumberFormVisible] = useState(false);
+  const [editingMusicalNumberId, setEditingMusicalNumberId] = useState<string | null>(null);
+  const [isSavingMusicalNumber, setIsSavingMusicalNumber] = useState(false);
+  const [deletingMusicalNumberId, setDeletingMusicalNumberId] = useState<string | null>(null);
+  const [musicalNumberAudioLabel, setMusicalNumberAudioLabel] = useState('');
+  const [musicalNumberAudioKind, setMusicalNumberAudioKind] =
+    useState<SharedSongAudioKind>(DEFAULT_UPLOAD_KIND);
+  const [musicalNumberGuideRoles, setMusicalNumberGuideRoles] = useState<string[]>([]);
+  const [isMusicalNumberUploading, setIsMusicalNumberUploading] = useState(false);
+  const [musicalNumberUploadProgress, setMusicalNumberUploadProgress] = useState<number | null>(null);
+  const [editingMusicalNumberAudioId, setEditingMusicalNumberAudioId] = useState<string | null>(null);
+  const [isSavingMusicalNumberAudio, setIsSavingMusicalNumberAudio] = useState(false);
+  const [deletingMusicalNumberAudioId, setDeletingMusicalNumberAudioId] = useState<string | null>(null);
+  const [isMusicalNumberAudioFormVisible, setIsMusicalNumberAudioFormVisible] = useState(false);
   const [playingPreviewAudioId, setPlayingPreviewAudioId] = useState<string | null>(null);
   const [previewAudioError, setPreviewAudioError] = useState<string | null>(null);
   const [previewAudioElement] = useState<HTMLAudioElement | null>(
@@ -115,6 +153,8 @@ export const SongManagerPanel: React.FC<Props> = ({
     return sharedScript.songs;
   }, [mySongs, sharedScript, viewMode]);
 
+  const musicalNumbers = useMemo(() => sharedScript?.musicalNumbers ?? [], [sharedScript]);
+
   useEffect(() => {
     if (!songsForCurrentView.length) {
       setSelectedSongId(null);
@@ -129,6 +169,20 @@ export const SongManagerPanel: React.FC<Props> = ({
   }, [songsForCurrentView]);
 
   useEffect(() => {
+    if (!musicalNumbers.length) {
+      setSelectedMusicalNumberId(null);
+      return;
+    }
+
+    setSelectedMusicalNumberId((previousMusicalNumberId) =>
+      previousMusicalNumberId &&
+      musicalNumbers.some((musicalNumber) => musicalNumber.id === previousMusicalNumberId)
+        ? previousMusicalNumberId
+        : musicalNumbers[0].id
+    );
+  }, [musicalNumbers]);
+
+  useEffect(() => {
     setAudioLabel('');
     setAudioKind(DEFAULT_UPLOAD_KIND);
     setGuideRoles([]);
@@ -138,6 +192,15 @@ export const SongManagerPanel: React.FC<Props> = ({
     setEditingAudioId(null);
   }, [selectedSongId]);
 
+  useEffect(() => {
+    setMusicalNumberAudioLabel('');
+    setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberGuideRoles([]);
+    setMusicalNumberUploadProgress(null);
+    setEditingMusicalNumberAudioId(null);
+    setIsMusicalNumberAudioFormVisible(false);
+  }, [selectedMusicalNumberId]);
+
   const selectedSong = useMemo<SharedSongAsset | null>(() => {
     if (!selectedSongId) {
       return null;
@@ -145,6 +208,25 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     return songsForCurrentView.find((song) => song.id === selectedSongId) ?? null;
   }, [selectedSongId, songsForCurrentView]);
+
+  const selectedMusicalNumber = useMemo<SharedMusicalNumberAsset | null>(() => {
+    if (!selectedMusicalNumberId) {
+      return null;
+    }
+
+    return musicalNumbers.find((musicalNumber) => musicalNumber.id === selectedMusicalNumberId) ?? null;
+  }, [musicalNumbers, selectedMusicalNumberId]);
+
+  const selectedMusicalNumberFormSongs = useMemo(
+    () =>
+      !sharedScript
+        ? []
+        : musicalNumberSongIds
+            .map((songId) => sharedScript.songs.find((song) => song.id === songId) ?? null)
+            .filter((song): song is SharedSongAsset => Boolean(song))
+            .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex),
+    [musicalNumberSongIds, sharedScript]
+  );
 
   const activePlaylistDescription = useMemo(() => {
     if (!activePlaylistMode || (viewMode !== 'my-songs' && viewMode !== 'all-songs')) {
@@ -170,12 +252,59 @@ export const SongManagerPanel: React.FC<Props> = ({
     return selectedSong.audios.find((audio) => audio.id === editingAudioId) ?? null;
   }, [editingAudioId, selectedSong]);
 
+  const editingMusicalNumberAudio = useMemo<SharedSongAudioAsset | null>(() => {
+    if (!selectedMusicalNumber || !editingMusicalNumberAudioId) {
+      return null;
+    }
+
+    return (
+      selectedMusicalNumber.audios.find((audio) => audio.id === editingMusicalNumberAudioId) ?? null
+    );
+  }, [editingMusicalNumberAudioId, selectedMusicalNumber]);
+
   const toggleGuideRole = (role: string) => {
     setGuideRoles((previousRoles) =>
       previousRoles.includes(role)
         ? previousRoles.filter((currentRole) => currentRole !== role)
         : [...previousRoles, role]
     );
+  };
+
+  const toggleMusicalNumberGuideRole = (role: string) => {
+    setMusicalNumberGuideRoles((previousRoles) =>
+      previousRoles.includes(role)
+        ? previousRoles.filter((currentRole) => currentRole !== role)
+        : [...previousRoles, role]
+    );
+  };
+
+  const toggleMusicalNumberSong = (songId: string) => {
+    setMusicalNumberSongIds((previousSongIds) => {
+      const nextSongIds = previousSongIds.includes(songId)
+        ? previousSongIds.filter((currentSongId) => currentSongId !== songId)
+        : [...previousSongIds, songId];
+
+      if (!sharedScript) {
+        return nextSongIds;
+      }
+
+      const sortedSongIds = nextSongIds
+        .map((currentSongId) => sharedScript.songs.find((song) => song.id === currentSongId) ?? null)
+        .filter((song): song is SharedSongAsset => Boolean(song))
+        .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex)
+        .map((song) => song.id);
+
+      if (!editingMusicalNumberId && musicalNumberTitle.trim().length === 0) {
+        const titleCandidate = buildDefaultMusicalNumberTitle(
+          sortedSongIds
+            .map((currentSongId) => sharedScript.songs.find((song) => song.id === currentSongId) ?? null)
+            .filter((song): song is SharedSongAsset => Boolean(song))
+        );
+        setMusicalNumberTitle(titleCandidate);
+      }
+
+      return sortedSongIds;
+    });
   };
 
   const pickPlaylistAudio = useCallback(
@@ -413,6 +542,23 @@ export const SongManagerPanel: React.FC<Props> = ({
     setEditingAudioId(null);
   };
 
+  const resetMusicalNumberForm = useCallback(() => {
+    setMusicalNumberTitle('');
+    setMusicalNumberSongIds([]);
+    setIsMusicalNumberFormVisible(false);
+    setEditingMusicalNumberId(null);
+  }, []);
+
+  const resetMusicalNumberAudioForm = useCallback(() => {
+    stopPreviewAudio();
+    setMusicalNumberAudioLabel('');
+    setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberGuideRoles([]);
+    setMusicalNumberUploadProgress(null);
+    setEditingMusicalNumberAudioId(null);
+    setIsMusicalNumberAudioFormVisible(false);
+  }, [stopPreviewAudio]);
+
   const startEditingAudio = (audio: SharedSongAudioAsset) => {
     stopPreviewAudio();
     setEditingAudioId(audio.id);
@@ -443,7 +589,8 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     return uploadSharedSongAudio({
       shareId: sharedScript.shareId,
-      songId: selectedSong.id,
+      targetId: selectedSong.id,
+      targetType: 'song',
       file,
       password: password.trim(),
       onUploadProgress: (percentage) => setUploadProgress(Math.round(percentage)),
@@ -585,6 +732,280 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
   };
 
+  const handleSelectMusicalNumber = (musicalNumberId: string) => {
+    stopPreviewAudio();
+    setSelectedMusicalNumberId(musicalNumberId);
+    setPreviewAudioError(null);
+  };
+
+  const startCreatingMusicalNumber = () => {
+    resetMusicalNumberAudioForm();
+    setEditingMusicalNumberId(null);
+    setMusicalNumberTitle('');
+    setMusicalNumberSongIds([]);
+    setIsMusicalNumberFormVisible(true);
+  };
+
+  const startEditingMusicalNumber = (musicalNumber: SharedMusicalNumberAsset) => {
+    resetMusicalNumberAudioForm();
+    setEditingMusicalNumberId(musicalNumber.id);
+    setMusicalNumberTitle(musicalNumber.title);
+    setMusicalNumberSongIds(musicalNumber.songIds);
+    setSelectedMusicalNumberId(musicalNumber.id);
+    setIsMusicalNumberFormVisible(true);
+  };
+
+  const handleSaveMusicalNumber = async () => {
+    if (!sharedScript) {
+      return;
+    }
+
+    setIsSavingMusicalNumber(true);
+    setManagerError(null);
+
+    try {
+      const title = musicalNumberTitle.trim() || 'Numero musical';
+      const manifest = editingMusicalNumberId
+        ? await updateSharedMusicalNumber({
+            shareId: sharedScript.shareId,
+            musicalNumberId: editingMusicalNumberId,
+            password: password.trim(),
+            title,
+            songIds: musicalNumberSongIds,
+          })
+        : await createSharedMusicalNumber({
+            shareId: sharedScript.shareId,
+            password: password.trim(),
+            title,
+            songIds: musicalNumberSongIds,
+          });
+
+      onManifestUpdated(manifest);
+      const nextMusicalNumber =
+        manifest.musicalNumbers.find((candidate) =>
+          editingMusicalNumberId ? candidate.id === editingMusicalNumberId : candidate.title === title
+        ) ?? manifest.musicalNumbers[0] ?? null;
+
+      setSelectedMusicalNumberId(nextMusicalNumber?.id ?? null);
+      resetMusicalNumberForm();
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudo guardar el numero musical.'
+      );
+    } finally {
+      setIsSavingMusicalNumber(false);
+    }
+  };
+
+  const handleDeleteMusicalNumber = async (musicalNumberId: string) => {
+    if (!sharedScript) {
+      return;
+    }
+
+    setDeletingMusicalNumberId(musicalNumberId);
+    setManagerError(null);
+
+    try {
+      const manifest = await deleteSharedMusicalNumber({
+        shareId: sharedScript.shareId,
+        musicalNumberId,
+        password: password.trim(),
+      });
+
+      onManifestUpdated(manifest);
+      if (editingMusicalNumberId === musicalNumberId) {
+        resetMusicalNumberForm();
+      }
+      if (selectedMusicalNumberId === musicalNumberId) {
+        setSelectedMusicalNumberId(manifest.musicalNumbers[0]?.id ?? null);
+      }
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudo borrar el numero musical.'
+      );
+    } finally {
+      setDeletingMusicalNumberId(null);
+    }
+  };
+
+  const pickAndUploadMusicalNumberAudioFile = async () => {
+    if (!sharedScript || !selectedMusicalNumber) {
+      return null;
+    }
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['audio/*', 'audio/mp4', 'video/mp4'],
+      copyToCacheDirectory: false,
+    });
+
+    if (result.canceled) {
+      return null;
+    }
+
+    const file = await resolveAssetBlob(result.assets[0]);
+    setMusicalNumberUploadProgress(0);
+
+    return uploadSharedSongAudio({
+      shareId: sharedScript.shareId,
+      targetId: selectedMusicalNumber.id,
+      targetType: 'musical-number',
+      file,
+      password: password.trim(),
+      onUploadProgress: (percentage) => setMusicalNumberUploadProgress(Math.round(percentage)),
+    });
+  };
+
+  const startEditingMusicalNumberAudio = (audio: SharedSongAudioAsset) => {
+    stopPreviewAudio();
+    setEditingMusicalNumberAudioId(audio.id);
+    setMusicalNumberAudioLabel(audio.label);
+    setMusicalNumberAudioKind(audio.kind);
+    setMusicalNumberGuideRoles(audio.guideRoles);
+    setMusicalNumberUploadProgress(null);
+    setManagerError(null);
+    setIsMusicalNumberAudioFormVisible(true);
+  };
+
+  const handleUploadMusicalNumberAudio = async () => {
+    if (!sharedScript || !selectedMusicalNumber) {
+      return;
+    }
+
+    setManagerError(null);
+    setIsMusicalNumberUploading(true);
+
+    try {
+      const uploadedAudio = await pickAndUploadMusicalNumberAudioFile();
+      if (!uploadedAudio) {
+        return;
+      }
+
+      const manifest = await registerSharedMusicalNumberAudio({
+        shareId: sharedScript.shareId,
+        musicalNumberId: selectedMusicalNumber.id,
+        password: password.trim(),
+        label:
+          musicalNumberAudioLabel.trim() ||
+          buildDefaultAudioLabel(musicalNumberAudioKind, musicalNumberGuideRoles),
+        kind: musicalNumberAudioKind,
+        guideRoles: musicalNumberGuideRoles,
+        audioUrl: uploadedAudio.url,
+        audioFileName: uploadedAudio.fileName,
+        contentType: uploadedAudio.contentType,
+        size: uploadedAudio.size,
+      });
+
+      onManifestUpdated(manifest);
+      resetMusicalNumberAudioForm();
+    } catch (error) {
+      setManagerError(error instanceof Error ? error.message : 'No se pudo subir el audio.');
+    } finally {
+      setIsMusicalNumberUploading(false);
+    }
+  };
+
+  const handleSaveMusicalNumberAudioEdits = async () => {
+    if (!sharedScript || !selectedMusicalNumber || !editingMusicalNumberAudio) {
+      return;
+    }
+
+    setIsSavingMusicalNumberAudio(true);
+    setManagerError(null);
+
+    try {
+      const manifest = await updateSharedMusicalNumberAudio({
+        shareId: sharedScript.shareId,
+        musicalNumberId: selectedMusicalNumber.id,
+        audioId: editingMusicalNumberAudio.id,
+        password: password.trim(),
+        label:
+          musicalNumberAudioLabel.trim() ||
+          buildDefaultAudioLabel(musicalNumberAudioKind, musicalNumberGuideRoles),
+        kind: musicalNumberAudioKind,
+        guideRoles: musicalNumberGuideRoles,
+      });
+
+      onManifestUpdated(manifest);
+      resetMusicalNumberAudioForm();
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudieron guardar los cambios del audio.'
+      );
+    } finally {
+      setIsSavingMusicalNumberAudio(false);
+    }
+  };
+
+  const handleReplaceMusicalNumberAudio = async () => {
+    if (!sharedScript || !selectedMusicalNumber || !editingMusicalNumberAudio) {
+      return;
+    }
+
+    setIsSavingMusicalNumberAudio(true);
+    setManagerError(null);
+
+    try {
+      const uploadedAudio = await pickAndUploadMusicalNumberAudioFile();
+      if (!uploadedAudio) {
+        return;
+      }
+
+      const manifest = await updateSharedMusicalNumberAudio({
+        shareId: sharedScript.shareId,
+        musicalNumberId: selectedMusicalNumber.id,
+        audioId: editingMusicalNumberAudio.id,
+        password: password.trim(),
+        label:
+          musicalNumberAudioLabel.trim() ||
+          buildDefaultAudioLabel(musicalNumberAudioKind, musicalNumberGuideRoles),
+        kind: musicalNumberAudioKind,
+        guideRoles: musicalNumberGuideRoles,
+        audioUrl: uploadedAudio.url,
+        audioFileName: uploadedAudio.fileName,
+        contentType: uploadedAudio.contentType,
+        size: uploadedAudio.size,
+      });
+
+      onManifestUpdated(manifest);
+      resetMusicalNumberAudioForm();
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudo reemplazar el audio.'
+      );
+    } finally {
+      setIsSavingMusicalNumberAudio(false);
+    }
+  };
+
+  const handleDeleteMusicalNumberAudio = async (audioId: string) => {
+    if (!sharedScript || !selectedMusicalNumber) {
+      return;
+    }
+
+    setDeletingMusicalNumberAudioId(audioId);
+    setManagerError(null);
+
+    try {
+      const manifest = await deleteSharedMusicalNumberAudio({
+        shareId: sharedScript.shareId,
+        musicalNumberId: selectedMusicalNumber.id,
+        audioId,
+        password: password.trim(),
+      });
+
+      onManifestUpdated(manifest);
+      if (editingMusicalNumberAudioId === audioId) {
+        resetMusicalNumberAudioForm();
+      }
+    } catch (error) {
+      setManagerError(
+        error instanceof Error ? error.message : 'No se pudo borrar el audio.'
+      );
+    } finally {
+      setDeletingMusicalNumberAudioId(null);
+    }
+  };
+
   const isDisabled = !sharedScript;
   const isPanelVisible = standalone || isVisible;
   const canManageSongs = Platform.OS === 'web';
@@ -593,6 +1014,17 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsSongPickerVisible(false);
     setIsUploadFormVisible(false);
     setEditingAudioId(null);
+    setManageSection('song-blocks');
+    setIsMusicalNumberFormVisible(false);
+    setEditingMusicalNumberId(null);
+    setMusicalNumberSongIds([]);
+    setMusicalNumberTitle('');
+    setIsMusicalNumberAudioFormVisible(false);
+    setEditingMusicalNumberAudioId(null);
+    setMusicalNumberAudioLabel('');
+    setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberGuideRoles([]);
+    setMusicalNumberUploadProgress(null);
     setManagerError(null);
     setPasswordError(null);
     setPreviewAudioError(null);
@@ -694,6 +1126,107 @@ export const SongManagerPanel: React.FC<Props> = ({
             </View>
             </TouchableOpacity>
             {showDetailInline && isSelected ? renderSongPracticeDetail(song) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+
+  const renderMusicalNumberDetail = (musicalNumber: SharedMusicalNumberAsset | null = selectedMusicalNumber) => {
+    if (!musicalNumber) {
+      return null;
+    }
+
+    const cueSongs = sharedScript
+      ? musicalNumber.songIds
+          .map((songId) => sharedScript.songs.find((song) => song.id === songId) ?? null)
+          .filter((song): song is SharedSongAsset => Boolean(song))
+      : [];
+
+    return (
+      <View style={styles.songDetailBox}>
+        <Text style={styles.songDetailTitle}>{musicalNumber.title}</Text>
+        <Text style={styles.songDetailMeta}>
+          {cueSongs.length} bloque{cueSongs.length === 1 ? '' : 's'} enlazado
+          {cueSongs.length === 1 ? '' : 's'}
+          {musicalNumber.sceneTitle ? ` · ${musicalNumber.sceneTitle}` : ''}
+        </Text>
+
+        <View style={styles.numberCueList}>
+          {cueSongs.map((song) => (
+            <View key={song.id} style={styles.numberCueChip}>
+              <Text style={styles.numberCueChipText}>{song.title}</Text>
+            </View>
+          ))}
+        </View>
+
+        {musicalNumber.audios.length > 0 ? (
+          <View style={styles.audioList}>
+            <Text style={styles.sectionTitle}>Audios cargados</Text>
+            {musicalNumber.audios.map((audio) => (
+              <View key={audio.id} style={styles.audioChip}>
+                <Text style={styles.audioChipTitle}>{audio.label}</Text>
+                <Text style={styles.audioChipMeta}>
+                  {formatSongAudioKind(audio.kind)}
+                  {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
+                </Text>
+                {audio.audioFileName ? (
+                  <Text style={styles.audioChipMeta}>{audio.audioFileName}</Text>
+                ) : null}
+                <View style={styles.audioActions}>
+                  <TouchableOpacity
+                    style={[styles.audioActionButton, styles.audioEditButton]}
+                    onPress={() => startEditingMusicalNumberAudio(audio)}
+                  >
+                    <Text style={styles.audioActionText}>Editar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.audioActionButton, styles.audioDeleteButton]}
+                    onPress={() => void handleDeleteMusicalNumberAudio(audio.id)}
+                    disabled={deletingMusicalNumberAudioId === audio.id}
+                  >
+                    <Text style={styles.audioDeleteText}>
+                      {deletingMusicalNumberAudioId === audio.id ? 'Borrando...' : 'Borrar'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.infoText}>Todavia no hay audios para este numero musical.</Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderMusicalNumberList = () => (
+    <View style={styles.songList}>
+      {musicalNumbers.map((musicalNumber) => {
+        const isSelected = selectedMusicalNumber?.id === musicalNumber.id;
+        const cueSongs = sharedScript
+          ? musicalNumber.songIds
+              .map((songId) => sharedScript.songs.find((song) => song.id === songId) ?? null)
+              .filter((song): song is SharedSongAsset => Boolean(song))
+          : [];
+
+        return (
+          <View key={musicalNumber.id} style={styles.songListItem}>
+            <TouchableOpacity
+              style={[styles.songRow, isSelected && styles.songRowSelected]}
+              onPress={() => handleSelectMusicalNumber(musicalNumber.id)}
+            >
+              <View style={styles.songRowText}>
+                <Text style={[styles.songRowTitle, isSelected && styles.songRowTitleSelected]}>
+                  {musicalNumber.title}
+                </Text>
+                <Text style={styles.songRowMeta}>
+                  {cueSongs.length} bloque{cueSongs.length === 1 ? '' : 's'} ·{' '}
+                  {musicalNumber.audios.length} audio{musicalNumber.audios.length === 1 ? '' : 's'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            {isSelected ? renderMusicalNumberDetail(musicalNumber) : null}
           </View>
         );
       })}
@@ -949,6 +1482,49 @@ export const SongManagerPanel: React.FC<Props> = ({
                     <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
                   </TouchableOpacity>
                   <Text style={styles.successText}>Sesion de gestion activa.</Text>
+                  <View style={styles.manageTabs}>
+                    <TouchableOpacity
+                      style={[
+                        styles.manageTabButton,
+                        manageSection === 'song-blocks' && styles.manageTabButtonActive,
+                      ]}
+                      onPress={() => {
+                        setManageSection('song-blocks');
+                        resetMusicalNumberForm();
+                        resetMusicalNumberAudioForm();
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.manageTabButtonText,
+                          manageSection === 'song-blocks' && styles.manageTabButtonTextActive,
+                        ]}
+                      >
+                        Bloques de cancion
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.manageTabButton,
+                        manageSection === 'musical-numbers' && styles.manageTabButtonActive,
+                      ]}
+                      onPress={() => {
+                        setManageSection('musical-numbers');
+                        resetAudioForm();
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.manageTabButtonText,
+                          manageSection === 'musical-numbers' && styles.manageTabButtonTextActive,
+                        ]}
+                      >
+                        Numeros musicales
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {manageSection === 'song-blocks' ? (
+                    <>
                   <TouchableOpacity
                     style={styles.secondaryAction}
                     onPress={() => setIsSongPickerVisible((previousValue) => !previousValue)}
@@ -1157,6 +1733,274 @@ export const SongManagerPanel: React.FC<Props> = ({
                       ) : null}
                     </View>
                   ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={styles.secondaryAction}
+                        onPress={() => {
+                          if (isMusicalNumberFormVisible) {
+                            resetMusicalNumberForm();
+                            return;
+                          }
+
+                          startCreatingMusicalNumber();
+                        }}
+                      >
+                        <Text style={styles.secondaryActionText}>
+                          {isMusicalNumberFormVisible
+                            ? 'Ocultar formulario de numero musical'
+                            : editingMusicalNumberId
+                              ? 'Seguir editando numero musical'
+                              : 'Crear numero musical'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {selectedMusicalNumber ? (
+                        <Text style={styles.selectionSummary}>
+                          Numero musical seleccionado: {selectedMusicalNumber.title}
+                        </Text>
+                      ) : (
+                        <Text style={styles.selectionSummary}>
+                          Elige o crea un numero musical enlazando varios bloques de cancion.
+                        </Text>
+                      )}
+
+                      {isMusicalNumberFormVisible ? (
+                        <View style={styles.formSection}>
+                          <Text style={styles.sectionTitle}>
+                            {editingMusicalNumberId ? 'Editar numero musical' : 'Nuevo numero musical'}
+                          </Text>
+                          <Text style={styles.formLabel}>Titulo</Text>
+                          <TextInput
+                            value={musicalNumberTitle}
+                            onChangeText={setMusicalNumberTitle}
+                            placeholder="Ej. Santa Fe completa"
+                            style={styles.textInput}
+                          />
+                          <Text style={styles.formLabel}>Bloques de cancion incluidos</Text>
+                          <View style={styles.roleTags}>
+                            {sharedScript.songs.map((song) => {
+                              const isSelected = musicalNumberSongIds.includes(song.id);
+                              return (
+                                <TouchableOpacity
+                                  key={`number-song-${song.id}`}
+                                  style={[styles.roleTag, isSelected && styles.roleTagSelected]}
+                                  onPress={() => toggleMusicalNumberSong(song.id)}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.roleTagText,
+                                      isSelected && styles.roleTagTextSelected,
+                                    ]}
+                                  >
+                                    {song.title}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                          {selectedMusicalNumberFormSongs.length > 0 ? (
+                            <Text style={styles.selectionSummary}>
+                              Tramo: {selectedMusicalNumberFormSongs[0].title} ·{' '}
+                              {
+                                selectedMusicalNumberFormSongs[
+                                  selectedMusicalNumberFormSongs.length - 1
+                                ].title
+                              }
+                            </Text>
+                          ) : null}
+                          {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
+                          <TouchableOpacity
+                            style={[
+                              styles.primaryAction,
+                              (isSavingMusicalNumber || musicalNumberSongIds.length < 2) &&
+                                styles.buttonDisabled,
+                            ]}
+                            onPress={() => void handleSaveMusicalNumber()}
+                            disabled={isSavingMusicalNumber || musicalNumberSongIds.length < 2}
+                          >
+                            <Text style={styles.primaryActionText}>
+                              {isSavingMusicalNumber ? 'Guardando...' : 'Guardar numero musical'}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.cancelLink}
+                            onPress={resetMusicalNumberForm}
+                            disabled={isSavingMusicalNumber}
+                          >
+                            <Text style={styles.cancelLinkText}>Cancelar</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+
+                      {musicalNumbers.length > 0 ? (
+                        renderMusicalNumberList()
+                      ) : (
+                        <Text style={styles.infoText}>
+                          Todavia no hay numeros musicales definidos para esta obra.
+                        </Text>
+                      )}
+
+                      {selectedMusicalNumber ? (
+                        <>
+                          <View style={styles.manageNumberActions}>
+                            <TouchableOpacity
+                              style={styles.secondaryAction}
+                              onPress={() => startEditingMusicalNumber(selectedMusicalNumber)}
+                            >
+                              <Text style={styles.secondaryActionText}>Editar numero musical</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.secondaryAction, styles.deleteAction]}
+                              onPress={() => void handleDeleteMusicalNumber(selectedMusicalNumber.id)}
+                              disabled={deletingMusicalNumberId === selectedMusicalNumber.id}
+                            >
+                              <Text style={styles.deleteActionText}>
+                                {deletingMusicalNumberId === selectedMusicalNumber.id
+                                  ? 'Borrando...'
+                                  : 'Borrar numero musical'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          <TouchableOpacity
+                            style={styles.secondaryAction}
+                            onPress={() =>
+                              setIsMusicalNumberAudioFormVisible((previousValue) => !previousValue)
+                            }
+                          >
+                            <Text style={styles.secondaryActionText}>
+                              {isMusicalNumberAudioFormVisible
+                                ? 'Ocultar menu de audio'
+                                : editingMusicalNumberAudio
+                                  ? 'Seguir editando audio'
+                                  : 'Anadir audio a este numero musical'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          {isMusicalNumberAudioFormVisible ? (
+                            <View style={styles.formSection}>
+                              <Text style={styles.sectionTitle}>
+                                {editingMusicalNumberAudio ? 'Editar audio' : 'Nuevo audio'}
+                              </Text>
+                              <Text style={styles.formLabel}>Tipo de audio</Text>
+                              <View style={styles.kindActions}>
+                                {(['karaoke', 'vocal_guide'] as SharedSongAudioKind[]).map((kind) => (
+                                  <TouchableOpacity
+                                    key={`number-audio-kind-${kind}`}
+                                    style={[
+                                      styles.kindButton,
+                                      musicalNumberAudioKind === kind && styles.kindButtonSelected,
+                                    ]}
+                                    onPress={() => setMusicalNumberAudioKind(kind)}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.kindButtonText,
+                                        musicalNumberAudioKind === kind &&
+                                          styles.kindButtonTextSelected,
+                                      ]}
+                                    >
+                                      {formatSongAudioKind(kind)}
+                                    </Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                              <Text style={styles.formLabel}>Etiqueta</Text>
+                              <TextInput
+                                value={musicalNumberAudioLabel}
+                                onChangeText={setMusicalNumberAudioLabel}
+                                placeholder={buildDefaultAudioLabel(
+                                  musicalNumberAudioKind,
+                                  musicalNumberGuideRoles
+                                )}
+                                style={styles.textInput}
+                              />
+                              <Text style={styles.formLabel}>Personajes que cantan en este audio</Text>
+                              <View style={styles.roleTags}>
+                                {availableRoles.map((role) => {
+                                  const isSelected = musicalNumberGuideRoles.includes(role);
+                                  return (
+                                    <TouchableOpacity
+                                      key={`${selectedMusicalNumber.id}-${role}`}
+                                      style={[styles.roleTag, isSelected && styles.roleTagSelected]}
+                                      onPress={() => toggleMusicalNumberGuideRole(role)}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.roleTagText,
+                                          isSelected && styles.roleTagTextSelected,
+                                        ]}
+                                      >
+                                        {role}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                              {musicalNumberUploadProgress !== null ? (
+                                <Text style={styles.progressText}>
+                                  Subiendo audio... {musicalNumberUploadProgress}%
+                                </Text>
+                              ) : null}
+                              {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
+                              {editingMusicalNumberAudio ? (
+                                <View style={styles.editActionStack}>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.primaryAction,
+                                      isSavingMusicalNumberAudio && styles.buttonDisabled,
+                                    ]}
+                                    onPress={() => void handleSaveMusicalNumberAudioEdits()}
+                                    disabled={isSavingMusicalNumberAudio}
+                                  >
+                                    <Text style={styles.primaryActionText}>
+                                      {isSavingMusicalNumberAudio ? 'Guardando...' : 'Guardar cambios'}
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.secondaryAction,
+                                      isSavingMusicalNumberAudio && styles.buttonDisabled,
+                                    ]}
+                                    onPress={() => void handleReplaceMusicalNumberAudio()}
+                                    disabled={isSavingMusicalNumberAudio}
+                                  >
+                                    <Text style={styles.secondaryActionText}>
+                                      {isSavingMusicalNumberAudio
+                                        ? 'Actualizando audio...'
+                                        : 'Reemplazar audio'}
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={styles.cancelLink}
+                                    onPress={resetMusicalNumberAudioForm}
+                                    disabled={isSavingMusicalNumberAudio}
+                                  >
+                                    <Text style={styles.cancelLinkText}>Cancelar edicion</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              ) : (
+                                <TouchableOpacity
+                                  style={[
+                                    styles.primaryAction,
+                                    isMusicalNumberUploading && styles.buttonDisabled,
+                                  ]}
+                                  onPress={() => void handleUploadMusicalNumberAudio()}
+                                  disabled={isMusicalNumberUploading}
+                                >
+                                  <Text style={styles.primaryActionText}>
+                                    {isMusicalNumberUploading ? 'Subiendo audio...' : 'Seleccionar audio'}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </>
+                  )}
                 </>
               )}
             </>
@@ -1304,10 +2148,48 @@ const styles = StyleSheet.create({
     color: '#6f4c19',
     fontWeight: '700',
   },
+  manageTabs: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  manageTabButton: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e4d1b3',
+    backgroundColor: '#f5ede3',
+    alignItems: 'center',
+  },
+  manageTabButtonActive: {
+    backgroundColor: '#fff8ef',
+    borderColor: '#c29557',
+  },
+  manageTabButtonText: {
+    color: '#6f4c19',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  manageTabButtonTextActive: {
+    color: '#7a4d13',
+  },
   selectionSummary: {
     textAlign: 'center',
     color: '#6b5b49',
     lineHeight: 20,
+  },
+  manageNumberActions: {
+    gap: 10,
+  },
+  deleteAction: {
+    backgroundColor: '#fff4f4',
+    borderColor: '#f0c8c8',
+  },
+  deleteActionText: {
+    color: '#b3261e',
+    fontWeight: '700',
+    textAlign: 'center',
   },
   playlistActions: {
     flexDirection: 'row',
@@ -1424,6 +2306,24 @@ const styles = StyleSheet.create({
   songDetailMeta: {
     textAlign: 'center',
     color: '#7a6332',
+  },
+  numberCueList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  numberCueChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(194, 149, 87, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(194, 149, 87, 0.3)',
+  },
+  numberCueChipText: {
+    color: '#7a4d13',
+    fontWeight: '600',
   },
   songLyrics: {
     textAlign: 'center',

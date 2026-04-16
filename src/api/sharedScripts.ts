@@ -1,4 +1,10 @@
 import type {
+  SharedMusicalNumberAudioDeleteInput,
+  SharedMusicalNumberAudioRegistrationInput,
+  SharedMusicalNumberAudioUpdateInput,
+  SharedMusicalNumberCreateInput,
+  SharedMusicalNumberDeleteInput,
+  SharedMusicalNumberUpdateInput,
   SharedSongAudioDeleteInput,
   SharedSongAudioRegistrationInput,
   SharedSongAudioUpdateInput,
@@ -145,6 +151,110 @@ export const updateSharedSongAudio = async (input: SharedSongAudioUpdateInput) =
 
 export const deleteSharedSongAudio = async (input: SharedSongAudioDeleteInput) => {
   const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const createSharedMusicalNumber = async (input: SharedMusicalNumberCreateInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const updateSharedMusicalNumber = async (input: SharedMusicalNumberUpdateInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const deleteSharedMusicalNumber = async (input: SharedMusicalNumberDeleteInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const registerSharedMusicalNumberAudio = async (
+  input: SharedMusicalNumberAudioRegistrationInput
+) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number-audio`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const updateSharedMusicalNumberAudio = async (input: SharedMusicalNumberAudioUpdateInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number-audio`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const deleteSharedMusicalNumberAudio = async (input: SharedMusicalNumberAudioDeleteInput) => {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number-audio`, {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
