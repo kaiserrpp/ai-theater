@@ -484,17 +484,67 @@ export const SongManagerPanel: React.FC<Props> = ({
     setViewMode('menu');
   }, [resetManagerPanels]);
 
-  const renderSongList = (songs: SharedSongAsset[]) => (
+  const renderSongPracticeDetail = (song: SharedSongAsset | null = selectedSong) => {
+    if (!song) {
+      return null;
+    }
+
+    return (
+      <View style={styles.songDetailBox}>
+        <Text style={styles.songDetailTitle}>{song.title}</Text>
+        <Text style={styles.songDetailMeta}>
+          {song.sceneTitle || 'Sin escena asociada'}
+        </Text>
+
+        {song.audios.length > 0 ? (
+          <View style={styles.audioList}>
+            <Text style={styles.sectionTitle}>Audios disponibles</Text>
+            {song.audios.map((audio) => {
+              const isPlaying = playingPreviewAudioId === audio.id;
+
+              return (
+                <View key={audio.id} style={styles.audioChip}>
+                  <Text style={styles.audioChipTitle}>{audio.label}</Text>
+                  <Text style={styles.audioChipMeta}>
+                    {formatSongAudioKind(audio.kind)}
+                    {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
+                  </Text>
+                  {audio.audioFileName ? (
+                    <Text style={styles.audioChipMeta}>{audio.audioFileName}</Text>
+                  ) : null}
+                  <View style={styles.audioActions}>
+                    <TouchableOpacity
+                      style={[styles.audioActionButton, styles.audioPlayButton]}
+                      onPress={() => void handlePlayPreviewAudio(audio)}
+                    >
+                      <Text style={styles.audioPlayText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <Text style={styles.infoText}>Todavia no hay audios para esta cancion.</Text>
+        )}
+
+        {previewAudioError ? <Text style={styles.errorText}>{previewAudioError}</Text> : null}
+        <Text style={styles.songLyrics}>{song.lyrics}</Text>
+      </View>
+    );
+  };
+
+  const renderSongList = (songs: SharedSongAsset[], showDetailInline = false) => (
     <View style={styles.songList}>
       {songs.map((song) => {
         const isSelected = selectedSong?.id === song.id;
 
         return (
-          <TouchableOpacity
-            key={song.id}
-            style={[styles.songRow, isSelected && styles.songRowSelected]}
-            onPress={() => handleSelectSong(song.id)}
-          >
+          <View key={song.id} style={styles.songListItem}>
+            <TouchableOpacity
+              style={[styles.songRow, isSelected && styles.songRowSelected]}
+              onPress={() => handleSelectSong(song.id)}
+            >
             <View style={styles.songRowText}>
               <Text style={[styles.songRowTitle, isSelected && styles.songRowTitleSelected]}>
                 {song.title}
@@ -504,13 +554,15 @@ export const SongManagerPanel: React.FC<Props> = ({
                 {song.audios.length === 1 ? '' : 's'}
               </Text>
             </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+            {showDetailInline && isSelected ? renderSongPracticeDetail(song) : null}
+          </View>
         );
       })}
     </View>
   );
 
-  const renderSongPracticeDetail = () => {
+  const _renderSongPracticeDetailLegacy = () => {
     if (!selectedSong) {
       return null;
     }
@@ -559,6 +611,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       </View>
     );
   };
+  void _renderSongPracticeDetailLegacy;
 
   return (
     <View style={styles.wrapper}>
@@ -642,8 +695,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
                   {songsForCurrentView.length > 0 ? (
                     <>
-                      {renderSongList(songsForCurrentView)}
-                      {renderSongPracticeDetail()}
+                      {renderSongList(songsForCurrentView, true)}
                     </>
                   ) : (
                     <Text style={styles.infoText}>
@@ -1072,6 +1124,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   songList: {
+    gap: 10,
+  },
+  songListItem: {
     gap: 10,
   },
   songRow: {
