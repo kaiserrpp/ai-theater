@@ -1,4 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import {
@@ -918,6 +919,23 @@ export const HomeScreen = () => {
               <View style={styles.menu}>
                 <View style={styles.menuOption}>
                   <TouchableOpacity
+                    style={[styles.btnMenu, styles.songLaunchButton, !sharedScript && styles.buttonDisabled]}
+                    onPress={() => setIsManagingSongs(true)}
+                    disabled={!sharedScript}
+                  >
+                    <View style={styles.songLaunchContent}>
+                      <MaterialCommunityIcons name="music-clef-treble" size={22} color="#fff7dc" />
+                      <Text style={styles.btnText}>Canciones</Text>
+                    </View>
+                    {sharedScript ? (
+                      <View style={styles.songLaunchBadge}>
+                        <Text style={styles.songLaunchBadgeText}>{sharedScript.songs.length}</Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.menuOption}>
+                  <TouchableOpacity
                     style={[styles.btnMenu, myRoles.length === 0 && styles.buttonDisabled]}
                     onPress={() => requestRehearsalStart('ALL')}
                     disabled={myRoles.length === 0}
@@ -1059,21 +1077,6 @@ export const HomeScreen = () => {
                 >
                   <Text style={[styles.compactShareButtonText, sharedScript && styles.compactShareButtonTextActive]}>
                     {sharedScript ? 'Actualizar obra compartida' : 'Compartir obra'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.compactShareButton,
-                    styles.songManagerButton,
-                    !sharedScript && styles.buttonDisabled,
-                  ]}
-                  onPress={() => setIsManagingSongs(true)}
-                  disabled={!sharedScript}
-                >
-                  <Text style={styles.compactShareButtonText}>
-                    Gestionar canciones
-                    {sharedScript ? ` (${sharedScript.songs.length})` : ''}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1389,10 +1392,6 @@ const styles = StyleSheet.create({
   compactShareButtonTextActive: {
     color: '#184e77',
   },
-  songManagerButton: {
-    backgroundColor: 'rgba(111, 76, 25, 0.88)',
-    borderColor: 'rgba(111, 76, 25, 0.96)',
-  },
   songManagerScreen: {
     width: '100%',
   },
@@ -1478,6 +1477,32 @@ const styles = StyleSheet.create({
   tagTextSelected: { color: '#1b5e20', fontWeight: '600' },
   menu: { gap: 12 },
   menuOption: { gap: 10 },
+  songLaunchButton: {
+    backgroundColor: 'rgba(165, 37, 88, 0.84)',
+    borderColor: 'rgba(255, 231, 164, 0.44)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+  },
+  songLaunchContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  songLaunchBadge: {
+    minWidth: 34,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 247, 220, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 243, 196, 0.42)',
+    alignItems: 'center',
+  },
+  songLaunchBadgeText: {
+    color: '#fff7dc',
+    fontWeight: '800',
+  },
   btnMenu: {
     backgroundColor: 'rgba(0, 122, 255, 0.78)',
     padding: 18,
