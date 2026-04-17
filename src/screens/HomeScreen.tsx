@@ -20,7 +20,10 @@ import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScript
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { getScriptIdentity } from '../utils/scriptIdentity';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
-import { syncSharedMusicalNumbersWithScript, syncSharedSongsWithScript } from '../utils/sharedSongs';
+import {
+  syncSharedMusicalNumbersWithScript,
+  syncSharedSongsWithScript,
+} from '../utils/sharedSongs';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRolesAndSongs } from '../utils/scriptScenes';
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
@@ -766,6 +769,7 @@ export const HomeScreen = () => {
           myRoles={myRoles}
           filterScenes={activeRehearsalScenes}
           sharedSongs={sharedScript?.songs ?? []}
+          musicalNumbers={sharedScript?.musicalNumbers ?? []}
           initialIndex={rehearsalStartIndex}
           onProgressChange={handleRehearsalProgressChange}
           onExit={() => setIsRehearsing(false)}

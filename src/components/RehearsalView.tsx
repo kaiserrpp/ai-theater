@@ -7,7 +7,7 @@ import {
   REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
 } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
-import { SharedSongAsset } from '../types/sharedScript';
+import { SharedMusicalNumberAsset, SharedSongAsset, SharedSongAudioAsset } from '../types/sharedScript';
 import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
@@ -17,6 +17,7 @@ interface Props {
   myRoles: string[];
   filterScenes: string[];
   sharedSongs?: SharedSongAsset[];
+  musicalNumbers?: SharedMusicalNumberAsset[];
   initialIndex?: number;
   onProgressChange?: (lineIndex: number, totalLines: number) => void;
   onExit: () => void;
@@ -108,6 +109,7 @@ export const RehearsalView: React.FC<Props> = ({
   myRoles,
   filterScenes,
   sharedSongs = [],
+  musicalNumbers = [],
   initialIndex = 0,
   onProgressChange,
   onExit,
@@ -132,11 +134,24 @@ export const RehearsalView: React.FC<Props> = ({
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
+    playbackKind?: 'song' | 'musical-number';
+    ownerId?: string | null;
+    advanceOnEnd?: boolean;
   } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoStartedSongKeyRef = useRef<string | null>(null);
+  const autoStartedMusicalNumberKeyRef = useRef<string | null>(null);
+  const activeAudioPlaybackRef = useRef<{
+    kind: 'song' | 'musical-number';
+    ownerId: string | null;
+  } | null>(null);
+  const selectedMusicalNumberAudioIdsRef = useRef<Record<string, string>>({});
 
   const currentLine = filteredGuion[currentIndex];
+  const currentLineIndexInScript = useMemo(
+    () => (currentLine ? guion.indexOf(currentLine) : -1),
+    [currentLine, guion]
+  );
   const speakableLineText = useMemo(
     () =>
       currentLine?.t
@@ -152,8 +167,60 @@ export const RehearsalView: React.FC<Props> = ({
     () => findSharedSongForLine(sharedSongs, guion, currentLine),
     [currentLine, guion, sharedSongs]
   );
+  const currentMusicalNumber = useMemo(
+    () =>
+      currentLineIndexInScript < 0
+        ? null
+        : musicalNumbers.find(
+            (musicalNumber) =>
+              currentLineIndexInScript >= musicalNumber.startLineIndex &&
+              currentLineIndexInScript <= musicalNumber.endLineIndex
+          ) ?? null,
+    [currentLineIndexInScript, musicalNumbers]
+  );
+  const preferredMusicalNumberAudio = useMemo<SharedSongAudioAsset | null>(() => {
+    if (!currentMusicalNumber?.audios.length) {
+      return null;
+    }
+
+    const rememberedAudioId = selectedMusicalNumberAudioIdsRef.current[currentMusicalNumber.id];
+    if (rememberedAudioId) {
+      const rememberedAudio = currentMusicalNumber.audios.find((audio) => audio.id === rememberedAudioId);
+      if (rememberedAudio) {
+        return rememberedAudio;
+      }
+    }
+
+    if (currentMusicalNumber.audios.length === 1) {
+      return currentMusicalNumber.audios[0];
+    }
+
+    const karaokeAudios = currentMusicalNumber.audios.filter((audio) => audio.kind === 'karaoke');
+    if (karaokeAudios.length === 1) {
+      return karaokeAudios[0];
+    }
+
+    const matchingRoleAudios = currentMusicalNumber.audios.filter((audio) =>
+      audio.guideRoles.some((role) => myRoles.includes(role))
+    );
+    if (matchingRoleAudios.length === 1) {
+      return matchingRoleAudios[0];
+    }
+
+    return null;
+  }, [currentMusicalNumber, myRoles]);
+  const currentRehearsalAudioOptions = useMemo(
+    () =>
+      currentMusicalNumber?.audios.length
+        ? currentMusicalNumber.audios
+        : currentSongAsset?.audios ?? [],
+    [currentMusicalNumber, currentSongAsset]
+  );
   const currentSongKey = isSongCue(currentLine)
     ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
+    : null;
+  const currentMusicalNumberKey = currentMusicalNumber
+    ? `${currentMusicalNumber.id}:${currentMusicalNumber.updatedAt}`
     : null;
   const currentDialogueKey =
     !isFinished && currentLine ? `${currentIndex}:${currentLine.p}:${currentLine.t}` : null;
@@ -310,6 +377,7 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     setPlayingAudioId(null);
+    activeAudioPlaybackRef.current = null;
   }, []);
 
   const disposeSongAudio = useCallback(() => {
@@ -325,7 +393,14 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     setPlayingAudioId(null);
+    activeAudioPlaybackRef.current = null;
   }, []);
+
+  const stopStandaloneSongAudio = useCallback(() => {
+    if (activeAudioPlaybackRef.current?.kind === 'song') {
+      stopSongAudio();
+    }
+  }, [stopSongAudio]);
 
   const getSongAudioPlayer = useCallback(() => {
     if (typeof Audio === 'undefined') {
@@ -341,6 +416,15 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     return audioRef.current;
+  }, []);
+
+  const setSongAudioVolume = useCallback((nextVolume: number) => {
+    const player = audioRef.current;
+    if (!player) {
+      return;
+    }
+
+    player.volume = Math.max(0, Math.min(nextVolume, 1));
   }, []);
 
   const primeSongPlayback = useCallback(async () => {
@@ -461,7 +545,7 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     setAudioError(null);
     setBlockedAutoplayAudio(null);
-  }, [currentSongKey]);
+  }, [currentMusicalNumberKey, currentSongKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -549,7 +633,7 @@ export const RehearsalView: React.FC<Props> = ({
 
   useEffect(() => {
     stopRehearsalSpeech();
-    stopSongAudio();
+    stopStandaloneSongAudio();
     let isCancelled = false;
     let advanceTimeout: ReturnType<typeof setTimeout> | null = null;
     let speechStartTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -557,7 +641,7 @@ export const RehearsalView: React.FC<Props> = ({
     if (isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine) || isMyTurn) {
       return () => {
         stopRehearsalSpeech();
-        stopSongAudio();
+        stopStandaloneSongAudio();
       };
     }
 
@@ -568,7 +652,7 @@ export const RehearsalView: React.FC<Props> = ({
           clearTimeout(advanceTimeout);
         }
         stopRehearsalSpeech();
-        stopSongAudio();
+        stopStandaloneSongAudio();
       };
     }
 
@@ -638,7 +722,7 @@ export const RehearsalView: React.FC<Props> = ({
       }
       void stopListening();
       stopRehearsalSpeech();
-      stopSongAudio();
+      stopStandaloneSongAudio();
     };
   }, [
     advanceLine,
@@ -651,7 +735,7 @@ export const RehearsalView: React.FC<Props> = ({
     isMyTurn,
     speakableLineText,
     stopListening,
-    stopSongAudio,
+    stopStandaloneSongAudio,
   ]);
 
   useEffect(() => () => {
@@ -664,6 +748,9 @@ export const RehearsalView: React.FC<Props> = ({
     void stopListening();
     onExit();
   };
+
+  const currentAudioModeLabel = currentMusicalNumber ? 'numero musical' : 'cancion';
+  const shouldShowCurrentAudioOptions = currentRehearsalAudioOptions.length > 0;
 
   const prepareRehearsalMedia = useCallback(async (phase = rehearsalPreflightPhase ?? 'auto-initial') => {
     const shouldUseAutoListen = phase !== 'manual-check';
@@ -789,7 +876,13 @@ export const RehearsalView: React.FC<Props> = ({
   const handlePlaySongAudio = useCallback((
     audioUrl: string,
     audioId: string,
-    options?: { advanceOnEnd?: boolean; autoStart?: boolean }
+    options?: {
+      advanceOnEnd?: boolean;
+      autoStart?: boolean;
+      playbackKind?: 'song' | 'musical-number';
+      ownerId?: string | null;
+      rememberForMusicalNumberId?: string | null;
+    }
   ) => {
     const player = getSongAudioPlayer();
     if (!player) {
@@ -805,26 +898,43 @@ export const RehearsalView: React.FC<Props> = ({
     setAudioError(null);
     setBlockedAutoplayAudio(null);
     stopSongAudio();
+    if (options?.rememberForMusicalNumberId) {
+      selectedMusicalNumberAudioIdsRef.current[options.rememberForMusicalNumberId] = audioId;
+    }
 
     player.onended = () => {
       setPlayingAudioId(null);
+      activeAudioPlaybackRef.current = null;
       if (options?.advanceOnEnd) {
         advanceLine();
       }
     };
     player.onerror = () => {
       setPlayingAudioId(null);
+      activeAudioPlaybackRef.current = null;
       setAudioError('No se pudo reproducir este audio.');
     };
 
     player.src = audioUrl;
     player.load();
+    player.volume = 1;
     setPlayingAudioId(audioId);
+    activeAudioPlaybackRef.current = {
+      kind: options?.playbackKind ?? 'song',
+      ownerId: options?.ownerId ?? null,
+    };
 
     void player.play().catch((error: unknown) => {
       setPlayingAudioId(null);
+      activeAudioPlaybackRef.current = null;
       if (options?.autoStart && isAutoplayBlockedError(error)) {
-        setBlockedAutoplayAudio({ audioId, audioUrl });
+        setBlockedAutoplayAudio({
+          audioId,
+          audioUrl,
+          playbackKind: options?.playbackKind,
+          ownerId: options?.ownerId ?? null,
+          advanceOnEnd: options?.advanceOnEnd,
+        });
         setAudioError(
           isSongPlaybackUnlocked
             ? 'Safari ha vuelto a bloquear el audio automatico de esta cancion.'
@@ -845,8 +955,84 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    if (!currentMusicalNumber) {
+      autoStartedMusicalNumberKeyRef.current = null;
+      if (activeAudioPlaybackRef.current?.kind === 'musical-number') {
+        stopSongAudio();
+      }
+      return;
+    }
+
+    const activePlayback = activeAudioPlaybackRef.current;
+    const isCurrentMusicalNumberPlaying =
+      activePlayback?.kind === 'musical-number' &&
+      activePlayback.ownerId === currentMusicalNumber.id &&
+      playingAudioId !== null;
+
+    if (
+      activePlayback?.kind === 'musical-number' &&
+      activePlayback.ownerId !== currentMusicalNumber.id
+    ) {
+      stopSongAudio();
+    }
+
+    if (!preferredMusicalNumberAudio) {
+      return;
+    }
+
+    if (isCurrentMusicalNumberPlaying) {
+      return;
+    }
+
+    if (autoStartedMusicalNumberKeyRef.current === currentMusicalNumberKey) {
+      return;
+    }
+
+    autoStartedMusicalNumberKeyRef.current = currentMusicalNumberKey;
+    handlePlaySongAudio(preferredMusicalNumberAudio.audioUrl, preferredMusicalNumberAudio.id, {
+      autoStart: true,
+      playbackKind: 'musical-number',
+      ownerId: currentMusicalNumber.id,
+      rememberForMusicalNumberId: currentMusicalNumber.id,
+    });
+  }, [
+    currentMusicalNumber,
+    currentMusicalNumberKey,
+    handlePlaySongAudio,
+    playingAudioId,
+    preferredMusicalNumberAudio,
+    stopSongAudio,
+  ]);
+
+  useEffect(() => {
+    const activePlayback = activeAudioPlaybackRef.current;
+    if (
+      activePlayback?.kind !== 'musical-number' ||
+      activePlayback.ownerId !== currentMusicalNumber?.id
+    ) {
+      return;
+    }
+
+    if (isSongCue(currentLine)) {
+      setSongAudioVolume(1);
+      return;
+    }
+
+    if (isMyTurn) {
+      setSongAudioVolume(0.18);
+      return;
+    }
+
+    setSongAudioVolume(0.34);
+  }, [currentLine, currentMusicalNumber?.id, isMyTurn, setSongAudioVolume]);
+
+  useEffect(() => {
     if (!currentSongKey) {
       autoStartedSongKeyRef.current = null;
+      return;
+    }
+
+    if (currentMusicalNumber) {
       return;
     }
 
@@ -864,7 +1050,7 @@ export const RehearsalView: React.FC<Props> = ({
       advanceOnEnd: true,
       autoStart: true,
     });
-  }, [currentSongAsset, currentSongKey, handlePlaySongAudio]);
+  }, [currentMusicalNumber, currentSongAsset, currentSongKey, handlePlaySongAudio]);
 
   const renderHeader = (title: string) => (
     <View style={styles.header}>
@@ -927,6 +1113,73 @@ export const RehearsalView: React.FC<Props> = ({
       </View>
     </View>
   );
+
+  const renderCurrentAudioPanel = () => {
+    if (!currentLine || !shouldShowCurrentAudioOptions) {
+      return null;
+    }
+
+    return (
+      <View style={styles.songAudioList}>
+        <Text style={styles.songSectionTitle}>
+          {currentMusicalNumber ? `Numero musical: ${currentMusicalNumber.title}` : 'Audios disponibles'}
+        </Text>
+        {currentMusicalNumber ? (
+          <Text style={styles.songHint}>
+            El audio seguira sonando entre el inicio y el final del numero musical, bajando volumen en el dialogo.
+          </Text>
+        ) : null}
+        {blockedAutoplayAudio ? (
+          <View style={styles.songActivationCard}>
+            <Text style={styles.songActivationText}>
+              Safari ha bloqueado el arranque automatico de este {currentAudioModeLabel}.
+            </Text>
+            <TouchableOpacity
+              style={styles.songActivationButton}
+              onPress={() =>
+                handlePlaySongAudio(blockedAutoplayAudio.audioUrl, blockedAutoplayAudio.audioId, {
+                  advanceOnEnd: blockedAutoplayAudio.advanceOnEnd,
+                  playbackKind: blockedAutoplayAudio.playbackKind,
+                  ownerId: blockedAutoplayAudio.ownerId,
+                  rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
+                })
+              }
+            >
+              <Text style={styles.songActivationButtonText}>Activar audio y reproducir</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+        {currentRehearsalAudioOptions.map((audio) => {
+          const isPlaying = playingAudioId === audio.id;
+
+          return (
+            <View key={audio.id} style={styles.songAudioCard}>
+              <View style={styles.songAudioText}>
+                <Text style={styles.songAudioTitle}>{audio.label}</Text>
+                <Text style={styles.songAudioMeta}>
+                  {formatSongAudioKind(audio.kind)}
+                  {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.songAudioButton, isPlaying && styles.songAudioButtonActive]}
+                onPress={() =>
+                  handlePlaySongAudio(audio.audioUrl, audio.id, {
+                    advanceOnEnd: currentMusicalNumber ? false : true,
+                    playbackKind: currentMusicalNumber ? 'musical-number' : 'song',
+                    ownerId: currentMusicalNumber?.id ?? currentSongAsset?.id ?? null,
+                    rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
+                  })
+                }
+              >
+                <Text style={styles.songAudioButtonText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
 
   if (!isRehearsalMediaReady) {
     return (
@@ -1012,7 +1265,9 @@ export const RehearsalView: React.FC<Props> = ({
             <Text style={styles.songTitle}>{currentLine.songTitle || 'Cancion'}</Text>
             {currentLine.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
 
-            {currentSongAsset?.audios.length ? (
+            {currentMusicalNumber && shouldShowCurrentAudioOptions ? (
+              renderCurrentAudioPanel()
+            ) : currentSongAsset?.audios.length ? (
               <View style={styles.songAudioList}>
                 <Text style={styles.songSectionTitle}>Audios disponibles</Text>
                 {blockedAutoplayAudio ? (
@@ -1024,7 +1279,10 @@ export const RehearsalView: React.FC<Props> = ({
                       style={styles.songActivationButton}
                       onPress={() =>
                         handlePlaySongAudio(blockedAutoplayAudio.audioUrl, blockedAutoplayAudio.audioId, {
-                          advanceOnEnd: true,
+                          advanceOnEnd: blockedAutoplayAudio.advanceOnEnd,
+                          playbackKind: blockedAutoplayAudio.playbackKind,
+                          ownerId: blockedAutoplayAudio.ownerId,
+                          rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
                         })
                       }
                     >
@@ -1046,7 +1304,14 @@ export const RehearsalView: React.FC<Props> = ({
                       </View>
                       <TouchableOpacity
                         style={[styles.songAudioButton, isPlaying && styles.songAudioButtonActive]}
-                        onPress={() => handlePlaySongAudio(audio.audioUrl, audio.id, { advanceOnEnd: true })}
+                        onPress={() =>
+                          handlePlaySongAudio(audio.audioUrl, audio.id, {
+                            advanceOnEnd: currentMusicalNumber ? false : true,
+                            playbackKind: currentMusicalNumber ? 'musical-number' : 'song',
+                            ownerId: currentMusicalNumber?.id ?? currentSongAsset?.id ?? null,
+                            rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
+                          })
+                        }
                       >
                         <Text style={styles.songAudioButtonText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
                       </TouchableOpacity>
@@ -1061,9 +1326,11 @@ export const RehearsalView: React.FC<Props> = ({
             {audioError ? <Text style={styles.songErrorText}>{audioError}</Text> : null}
             <Text style={styles.songText}>{currentLine.t}</Text>
             <Text style={styles.songHint}>
-              {currentSongAsset?.audios.length === 1
-                ? 'La cancion se reproduce automaticamente y al terminar pasa a la linea siguiente.'
-                : 'La voz se pausa aqui para que podais seguir la letra manualmente.'}
+              {currentMusicalNumber
+                ? 'Este bloque forma parte de un numero musical. Si activas su audio, seguira vivo durante el dialogo intermedio.'
+                : currentSongAsset?.audios.length === 1
+                  ? 'La cancion se reproduce automaticamente y al terminar pasa a la linea siguiente.'
+                  : 'La voz se pausa aqui para que podais seguir la letra manualmente.'}
             </Text>
           </View>
         </ScrollView>
@@ -1154,6 +1421,7 @@ export const RehearsalView: React.FC<Props> = ({
                 </Text>
               </View>
             ) : null}
+            {currentMusicalNumber ? renderCurrentAudioPanel() : null}
           </View>
         )}
       </ScrollView>
