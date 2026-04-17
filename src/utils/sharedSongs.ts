@@ -100,6 +100,44 @@ const normalizeSongAudios = (song: unknown): SharedSongAudioAsset[] => {
   return [];
 };
 
+const normalizeRangeBoundaries = (startLineIndex: number, endLineIndex: number) =>
+  startLineIndex <= endLineIndex
+    ? { startLineIndex, endLineIndex }
+    : { startLineIndex: endLineIndex, endLineIndex: startLineIndex };
+
+export const getSongsForLineRange = (
+  songs: SharedSongAsset[] | null | undefined,
+  sceneTitle: string | null,
+  startLineIndex: number,
+  endLineIndex: number
+) => {
+  if (!songs?.length || startLineIndex < 0 || endLineIndex < 0) {
+    return [];
+  }
+
+  const normalizedRange = normalizeRangeBoundaries(startLineIndex, endLineIndex);
+
+  return songs
+    .filter((song) => {
+      if (sceneTitle && song.sceneTitle !== sceneTitle) {
+        return false;
+      }
+
+      return (
+        song.lineIndex >= normalizedRange.startLineIndex &&
+        song.lineIndex <= normalizedRange.endLineIndex
+      );
+    })
+    .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex);
+};
+
+export const getSongIdsForLineRange = (
+  songs: SharedSongAsset[] | null | undefined,
+  sceneTitle: string | null,
+  startLineIndex: number,
+  endLineIndex: number
+) => getSongsForLineRange(songs, sceneTitle, startLineIndex, endLineIndex).map((song) => song.id);
+
 export const buildSharedSongPlaceholders = (guion: Dialogue[]): SharedSongAsset[] => {
   const occurrences = new Map<string, number>();
   const placeholders: SharedSongAsset[] = [];
@@ -198,7 +236,23 @@ export const syncSharedMusicalNumbersWithScript = (
         Boolean(musicalNumber) && typeof musicalNumber === 'object'
     )
     .map((musicalNumber, index) => {
-      const songIds = Array.isArray(musicalNumber.songIds)
+      const startLineIndex =
+        typeof musicalNumber.startLineIndex === 'number' && musicalNumber.startLineIndex >= 0
+          ? musicalNumber.startLineIndex
+          : -1;
+      const endLineIndex =
+        typeof musicalNumber.endLineIndex === 'number' && musicalNumber.endLineIndex >= 0
+          ? musicalNumber.endLineIndex
+          : -1;
+      const sceneTitle =
+        typeof musicalNumber.sceneTitle === 'string' && musicalNumber.sceneTitle.trim().length > 0
+          ? musicalNumber.sceneTitle.trim()
+          : null;
+      const songIdsFromRange =
+        startLineIndex >= 0 && endLineIndex >= 0
+          ? getSongIdsForLineRange(songs, sceneTitle, startLineIndex, endLineIndex)
+          : [];
+      const legacySongIds = Array.isArray(musicalNumber.songIds)
         ? Array.from(
             new Set(
               musicalNumber.songIds.filter(
@@ -208,15 +262,24 @@ export const syncSharedMusicalNumbersWithScript = (
             )
           )
         : [];
-
-      const linkedSongs = songIds
-        .map((songId) => songs.find((song) => song.id === songId) ?? null)
-        .filter((song): song is SharedSongAsset => Boolean(song))
-        .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex);
+      const songIds = songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds;
+      const linkedSongs = getSongsForLineRange(
+        songs,
+        sceneTitle ?? null,
+        startLineIndex >= 0 ? startLineIndex : songs.find((song) => song.id === songIds[0])?.lineIndex ?? -1,
+        endLineIndex >= 0
+          ? endLineIndex
+          : songs.find((song) => song.id === songIds[songIds.length - 1])?.lineIndex ?? -1
+      );
 
       if (linkedSongs.length === 0) {
         return null;
       }
+
+      const normalizedRange = normalizeRangeBoundaries(
+        linkedSongs[0].lineIndex,
+        linkedSongs[linkedSongs.length - 1].lineIndex
+      );
 
       return {
         id:
@@ -227,9 +290,9 @@ export const syncSharedMusicalNumbersWithScript = (
           typeof musicalNumber.title === 'string' && musicalNumber.title.trim().length > 0
             ? musicalNumber.title.trim()
             : linkedSongs[0].title,
-        sceneTitle: linkedSongs[0].sceneTitle ?? null,
-        startLineIndex: linkedSongs[0].lineIndex,
-        endLineIndex: linkedSongs[linkedSongs.length - 1].lineIndex,
+        sceneTitle: sceneTitle ?? linkedSongs[0].sceneTitle ?? null,
+        startLineIndex: normalizedRange.startLineIndex,
+        endLineIndex: normalizedRange.endLineIndex,
         songIds,
         audios: normalizeSongAudios(musicalNumber),
         updatedAt:

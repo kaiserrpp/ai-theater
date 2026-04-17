@@ -20,30 +20,32 @@ const ensureConfigured = (response) => {
   return true;
 };
 
-const normalizeSongIds = (value, songs) => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
+const normalizeRangeBoundaries = (startLineIndex, endLineIndex) =>
+  startLineIndex <= endLineIndex
+    ? { startLineIndex, endLineIndex }
+    : { startLineIndex: endLineIndex, endLineIndex: startLineIndex };
 
-  return Array.from(
-    new Set(
-      value.filter(
-        (songId) =>
-          typeof songId === 'string' && songId.trim() && songs.some((song) => song.id === songId)
-      )
-    )
-  );
-};
+const buildRangeSelection = (sceneTitle, startLineIndex, endLineIndex, songs) => {
+  const normalizedRange = normalizeRangeBoundaries(startLineIndex, endLineIndex);
+  const songIds = songs
+    .filter((song) => {
+      if (sceneTitle && song.sceneTitle !== sceneTitle) {
+        return false;
+      }
 
-const buildSpan = (songIds, songs) => {
-  const referencedSongs = songs
-    .filter((song) => songIds.includes(song.id))
-    .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex);
+      return (
+        song.lineIndex >= normalizedRange.startLineIndex &&
+        song.lineIndex <= normalizedRange.endLineIndex
+      );
+    })
+    .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex)
+    .map((song) => song.id);
 
   return {
-    sceneTitle: referencedSongs[0]?.sceneTitle ?? null,
-    startLineIndex: referencedSongs[0]?.lineIndex ?? -1,
-    endLineIndex: referencedSongs[referencedSongs.length - 1]?.lineIndex ?? -1,
+    sceneTitle,
+    startLineIndex: normalizedRange.startLineIndex,
+    endLineIndex: normalizedRange.endLineIndex,
+    songIds,
   };
 };
 
@@ -81,21 +83,33 @@ module.exports = async (request, response) => {
         typeof payload.title === 'string' && payload.title.trim()
           ? payload.title.trim()
           : 'Numero musical';
-      const songIds = normalizeSongIds(payload.songIds, manifest.songs);
+      const sceneTitle =
+        typeof payload.sceneTitle === 'string' && payload.sceneTitle.trim()
+          ? payload.sceneTitle.trim()
+          : '';
+      const startLineIndex =
+        typeof payload.startLineIndex === 'number' ? payload.startLineIndex : -1;
+      const endLineIndex = typeof payload.endLineIndex === 'number' ? payload.endLineIndex : -1;
 
-      if (songIds.length < 2) {
-        response.status(400).json({ error: 'Selecciona al menos dos bloques de cancion.' });
+      if (!sceneTitle || startLineIndex < 0 || endLineIndex < 0) {
+        response.status(400).json({ error: 'Selecciona la escena y el tramo del numero musical.' });
         return;
       }
 
-      const span = buildSpan(songIds, manifest.songs);
+      const selection = buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
+
+      if (selection.songIds.length === 0) {
+        response.status(400).json({ error: 'El tramo seleccionado no incluye ninguna cancion.' });
+        return;
+      }
+
       const nextMusicalNumber = {
         id: `musical-number-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
         title,
-        sceneTitle: span.sceneTitle,
-        startLineIndex: span.startLineIndex,
-        endLineIndex: span.endLineIndex,
-        songIds,
+        sceneTitle: selection.sceneTitle,
+        startLineIndex: selection.startLineIndex,
+        endLineIndex: selection.endLineIndex,
+        songIds: selection.songIds,
         audios: [],
         updatedAt: now,
       };
@@ -143,14 +157,31 @@ module.exports = async (request, response) => {
       typeof payload.title === 'string' && payload.title.trim()
         ? payload.title.trim()
         : existingMusicalNumber.title;
-    const songIds = normalizeSongIds(payload.songIds, manifest.songs);
+    const sceneTitle =
+      typeof payload.sceneTitle === 'string' && payload.sceneTitle.trim()
+        ? payload.sceneTitle.trim()
+        : existingMusicalNumber.sceneTitle || '';
+    const startLineIndex =
+      typeof payload.startLineIndex === 'number'
+        ? payload.startLineIndex
+        : existingMusicalNumber.startLineIndex;
+    const endLineIndex =
+      typeof payload.endLineIndex === 'number'
+        ? payload.endLineIndex
+        : existingMusicalNumber.endLineIndex;
 
-    if (songIds.length < 2) {
-      response.status(400).json({ error: 'Selecciona al menos dos bloques de cancion.' });
+    if (!sceneTitle || startLineIndex < 0 || endLineIndex < 0) {
+      response.status(400).json({ error: 'Selecciona la escena y el tramo del numero musical.' });
       return;
     }
 
-    const span = buildSpan(songIds, manifest.songs);
+    const selection = buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
+
+    if (selection.songIds.length === 0) {
+      response.status(400).json({ error: 'El tramo seleccionado no incluye ninguna cancion.' });
+      return;
+    }
+
     const updatedManifest = await writeManifest({
       ...manifest,
       musicalNumbers: (manifest.musicalNumbers || []).map((musicalNumber) =>
@@ -158,10 +189,10 @@ module.exports = async (request, response) => {
           ? {
               ...musicalNumber,
               title,
-              songIds,
-              sceneTitle: span.sceneTitle,
-              startLineIndex: span.startLineIndex,
-              endLineIndex: span.endLineIndex,
+              songIds: selection.songIds,
+              sceneTitle: selection.sceneTitle,
+              startLineIndex: selection.startLineIndex,
+              endLineIndex: selection.endLineIndex,
               updatedAt: now,
             }
           : musicalNumber

@@ -1,6 +1,6 @@
 const { head, list, put } = require('@vercel/blob');
 
-const MANIFEST_VERSION = 3;
+const MANIFEST_VERSION = 4;
 const EMPTY_SONGS = [];
 const EMPTY_MUSICAL_NUMBERS = [];
 const SONG_AUDIO_KINDS = new Set(['karaoke', 'vocal_guide']);
@@ -156,6 +156,33 @@ const resolveMusicalNumberIndexes = (songIds, songs) => {
   };
 };
 
+const normalizeRangeBoundaries = (startLineIndex, endLineIndex) =>
+  startLineIndex <= endLineIndex
+    ? { startLineIndex, endLineIndex }
+    : { startLineIndex: endLineIndex, endLineIndex: startLineIndex };
+
+const getSongIdsForLineRange = (songs, sceneTitle, startLineIndex, endLineIndex) => {
+  if (!Array.isArray(songs) || startLineIndex < 0 || endLineIndex < 0) {
+    return [];
+  }
+
+  const normalizedRange = normalizeRangeBoundaries(startLineIndex, endLineIndex);
+
+  return songs
+    .filter((song) => {
+      if (sceneTitle && song.sceneTitle !== sceneTitle) {
+        return false;
+      }
+
+      return (
+        song.lineIndex >= normalizedRange.startLineIndex &&
+        song.lineIndex <= normalizedRange.endLineIndex
+      );
+    })
+    .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex)
+    .map((song) => song.id);
+};
+
 const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
   if (!Array.isArray(value)) {
     return EMPTY_MUSICAL_NUMBERS;
@@ -169,7 +196,23 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
         typeof musicalNumber.title === 'string'
     )
     .map((musicalNumber) => {
-      const songIds = Array.isArray(musicalNumber.songIds)
+      const rawSceneTitle =
+        typeof musicalNumber.sceneTitle === 'string' && musicalNumber.sceneTitle.trim()
+          ? musicalNumber.sceneTitle.trim()
+          : null;
+      const rawStartLineIndex =
+        typeof musicalNumber.startLineIndex === 'number' && musicalNumber.startLineIndex >= 0
+          ? musicalNumber.startLineIndex
+          : -1;
+      const rawEndLineIndex =
+        typeof musicalNumber.endLineIndex === 'number' && musicalNumber.endLineIndex >= 0
+          ? musicalNumber.endLineIndex
+          : -1;
+      const songIdsFromRange =
+        rawStartLineIndex >= 0 && rawEndLineIndex >= 0
+          ? getSongIdsForLineRange(songs, rawSceneTitle, rawStartLineIndex, rawEndLineIndex)
+          : [];
+      const legacySongIds = Array.isArray(musicalNumber.songIds)
         ? Array.from(
             new Set(
               musicalNumber.songIds.filter(
@@ -181,22 +224,27 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
             )
           )
         : [];
+      const songIds = songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds;
       const resolvedIndexes = resolveMusicalNumberIndexes(songIds, songs);
+      const normalizedRange =
+        rawStartLineIndex >= 0 && rawEndLineIndex >= 0
+          ? normalizeRangeBoundaries(rawStartLineIndex, rawEndLineIndex)
+          : normalizeRangeBoundaries(
+              resolvedIndexes.startLineIndex,
+              resolvedIndexes.endLineIndex
+            );
 
       return {
         id: musicalNumber.id.trim(),
         title: musicalNumber.title.trim() || 'Numero musical',
-        sceneTitle:
-          typeof musicalNumber.sceneTitle === 'string' && musicalNumber.sceneTitle.trim()
-            ? musicalNumber.sceneTitle.trim()
-            : resolvedIndexes.sceneTitle,
+        sceneTitle: rawSceneTitle ?? resolvedIndexes.sceneTitle,
         startLineIndex:
-          typeof musicalNumber.startLineIndex === 'number' && musicalNumber.startLineIndex >= 0
-            ? musicalNumber.startLineIndex
+          normalizedRange.startLineIndex >= 0
+            ? normalizedRange.startLineIndex
             : resolvedIndexes.startLineIndex,
         endLineIndex:
-          typeof musicalNumber.endLineIndex === 'number' && musicalNumber.endLineIndex >= 0
-            ? musicalNumber.endLineIndex
+          normalizedRange.endLineIndex >= 0
+            ? normalizedRange.endLineIndex
             : resolvedIndexes.endLineIndex,
         songIds,
         audios: Array.isArray(musicalNumber.audios)
@@ -210,7 +258,12 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
             : new Date().toISOString(),
       };
     })
-    .filter((musicalNumber) => musicalNumber.songIds.length > 0);
+    .filter(
+      (musicalNumber) =>
+        musicalNumber.songIds.length > 0 &&
+        musicalNumber.startLineIndex >= 0 &&
+        musicalNumber.endLineIndex >= 0
+    );
 };
 
 const normalizeManifest = (value) => {

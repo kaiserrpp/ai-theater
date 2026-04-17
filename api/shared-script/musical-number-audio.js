@@ -51,6 +51,29 @@ const areSongIdsEqual = (leftSongIds, rightSongIds) => {
   return normalizedLeft.every((songId, index) => songId === normalizedRight[index]);
 };
 
+const matchesRange = (candidate, payload) => {
+  const sceneTitle =
+    typeof payload.sceneTitle === 'string' && payload.sceneTitle.trim()
+      ? payload.sceneTitle.trim()
+      : '';
+  const startLineIndex =
+    typeof payload.startLineIndex === 'number' ? payload.startLineIndex : null;
+  const endLineIndex = typeof payload.endLineIndex === 'number' ? payload.endLineIndex : null;
+
+  if (!sceneTitle || startLineIndex === null || endLineIndex === null) {
+    return false;
+  }
+
+  const normalizedStart = Math.min(startLineIndex, endLineIndex);
+  const normalizedEnd = Math.max(startLineIndex, endLineIndex);
+
+  return (
+    candidate.sceneTitle === sceneTitle &&
+    candidate.startLineIndex === normalizedStart &&
+    candidate.endLineIndex === normalizedEnd
+  );
+};
+
 const resolveMusicalNumber = (manifest, payload) => {
   const allMusicalNumbers = Array.isArray(manifest.musicalNumbers) ? manifest.musicalNumbers : [];
   const musicalNumberId =
@@ -78,6 +101,14 @@ const resolveMusicalNumber = (manifest, payload) => {
       return false;
     }
 
+    if (
+      (typeof payload.sceneTitle === 'string' && payload.sceneTitle.trim()) ||
+      typeof payload.startLineIndex === 'number' ||
+      typeof payload.endLineIndex === 'number'
+    ) {
+      return matchesRange(candidate, payload);
+    }
+
     if (songIds.length > 0 && !areSongIdsEqual(candidate.songIds || [], songIds)) {
       return false;
     }
@@ -87,6 +118,11 @@ const resolveMusicalNumber = (manifest, payload) => {
 
   if (matchingCandidates.length === 1) {
     return matchingCandidates[0];
+  }
+
+  const rangeMatch = allMusicalNumbers.find((candidate) => matchesRange(candidate, payload));
+  if (rangeMatch) {
+    return rangeMatch;
   }
 
   if (songIds.length > 0) {
