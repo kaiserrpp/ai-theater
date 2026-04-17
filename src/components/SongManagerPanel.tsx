@@ -23,10 +23,8 @@ import {
   SharedSongAudioKind,
 } from '../types/sharedScript';
 import {
-  countSharedLibraryAudios,
   formatSongAudioKind,
   getSongsForLineRange,
-  projectSharedSongsForPractice,
 } from '../utils/sharedSongs';
 import { Dialogue } from '../types/script';
 import { isSceneMarker, isSongCue } from '../utils/scriptScenes';
@@ -55,8 +53,12 @@ type MusicalNumberSceneEntry = {
   detailText: string;
   songId: string | null;
 };
+type PracticeMusicalNumberAsset = SharedMusicalNumberAsset & {
+  cueSongs: SharedSongAsset[];
+  rangeEntries: MusicalNumberSceneEntry[];
+};
 type PlaylistEntry = {
-  song: SharedSongAsset;
+  musicalNumber: PracticeMusicalNumberAsset;
   audio: SharedSongAudioAsset;
 };
 type PlaybackSession =
@@ -134,7 +136,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [password, setPassword] = useState(cachedSongAdminPassword ?? '');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
-  const [manageSection, setManageSection] = useState<ManageSection>('song-blocks');
+  const [, setManageSection] = useState<ManageSection>('musical-numbers');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
   const [selectedMusicalNumberId, setSelectedMusicalNumberId] = useState<string | null>(null);
   const [audioLabel, setAudioLabel] = useState('');
@@ -178,52 +180,118 @@ export const SongManagerPanel: React.FC<Props> = ({
   const replayCycleRef = useRef(0);
   const playbackSessionRef = useRef<PlaybackSession | null>(null);
   const [activePlaylistMode, setActivePlaylistMode] = useState<SongPlaybackMode | null>(null);
+  const sharedSongs = useMemo(() => sharedScript?.songs ?? [], [sharedScript]);
   const musicalNumbers = useMemo(() => sharedScript?.musicalNumbers ?? [], [sharedScript]);
-  const practiceSongs = useMemo(
-    () => projectSharedSongsForPractice(sharedScript?.songs, musicalNumbers),
-    [musicalNumbers, sharedScript?.songs]
-  );
-  const totalAudioCount = useMemo(
-    () => countSharedLibraryAudios(sharedScript?.songs, musicalNumbers),
-    [musicalNumbers, sharedScript?.songs]
+  const musicalNumberAudioCount = useMemo(
+    () => musicalNumbers.reduce((count, musicalNumber) => count + musicalNumber.audios.length, 0),
+    [musicalNumbers]
   );
 
-  const mySongs = useMemo(
+  const buildMusicalNumberCueSongs = useCallback(
+    (musicalNumber: SharedMusicalNumberAsset) =>
+      sharedSongs
+        .filter((song) => musicalNumber.songIds.includes(song.id))
+        .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex),
+    [sharedSongs]
+  );
+
+  const buildMusicalNumberRangeEntries = useCallback(
+    (musicalNumber: SharedMusicalNumberAsset): MusicalNumberSceneEntry[] => {
+      if (!sharedScript || !musicalNumber.sceneTitle) {
+        return [];
+      }
+
+      const entries: MusicalNumberSceneEntry[] = [];
+      let currentScene = '';
+
+      sharedScript.scriptData.guion.forEach((line, lineIndex) => {
+        if (isSceneMarker(line)) {
+          currentScene = line.t;
+          return;
+        }
+
+        if (
+          currentScene !== musicalNumber.sceneTitle ||
+          lineIndex < musicalNumber.startLineIndex ||
+          lineIndex > musicalNumber.endLineIndex
+        ) {
+          return;
+        }
+
+        if (isSongCue(line)) {
+          const song = sharedSongs.find((candidate) => candidate.lineIndex === lineIndex) ?? null;
+          entries.push({
+            lineIndex,
+            kind: 'song',
+            title: song?.title || line.songTitle || 'Cancion',
+            meta: song
+              ? `${song.audios.length} audio${song.audios.length === 1 ? '' : 's'} cargado${song.audios.length === 1 ? '' : 's'}`
+              : 'Bloque de cancion',
+            detailText: song?.lyrics || line.t,
+            songId: song?.id ?? null,
+          });
+          return;
+        }
+
+        entries.push({
+          lineIndex,
+          kind: 'dialogue',
+          title: buildDialogueEntryLabel(line),
+          meta: truncateText(line.t),
+          detailText: line.t,
+          songId: null,
+        });
+      });
+
+      return entries;
+    },
+    [sharedScript, sharedSongs]
+  );
+
+  const practiceMusicalNumbers = useMemo<PracticeMusicalNumberAsset[]>(
     () =>
-      practiceSongs.filter((song) =>
-        song.audios.some((audio) => audio.guideRoles.some((role) => myRoles.includes(role)))
-      ),
-    [myRoles, practiceSongs]
+      musicalNumbers.map((musicalNumber) => ({
+        ...musicalNumber,
+        cueSongs: buildMusicalNumberCueSongs(musicalNumber),
+        rangeEntries: buildMusicalNumberRangeEntries(musicalNumber),
+      })),
+    [buildMusicalNumberCueSongs, buildMusicalNumberRangeEntries, musicalNumbers]
   );
 
-  const songsForCurrentView = useMemo(() => {
-    if (!sharedScript) {
-      return [];
-    }
+  const myPracticeMusicalNumbers = useMemo(
+    () =>
+      practiceMusicalNumbers.filter((musicalNumber) =>
+        musicalNumber.audios.some((audio) =>
+          audio.guideRoles.some((role) => myRoles.includes(role))
+        )
+      ),
+    [myRoles, practiceMusicalNumbers]
+  );
 
+  const musicalNumbersForCurrentView = useMemo(() => {
     if (viewMode === 'my-songs') {
-      return mySongs;
+      return myPracticeMusicalNumbers;
     }
 
     if (viewMode === 'all-songs') {
-      return practiceSongs;
+      return practiceMusicalNumbers;
     }
 
-    return sharedScript.songs;
-  }, [mySongs, practiceSongs, sharedScript, viewMode]);
+    return [];
+  }, [myPracticeMusicalNumbers, practiceMusicalNumbers, viewMode]);
 
   useEffect(() => {
-    if (!songsForCurrentView.length) {
+    if (!sharedSongs.length) {
       setSelectedSongId(null);
       return;
     }
 
     setSelectedSongId((previousSongId) =>
-      previousSongId && songsForCurrentView.some((song) => song.id === previousSongId)
+      previousSongId && sharedSongs.some((song) => song.id === previousSongId)
         ? previousSongId
-        : songsForCurrentView[0].id
+        : sharedSongs[0].id
     );
-  }, [songsForCurrentView]);
+  }, [sharedSongs]);
 
   useEffect(() => {
     if (!musicalNumbers.length) {
@@ -263,8 +331,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       return null;
     }
 
-    return songsForCurrentView.find((song) => song.id === selectedSongId) ?? null;
-  }, [selectedSongId, songsForCurrentView]);
+    return sharedSongs.find((song) => song.id === selectedSongId) ?? null;
+  }, [selectedSongId, sharedSongs]);
 
   const selectedMusicalNumber = useMemo<SharedMusicalNumberAsset | null>(() => {
     if (!selectedMusicalNumberId) {
@@ -273,6 +341,22 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     return musicalNumbers.find((musicalNumber) => musicalNumber.id === selectedMusicalNumberId) ?? null;
   }, [musicalNumbers, selectedMusicalNumberId]);
+
+  const selectedPracticeMusicalNumber = useMemo<PracticeMusicalNumberAsset | null>(() => {
+    if (viewMode !== 'my-songs' && viewMode !== 'all-songs') {
+      return null;
+    }
+
+    if (!musicalNumbersForCurrentView.length) {
+      return null;
+    }
+
+    return (
+      musicalNumbersForCurrentView.find(
+        (musicalNumber) => musicalNumber.id === selectedMusicalNumberId
+      ) ?? musicalNumbersForCurrentView[0]
+    );
+  }, [musicalNumbersForCurrentView, selectedMusicalNumberId, viewMode]);
 
   const musicalNumberSceneOptions = useMemo<MusicalNumberSceneOption[]>(() => {
     if (!sharedScript) {
@@ -520,9 +604,14 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const pickPlaylistAudio = useCallback(
-    (song: SharedSongAsset, mode: SongPlaybackMode): SharedSongAudioAsset | null => {
+    (
+      musicalNumber: SharedMusicalNumberAsset,
+      mode: SongPlaybackMode
+    ): SharedSongAudioAsset | null => {
       const candidates =
-        mode === 'all' ? song.audios : song.audios.filter((audio) => audio.kind === mode);
+        mode === 'all'
+          ? musicalNumber.audios
+          : musicalNumber.audios.filter((audio) => audio.kind === mode);
 
       if (!candidates.length) {
         return null;
@@ -609,7 +698,7 @@ export const SongManagerPanel: React.FC<Props> = ({
           const nextIndex = (session.index + 1) % session.entries.length;
           const nextEntry = session.entries[nextIndex];
           playbackSessionRef.current = { ...session, index: nextIndex };
-          setSelectedSongId(nextEntry.song.id);
+          setSelectedMusicalNumberId(nextEntry.musicalNumber.id);
           void startPreviewPlayback(nextEntry.audio, cycleId);
         }, 3000);
       };
@@ -692,10 +781,10 @@ export const SongManagerPanel: React.FC<Props> = ({
         return;
       }
 
-      const entries = songsForCurrentView
-        .map((song) => {
-          const audio = pickPlaylistAudio(song, mode);
-          return audio ? { song, audio } : null;
+      const entries = musicalNumbersForCurrentView
+        .map((musicalNumber) => {
+          const audio = pickPlaylistAudio(musicalNumber, mode);
+          return audio ? { musicalNumber, audio } : null;
         })
         .filter((entry): entry is PlaylistEntry => Boolean(entry));
 
@@ -710,8 +799,8 @@ export const SongManagerPanel: React.FC<Props> = ({
         return;
       }
 
-      const preferredIndex = selectedSong
-        ? entries.findIndex((entry) => entry.song.id === selectedSong.id)
+      const preferredIndex = selectedPracticeMusicalNumber
+        ? entries.findIndex((entry) => entry.musicalNumber.id === selectedPracticeMusicalNumber.id)
         : 0;
       const nextIndex = preferredIndex >= 0 ? preferredIndex : 0;
       const nextEntry = entries[nextIndex];
@@ -721,7 +810,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       stopPreviewAudio({ cancelLoop: false });
       playbackSessionRef.current = { kind: 'playlist', mode, entries, index: nextIndex };
       setActivePlaylistMode(mode);
-      setSelectedSongId(nextEntry.song.id);
+      setSelectedMusicalNumberId(nextEntry.musicalNumber.id);
 
       const cycleId = replayCycleRef.current;
       await startPreviewPlayback(nextEntry.audio, cycleId);
@@ -731,8 +820,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       cancelQueuedReplay,
       pickPlaylistAudio,
       previewAudioElement,
-      selectedSong,
-      songsForCurrentView,
+      selectedPracticeMusicalNumber,
+      musicalNumbersForCurrentView,
       startPreviewPlayback,
       stopPreviewAudio,
     ]
@@ -1348,7 +1437,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsSongPickerVisible(false);
     setIsUploadFormVisible(false);
     setEditingAudioId(null);
-    setManageSection('song-blocks');
+    setManageSection('musical-numbers');
     setSelectedMusicalNumberId(null);
     setIsMusicalNumberFormVisible(false);
     setEditingMusicalNumberId(null);
@@ -1373,9 +1462,6 @@ export const SongManagerPanel: React.FC<Props> = ({
     (nextViewMode: SongManagerViewMode) => {
       resetManagerPanels();
       setViewMode(nextViewMode);
-      if (nextViewMode === 'manage') {
-        setIsSongPickerVisible(true);
-      }
     },
     [resetManagerPanels]
   );
@@ -1480,6 +1566,153 @@ export const SongManagerPanel: React.FC<Props> = ({
             </View>
             </TouchableOpacity>
             {showDetailInline && isSelected ? renderSongPracticeDetail(song) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+
+  void renderSongPracticeDetail;
+  void renderSongList;
+
+  const renderPracticeMusicalNumberDetail = (
+    musicalNumber: PracticeMusicalNumberAsset | null = selectedPracticeMusicalNumber
+  ) => {
+    if (!musicalNumber) {
+      return null;
+    }
+
+    return (
+      <View style={styles.songDetailBox}>
+        <Text style={styles.songDetailTitle}>{musicalNumber.title}</Text>
+        <Text style={styles.songDetailMeta}>
+          {musicalNumber.sceneTitle || 'Sin escena'} · {musicalNumber.cueSongs.length} bloque
+          {musicalNumber.cueSongs.length === 1 ? '' : 's'} · {musicalNumber.audios.length} audio
+          {musicalNumber.audios.length === 1 ? '' : 's'}
+        </Text>
+        <Text style={styles.songDetailMeta}>
+          {describeMusicalNumberBoundary(musicalNumber, 'start')} {'->'}{' '}
+          {describeMusicalNumberBoundary(musicalNumber, 'end')}
+        </Text>
+
+        {musicalNumber.audios.length > 0 ? (
+          <View style={styles.audioList}>
+            <Text style={styles.sectionTitle}>Audios disponibles</Text>
+            {musicalNumber.audios.map((audio) => {
+              const isPlaying = playingPreviewAudioId === audio.id;
+              const isPaused = isPlaying && isPreviewAudioPaused;
+
+              return (
+                <View key={audio.id} style={styles.audioChip}>
+                  <Text style={styles.audioChipTitle}>{audio.label}</Text>
+                  <Text style={styles.audioChipMeta}>
+                    {formatSongAudioKind(audio.kind)}
+                    {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
+                  </Text>
+                  {audio.audioFileName ? (
+                    <Text style={styles.audioChipMeta}>{audio.audioFileName}</Text>
+                  ) : null}
+                  <View style={styles.audioActions}>
+                    <TouchableOpacity
+                      style={[styles.audioActionButton, styles.audioPlayButton]}
+                      onPress={() => void handlePlayPreviewAudio(audio)}
+                    >
+                      <View style={styles.audioButtonContent}>
+                        <MaterialCommunityIcons
+                          name={isPlaying ? 'stop-circle-outline' : 'play-circle-outline'}
+                          size={18}
+                          color="#184e77"
+                        />
+                        <Text style={styles.audioPlayText}>
+                          {isPlaying ? 'Detener' : 'Reproducir'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    {isPlaying ? (
+                      <TouchableOpacity
+                        style={[styles.audioActionButton, styles.audioPauseButton]}
+                        onPress={() => void handlePauseResumePreviewAudio(audio)}
+                      >
+                        <View style={styles.audioButtonContent}>
+                          <MaterialCommunityIcons
+                            name={isPaused ? 'play-circle-outline' : 'pause-circle-outline'}
+                            size={18}
+                            color="#6f4c19"
+                          />
+                          <Text style={styles.audioPauseText}>
+                            {isPaused ? 'Reanudar' : 'Pausar'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <Text style={styles.infoText}>Todavia no hay audios para este numero musical.</Text>
+        )}
+
+        {previewAudioError ? <Text style={styles.errorText}>{previewAudioError}</Text> : null}
+
+        <View style={styles.rangeEntryList}>
+          <Text style={styles.sectionTitle}>Incluye</Text>
+          {musicalNumber.rangeEntries.map((entry) => (
+            <View key={`${musicalNumber.id}-practice-entry-${entry.lineIndex}`} style={styles.rangeEntryRow}>
+              <View
+                style={[
+                  styles.rangeEntryBadge,
+                  entry.kind === 'song' ? styles.rangeEntryBadgeSong : styles.rangeEntryBadgeDialogue,
+                ]}
+              >
+                <Text style={styles.rangeEntryBadgeText}>
+                  {entry.kind === 'song' ? 'Cancion' : 'Linea'}
+                </Text>
+              </View>
+              <View style={styles.rangeEntryText}>
+                <Text style={styles.rangeEntryTitle}>{entry.title}</Text>
+                <Text style={styles.rangeEntryMeta}>
+                  {buildMusicalNumberEntryMeta(entry)} · {entry.meta}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  const renderPracticeMusicalNumberList = (
+    numbers: PracticeMusicalNumberAsset[],
+    showDetailInline = false
+  ) => (
+    <View style={styles.songList}>
+      {numbers.map((musicalNumber) => {
+        const isSelected = selectedPracticeMusicalNumber?.id === musicalNumber.id;
+
+        return (
+          <View key={musicalNumber.id} style={styles.songListItem}>
+            <TouchableOpacity
+              style={[styles.songRow, isSelected && styles.songRowSelected]}
+              onPress={() => handleSelectMusicalNumber(musicalNumber.id)}
+            >
+              <View style={styles.songRowText}>
+                <Text style={[styles.songRowTitle, isSelected && styles.songRowTitleSelected]}>
+                  {musicalNumber.title}
+                </Text>
+                <Text style={styles.songRowMeta}>
+                  {musicalNumber.sceneTitle || 'Sin escena'} · {musicalNumber.cueSongs.length} bloque
+                  {musicalNumber.cueSongs.length === 1 ? '' : 's'} · {musicalNumber.audios.length} audio
+                  {musicalNumber.audios.length === 1 ? '' : 's'}
+                </Text>
+                <Text style={styles.songRowMeta}>
+                  {describeMusicalNumberBoundary(musicalNumber, 'start')} {'->'}{' '}
+                  {describeMusicalNumberBoundary(musicalNumber, 'end')}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            {showDetailInline && isSelected ? renderPracticeMusicalNumberDetail(musicalNumber) : null}
           </View>
         );
       })}
@@ -2012,8 +2245,11 @@ export const SongManagerPanel: React.FC<Props> = ({
             <>
               <Text style={styles.panelTitle}>Canciones de {sharedScript.scriptData.obra}</Text>
               <Text style={styles.panelHint}>
-                {sharedScript.songs.length} canciones detectadas · {totalAudioCount} audio
-                {totalAudioCount === 1 ? '' : 's'} cargado{totalAudioCount === 1 ? '' : 's'}
+                {sharedScript.songs.length} bloques detectados · {musicalNumbers.length} numero
+                {musicalNumbers.length === 1 ? '' : 's'} musical
+                {musicalNumbers.length === 1 ? '' : 'es'} · {musicalNumberAudioCount} audio
+                {musicalNumberAudioCount === 1 ? '' : 's'} cargado
+                {musicalNumberAudioCount === 1 ? '' : 's'}
               </Text>
 
               {viewMode === 'menu' ? (
@@ -2024,9 +2260,9 @@ export const SongManagerPanel: React.FC<Props> = ({
                   >
                     <Text style={styles.modeCardTitle}>Mis canciones</Text>
                     <Text style={styles.modeCardText}>
-                      {mySongs.length === 0
-                        ? 'Todavia no hay canciones etiquetadas para tus personajes.'
-                        : `${mySongs.length} canciones donde canta tu reparto.`}
+                      {myPracticeMusicalNumbers.length === 0
+                        ? 'Todavia no hay numeros musicales etiquetados para tus personajes.'
+                        : `${myPracticeMusicalNumbers.length} numeros musicales donde canta tu reparto.`}
                     </Text>
                   </TouchableOpacity>
 
@@ -2036,7 +2272,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                   >
                     <Text style={styles.modeCardTitle}>Todas las canciones</Text>
                     <Text style={styles.modeCardText}>
-                      {sharedScript.songs.length} canciones disponibles para practicar.
+                      {practiceMusicalNumbers.length} numeros musicales disponibles para practicar.
                     </Text>
                   </TouchableOpacity>
 
@@ -2052,7 +2288,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                     <Text style={styles.modeCardTitle}>Anadir/modificar canciones</Text>
                     <Text style={styles.modeCardText}>
                       {canManageSongs
-                        ? `${totalAudioCount} audio${totalAudioCount === 1 ? '' : 's'} para revisar o ampliar.`
+                        ? `${musicalNumbers.length} numero${musicalNumbers.length === 1 ? '' : 's'} musical${musicalNumbers.length === 1 ? '' : 'es'} para revisar o ampliar.`
                         : 'Disponible en la app web.'}
                     </Text>
                   </TouchableOpacity>
@@ -2065,8 +2301,8 @@ export const SongManagerPanel: React.FC<Props> = ({
 
                   <Text style={styles.selectionSummary}>
                     {viewMode === 'my-songs'
-                      ? 'Canciones etiquetadas para tus personajes.'
-                      : 'Listado completo de canciones de la obra.'}
+                      ? 'Numeros musicales etiquetados para tus personajes.'
+                      : 'Listado completo de numeros musicales de la obra.'}
                   </Text>
 
                   <View style={styles.playlistActions}>
@@ -2132,15 +2368,15 @@ export const SongManagerPanel: React.FC<Props> = ({
                     <Text style={styles.playlistStatusText}>{activePlaylistDescription}</Text>
                   ) : null}
 
-                  {songsForCurrentView.length > 0 ? (
+                  {musicalNumbersForCurrentView.length > 0 ? (
                     <>
-                      {renderSongList(songsForCurrentView, true)}
+                      {renderPracticeMusicalNumberList(musicalNumbersForCurrentView, true)}
                     </>
                   ) : (
                     <Text style={styles.infoText}>
                       {viewMode === 'my-songs'
-                        ? 'Todavia no hay canciones etiquetadas para los personajes seleccionados.'
-                        : 'Esta obra todavia no tiene canciones detectadas.'}
+                        ? 'Todavia no hay numeros musicales etiquetados para los personajes seleccionados.'
+                        : 'Esta obra todavia no tiene numeros musicales creados.'}
                     </Text>
                   )}
                 </>
@@ -2187,47 +2423,10 @@ export const SongManagerPanel: React.FC<Props> = ({
                     <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
                   </TouchableOpacity>
                   <Text style={styles.successText}>Sesion de gestion activa.</Text>
-                  <View style={styles.manageTabs}>
-                    <TouchableOpacity
-                      style={[
-                        styles.manageTabButton,
-                        manageSection === 'song-blocks' && styles.manageTabButtonActive,
-                      ]}
-                      onPress={() => {
-                        setManageSection('song-blocks');
-                        resetMusicalNumberForm();
-                        resetMusicalNumberAudioForm();
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.manageTabButtonText,
-                          manageSection === 'song-blocks' && styles.manageTabButtonTextActive,
-                        ]}
-                      >
-                        Bloques de cancion
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.manageTabButton,
-                        manageSection === 'musical-numbers' && styles.manageTabButtonActive,
-                      ]}
-                      onPress={() => {
-                        returnToMusicalNumberCatalog();
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.manageTabButtonText,
-                          manageSection === 'musical-numbers' && styles.manageTabButtonTextActive,
-                        ]}
-                      >
-                        Numeros musicales
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  {manageSection === 'song-blocks' ? (
+                  <Text style={styles.selectionSummary}>
+                    Gestiona numeros musicales. Los bloques de cancion se detectan automaticamente dentro del tramo que elijas.
+                  </Text>
+                  {false ? (
                     <>
                   <TouchableOpacity
                     style={styles.secondaryAction}
@@ -2244,7 +2443,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
                   {selectedSong ? (
                     <Text style={styles.selectionSummary}>
-                      Cancion seleccionada: {selectedSong.title}
+                      Cancion seleccionada: {selectedSong?.title}
                     </Text>
                   ) : (
                     <Text style={styles.selectionSummary}>
@@ -2254,7 +2453,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
                   {isSongPickerVisible ? (
                     <View style={styles.songList}>
-                    {sharedScript.songs.map((song) => {
+                    {(sharedScript?.songs ?? []).map((song) => {
                       const isSelected = selectedSong?.id === song.id;
 
                       return (
@@ -2280,15 +2479,15 @@ export const SongManagerPanel: React.FC<Props> = ({
 
                   {selectedSong ? (
                     <View style={styles.songDetailBox}>
-                      <Text style={styles.songDetailTitle}>{selectedSong.title}</Text>
+                      <Text style={styles.songDetailTitle}>{selectedSong?.title}</Text>
                       <Text style={styles.songDetailMeta}>
-                        {selectedSong.sceneTitle || 'Sin escena asociada'}
+                        {selectedSong?.sceneTitle || 'Sin escena asociada'}
                       </Text>
 
-                      {selectedSong.audios.length > 0 ? (
+                      {(selectedSong?.audios.length ?? 0) > 0 ? (
                         <View style={styles.audioList}>
                           <Text style={styles.sectionTitle}>Audios cargados</Text>
-                          {selectedSong.audios.map((audio) => (
+                          {(selectedSong?.audios ?? []).map((audio) => (
                             <View key={audio.id} style={styles.audioChip}>
                               <Text style={styles.audioChipTitle}>{audio.label}</Text>
                               <Text style={styles.audioChipMeta}>
@@ -2322,7 +2521,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                         <Text style={styles.infoText}>Todavia no hay audios para esta cancion.</Text>
                       )}
 
-                      <Text style={styles.songLyrics}>{selectedSong.lyrics}</Text>
+                      <Text style={styles.songLyrics}>{selectedSong?.lyrics}</Text>
 
                       <TouchableOpacity
                         style={styles.secondaryAction}
@@ -2377,7 +2576,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
                             return (
                               <TouchableOpacity
-                                key={`${selectedSong.id}-${role}`}
+                                key={`${selectedSong?.id ?? 'song'}-${role}`}
                                 style={[styles.roleTag, isSelected && styles.roleTagSelected]}
                                 onPress={() => toggleGuideRole(role)}
                               >
@@ -2460,9 +2659,9 @@ export const SongManagerPanel: React.FC<Props> = ({
                         </Text>
                       </TouchableOpacity>
 
-                      {selectedMusicalNumber ? (
+                      {false ? (
                         <Text style={styles.selectionSummary}>
-                          Numero musical seleccionado: {selectedMusicalNumber.title}
+                          Numero musical seleccionado: {selectedMusicalNumber?.title}
                         </Text>
                       ) : (
                         <Text style={styles.selectionSummary}>
