@@ -241,6 +241,68 @@ export const syncSharedMusicalNumbersWithScript = (
     .filter((musicalNumber): musicalNumber is SharedMusicalNumberAsset => Boolean(musicalNumber));
 };
 
+const buildProjectedMusicalNumberAudioLabel = (
+  musicalNumber: SharedMusicalNumberAsset,
+  audio: SharedSongAudioAsset
+) => {
+  const trimmedNumberTitle = musicalNumber.title.trim();
+  const trimmedAudioLabel = audio.label.trim();
+
+  if (!trimmedNumberTitle || !trimmedAudioLabel) {
+    return trimmedAudioLabel || trimmedNumberTitle || 'Audio';
+  }
+
+  const normalizedNumberTitle = trimmedNumberTitle.toLowerCase();
+  const normalizedAudioLabel = trimmedAudioLabel.toLowerCase();
+
+  if (normalizedAudioLabel.startsWith(normalizedNumberTitle)) {
+    return trimmedAudioLabel;
+  }
+
+  return `${trimmedNumberTitle} · ${trimmedAudioLabel}`;
+};
+
+export const projectSharedSongsForPractice = (
+  songs: SharedSongAsset[] | null | undefined,
+  musicalNumbers: SharedMusicalNumberAsset[] | null | undefined
+): SharedSongAsset[] => {
+  if (!songs?.length) {
+    return [];
+  }
+
+  const availableMusicalNumbers = (musicalNumbers ?? [])
+    .filter((musicalNumber) => musicalNumber.songIds.length > 0 && musicalNumber.audios.length > 0)
+    .sort((leftNumber, rightNumber) => leftNumber.startLineIndex - rightNumber.startLineIndex);
+
+  return songs.map((song) => {
+    const inheritedAudios = availableMusicalNumbers
+      .filter((musicalNumber) => musicalNumber.songIds.includes(song.id))
+      .flatMap((musicalNumber) =>
+        musicalNumber.audios.map((audio) => ({
+          ...audio,
+          id: `musical-number:${musicalNumber.id}:${audio.id}`,
+          label: buildProjectedMusicalNumberAudioLabel(musicalNumber, audio),
+        }))
+      );
+
+    if (inheritedAudios.length === 0) {
+      return song;
+    }
+
+    return {
+      ...song,
+      audios: [...song.audios, ...inheritedAudios],
+    };
+  });
+};
+
+export const countSharedLibraryAudios = (
+  songs: SharedSongAsset[] | null | undefined,
+  musicalNumbers: SharedMusicalNumberAsset[] | null | undefined
+) =>
+  (songs?.reduce((count, song) => count + song.audios.length, 0) ?? 0) +
+  (musicalNumbers?.reduce((count, musicalNumber) => count + musicalNumber.audios.length, 0) ?? 0);
+
 export const findSharedSongForLine = (
   songs: SharedSongAsset[] | null | undefined,
   guion: Dialogue[],

@@ -22,7 +22,11 @@ import {
   SharedSongAsset,
   SharedSongAudioKind,
 } from '../types/sharedScript';
-import { formatSongAudioKind } from '../utils/sharedSongs';
+import {
+  countSharedLibraryAudios,
+  formatSongAudioKind,
+  projectSharedSongsForPractice,
+} from '../utils/sharedSongs';
 
 interface Props {
   sharedScript: SharedScriptManifest | null;
@@ -129,17 +133,22 @@ export const SongManagerPanel: React.FC<Props> = ({
   const replayCycleRef = useRef(0);
   const playbackSessionRef = useRef<PlaybackSession | null>(null);
   const [activePlaylistMode, setActivePlaylistMode] = useState<SongPlaybackMode | null>(null);
+  const musicalNumbers = useMemo(() => sharedScript?.musicalNumbers ?? [], [sharedScript]);
+  const practiceSongs = useMemo(
+    () => projectSharedSongsForPractice(sharedScript?.songs, musicalNumbers),
+    [musicalNumbers, sharedScript?.songs]
+  );
   const totalAudioCount = useMemo(
-    () => sharedScript?.songs.reduce((count, song) => count + song.audios.length, 0) ?? 0,
-    [sharedScript]
+    () => countSharedLibraryAudios(sharedScript?.songs, musicalNumbers),
+    [musicalNumbers, sharedScript?.songs]
   );
 
   const mySongs = useMemo(
     () =>
-      sharedScript?.songs.filter((song) =>
+      practiceSongs.filter((song) =>
         song.audios.some((audio) => audio.guideRoles.some((role) => myRoles.includes(role)))
-      ) ?? [],
-    [myRoles, sharedScript]
+      ),
+    [myRoles, practiceSongs]
   );
 
   const songsForCurrentView = useMemo(() => {
@@ -151,10 +160,12 @@ export const SongManagerPanel: React.FC<Props> = ({
       return mySongs;
     }
 
-    return sharedScript.songs;
-  }, [mySongs, sharedScript, viewMode]);
+    if (viewMode === 'all-songs') {
+      return practiceSongs;
+    }
 
-  const musicalNumbers = useMemo(() => sharedScript?.musicalNumbers ?? [], [sharedScript]);
+    return sharedScript.songs;
+  }, [mySongs, practiceSongs, sharedScript, viewMode]);
 
   useEffect(() => {
     if (!songsForCurrentView.length) {
