@@ -125,6 +125,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [deletingMusicalNumberAudioId, setDeletingMusicalNumberAudioId] = useState<string | null>(null);
   const [isMusicalNumberAudioFormVisible, setIsMusicalNumberAudioFormVisible] = useState(false);
   const [playingPreviewAudioId, setPlayingPreviewAudioId] = useState<string | null>(null);
+  const [isPreviewAudioPaused, setIsPreviewAudioPaused] = useState(false);
   const [previewAudioError, setPreviewAudioError] = useState<string | null>(null);
   const [previewAudioElement] = useState<HTMLAudioElement | null>(
     typeof Audio === 'undefined' ? null : new Audio()
@@ -380,6 +381,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       previewAudioElement.onended = null;
       previewAudioElement.onerror = null;
       setPlayingPreviewAudioId(null);
+      setIsPreviewAudioPaused(false);
     },
     [cancelQueuedReplay, previewAudioElement]
   );
@@ -395,6 +397,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       previewAudioElement.load();
       previewAudioElement.onended = () => {
         setPlayingPreviewAudioId(null);
+        setIsPreviewAudioPaused(false);
         replayTimeoutRef.current = setTimeout(() => {
           replayTimeoutRef.current = null;
           if (replayCycleRef.current !== cycleId) {
@@ -420,19 +423,45 @@ export const SongManagerPanel: React.FC<Props> = ({
       };
       previewAudioElement.onerror = () => {
         setPlayingPreviewAudioId(null);
+        setIsPreviewAudioPaused(false);
         setPreviewAudioError('No se pudo reproducir este audio.');
       };
 
       try {
         previewAudioElement.currentTime = 0;
         setPlayingPreviewAudioId(audio.id);
+        setIsPreviewAudioPaused(false);
         await previewAudioElement.play();
       } catch {
         setPlayingPreviewAudioId(null);
+        setIsPreviewAudioPaused(false);
         setPreviewAudioError('No se pudo reproducir este audio.');
       }
     },
     [previewAudioElement]
+  );
+
+  const handlePauseResumePreviewAudio = useCallback(
+    async (audio: SharedSongAudioAsset) => {
+      if (!previewAudioElement || playingPreviewAudioId !== audio.id) {
+        return;
+      }
+
+      if (isPreviewAudioPaused) {
+        try {
+          setPreviewAudioError(null);
+          await previewAudioElement.play();
+          setIsPreviewAudioPaused(false);
+        } catch {
+          setPreviewAudioError('No se pudo reanudar este audio.');
+        }
+        return;
+      }
+
+      previewAudioElement.pause();
+      setIsPreviewAudioPaused(true);
+    },
+    [isPreviewAudioPaused, playingPreviewAudioId, previewAudioElement]
   );
 
   const handlePlayPreviewAudio = useCallback(
@@ -1095,6 +1124,7 @@ export const SongManagerPanel: React.FC<Props> = ({
             <Text style={styles.sectionTitle}>Audios disponibles</Text>
             {song.audios.map((audio) => {
               const isPlaying = playingPreviewAudioId === audio.id;
+              const isPaused = isPlaying && isPreviewAudioPaused;
 
               return (
                 <View key={audio.id} style={styles.audioChip}>
@@ -1120,6 +1150,21 @@ export const SongManagerPanel: React.FC<Props> = ({
                         <Text style={styles.audioPlayText}>{isPlaying ? 'Detener' : 'Reproducir'}</Text>
                       </View>
                     </TouchableOpacity>
+                    {isPlaying ? (
+                      <TouchableOpacity
+                        style={[styles.audioActionButton, styles.audioPauseButton]}
+                        onPress={() => void handlePauseResumePreviewAudio(audio)}
+                      >
+                        <View style={styles.audioButtonContent}>
+                          <MaterialCommunityIcons
+                            name={isPaused ? 'play-circle-outline' : 'pause-circle-outline'}
+                            size={18}
+                            color="#6f4c19"
+                          />
+                          <Text style={styles.audioPauseText}>{isPaused ? 'Reanudar' : 'Pausar'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 </View>
               );
@@ -2457,8 +2502,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(24, 78, 119, 0.1)',
     borderColor: 'rgba(24, 78, 119, 0.24)',
   },
+  audioPauseButton: {
+    backgroundColor: '#f5ede3',
+    borderColor: '#e4d1b3',
+  },
   audioPlayText: {
     color: '#184e77',
+    fontWeight: '700',
+  },
+  audioPauseText: {
+    color: '#6f4c19',
     fontWeight: '700',
   },
   audioEditButton: {
