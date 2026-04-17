@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { uploadSharedSongAudio } from '../api/sharedSongUploads';
 import {
   createSharedMusicalNumber,
@@ -235,7 +235,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       previousMusicalNumberId &&
       musicalNumbers.some((musicalNumber) => musicalNumber.id === previousMusicalNumberId)
         ? previousMusicalNumberId
-        : musicalNumbers[0].id
+        : null
     );
   }, [musicalNumbers]);
 
@@ -771,7 +771,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setPreviewAudioError(null);
   };
 
-  const resetAudioForm = () => {
+  const resetAudioForm = useCallback(() => {
     stopPreviewAudio();
     setAudioLabel('');
     setAudioKind(DEFAULT_UPLOAD_KIND);
@@ -780,7 +780,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setManagerError(null);
     setIsUploadFormVisible(false);
     setEditingAudioId(null);
-  };
+  }, [stopPreviewAudio]);
 
   const resetMusicalNumberForm = useCallback(() => {
     setMusicalNumberTitle('');
@@ -801,6 +801,61 @@ export const SongManagerPanel: React.FC<Props> = ({
     setEditingMusicalNumberAudioId(null);
     setIsMusicalNumberAudioFormVisible(false);
   }, [stopPreviewAudio]);
+
+  const returnToMusicalNumberCatalog = useCallback(() => {
+    stopPreviewAudio();
+    resetAudioForm();
+    resetMusicalNumberForm();
+    resetMusicalNumberAudioForm();
+    setManageSection('musical-numbers');
+    setSelectedMusicalNumberId(null);
+    setManagerError(null);
+    setPreviewAudioError(null);
+  }, [resetAudioForm, resetMusicalNumberAudioForm, resetMusicalNumberForm, stopPreviewAudio]);
+
+  const confirmMusicalNumberDeletion = useCallback(
+    async (musicalNumber: SharedMusicalNumberAsset) => {
+      const message = `Se borrara "${musicalNumber.title}". Esta accion no se puede deshacer.`;
+
+      if (Platform.OS === 'web') {
+        return typeof window !== 'undefined' ? window.confirm(message) : false;
+      }
+
+      return new Promise<boolean>((resolve) => {
+        let isResolved = false;
+        const finish = (value: boolean) => {
+          if (isResolved) {
+            return;
+          }
+
+          isResolved = true;
+          resolve(value);
+        };
+
+        Alert.alert(
+          'Borrar numero musical',
+          message,
+          [
+            {
+              text: 'Cancelar',
+              style: 'cancel',
+              onPress: () => finish(false),
+            },
+            {
+              text: 'Borrar',
+              style: 'destructive',
+              onPress: () => finish(true),
+            },
+          ],
+          {
+            cancelable: true,
+            onDismiss: () => finish(false),
+          }
+        );
+      });
+    },
+    []
+  );
 
   const startEditingAudio = (audio: SharedSongAudioAsset) => {
     stopPreviewAudio();
@@ -1056,28 +1111,28 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
   };
 
-  const handleDeleteMusicalNumber = async (musicalNumberId: string) => {
+  const handleDeleteMusicalNumber = async (musicalNumber: SharedMusicalNumberAsset) => {
     if (!sharedScript) {
       return;
     }
 
-    setDeletingMusicalNumberId(musicalNumberId);
+    const shouldDelete = await confirmMusicalNumberDeletion(musicalNumber);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingMusicalNumberId(musicalNumber.id);
     setManagerError(null);
 
     try {
       const manifest = await deleteSharedMusicalNumber({
         shareId: sharedScript.shareId,
-        musicalNumberId,
+        musicalNumberId: musicalNumber.id,
         password: password.trim(),
       });
 
       onManifestUpdated(manifest);
-      if (editingMusicalNumberId === musicalNumberId) {
-        resetMusicalNumberForm();
-      }
-      if (selectedMusicalNumberId === musicalNumberId) {
-        setSelectedMusicalNumberId(manifest.musicalNumbers[0]?.id ?? null);
-      }
+      returnToMusicalNumberCatalog();
     } catch (error) {
       setManagerError(
         error instanceof Error ? error.message : 'No se pudo borrar el numero musical.'
@@ -1294,6 +1349,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsUploadFormVisible(false);
     setEditingAudioId(null);
     setManageSection('song-blocks');
+    setSelectedMusicalNumberId(null);
     setIsMusicalNumberFormVisible(false);
     setEditingMusicalNumberId(null);
     setMusicalNumberTitle('');
@@ -1480,7 +1536,7 @@ export const SongManagerPanel: React.FC<Props> = ({
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.secondaryAction, styles.deleteAction]}
-            onPress={() => void handleDeleteMusicalNumber(musicalNumber.id)}
+            onPress={() => void handleDeleteMusicalNumber(musicalNumber)}
             disabled={deletingMusicalNumberId === musicalNumber.id}
           >
             <Text style={styles.deleteActionText}>
@@ -2158,8 +2214,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                         manageSection === 'musical-numbers' && styles.manageTabButtonActive,
                       ]}
                       onPress={() => {
-                        setManageSection('musical-numbers');
-                        resetAudioForm();
+                        returnToMusicalNumberCatalog();
                       }}
                     >
                       <Text
@@ -2556,7 +2611,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                             </TouchableOpacity>
                             <TouchableOpacity
                               style={[styles.secondaryAction, styles.deleteAction]}
-                              onPress={() => void handleDeleteMusicalNumber(selectedMusicalNumber.id)}
+                              onPress={() => void handleDeleteMusicalNumber(selectedMusicalNumber)}
                               disabled={deletingMusicalNumberId === selectedMusicalNumber.id}
                             >
                               <Text style={styles.deleteActionText}>
