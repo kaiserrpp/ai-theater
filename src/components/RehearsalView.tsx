@@ -859,8 +859,8 @@ export const RehearsalView: React.FC<Props> = ({
     setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(true);
     setRehearsalPreflightPhase(null);
-      setRehearsalMediaStatus(null);
-    }, [prepareRehearsalMedia, primeSongPlayback, rehearsalPreflightPhase]);
+    setRehearsalMediaStatus(null);
+  }, [prepareRehearsalMedia, primeSongPlayback, rehearsalPreflightPhase]);
 
   const handleChooseAutomaticListen = useCallback(() => {
     void enableAutoListenForDevice();
@@ -1249,7 +1249,6 @@ export const RehearsalView: React.FC<Props> = ({
       </View>
     );
   };
-
   if (!isRehearsalMediaReady) {
     return (
       <View style={styles.container}>
