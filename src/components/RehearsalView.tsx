@@ -24,6 +24,7 @@ interface Props {
 }
 
 type RehearsalPreflightPhase = 'auto-initial' | 'manual-check' | 'auto-final' | null;
+type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual';
 
 const createWavObjectUrl = ({
   frequencyHz = 0,
@@ -119,6 +120,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [autoListenEnabled, setAutoListenEnabled] = useState(true);
+  const [listenModeSelection, setListenModeSelection] =
+    useState<RehearsalListenModeSelection>('pending');
   const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
@@ -283,6 +286,7 @@ export const RehearsalView: React.FC<Props> = ({
   const disableAutoListenForDevice = useCallback(
     async (reasonMessage: string, storedValue = 'manual-disabled') => {
       setAutoListenEnabled(false);
+      setListenModeSelection('manual');
       setTemporarilySuspendingAutoListen(false);
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
@@ -304,6 +308,7 @@ export const RehearsalView: React.FC<Props> = ({
   );
 
   const enableAutoListenForDevice = useCallback(async () => {
+    setListenModeSelection('auto');
     setAutoListenEnabled(true);
     setTemporarilySuspendingAutoListen(false);
     setIsRehearsalMediaReady(false);
@@ -327,10 +332,21 @@ export const RehearsalView: React.FC<Props> = ({
 
   useEffect(() => {
     if (!isListeningSupported) {
+      setListenModeSelection('manual');
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(false);
       setHasCompletedRehearsalPreflight(true);
+      setRehearsalPreflightPhase(null);
+      setRehearsalMediaStatus(null);
+      return;
+    }
+
+    if (listenModeSelection === 'pending') {
+      setIsRehearsalMediaReady(false);
+      setIsPreparingRehearsalMedia(false);
+      setHasPreparedRehearsalMedia(false);
+      setHasCompletedRehearsalPreflight(false);
       setRehearsalPreflightPhase(null);
       setRehearsalMediaStatus(null);
       return;
@@ -364,6 +380,7 @@ export const RehearsalView: React.FC<Props> = ({
     autoListenEnabled,
     hasCompletedRehearsalPreflight,
     isListeningSupported,
+    listenModeSelection,
     rehearsalPreflightPhase,
   ]);
 
@@ -565,8 +582,6 @@ export const RehearsalView: React.FC<Props> = ({
         }
 
         if (storedMode === 'manual-disabled') {
-          setAutoListenEnabled(false);
-          setTemporarilySuspendingAutoListen(false);
           setCompatibilityMessage(
             'En este dispositivo has desactivado la escucha automatica porque la voz del resto no se escuchaba bien.'
           );
@@ -844,8 +859,27 @@ export const RehearsalView: React.FC<Props> = ({
     setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(true);
     setRehearsalPreflightPhase(null);
+      setRehearsalMediaStatus(null);
+    }, [prepareRehearsalMedia, primeSongPlayback, rehearsalPreflightPhase]);
+
+  const handleChooseAutomaticListen = useCallback(() => {
+    void enableAutoListenForDevice();
+  }, [enableAutoListenForDevice]);
+
+  const handleChooseManualListen = useCallback(async () => {
+    setListenModeSelection('manual');
+    setAutoListenEnabled(false);
+    setTemporarilySuspendingAutoListen(false);
+    setIsRehearsalMediaReady(true);
+    setIsPreparingRehearsalMedia(false);
+    setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(true);
+    setRehearsalPreflightPhase(null);
     setRehearsalMediaStatus(null);
-  }, [prepareRehearsalMedia, primeSongPlayback, rehearsalPreflightPhase]);
+    setCompatibilityMessage(null);
+    setShowCompatibilityInfo(false);
+    await stopListening();
+  }, [stopListening]);
 
   const handlePreflightMissedVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'auto-initial') {
@@ -1061,7 +1095,7 @@ export const RehearsalView: React.FC<Props> = ({
         <TouchableOpacity onPress={goBackLine} disabled={!canGoBack}>
           <Text style={[styles.backLink, !canGoBack && styles.backLinkDisabled]}>{'<'} Linea anterior</Text>
         </TouchableOpacity>
-        {isListeningSupported ? (
+        {isListeningSupported && listenModeSelection !== 'pending' ? (
           <TouchableOpacity
             onPress={() => {
               if (!autoListenEnabled) {
@@ -1100,7 +1134,7 @@ export const RehearsalView: React.FC<Props> = ({
             </TouchableOpacity>
           ) : null}
         </View>
-        {autoListenEnabled ? (
+        {listenModeSelection === 'auto' && autoListenEnabled ? (
           <Text style={styles.listenStatus}>
             {isListeningActive ? 'Micro escuchando tu replica' : 'Escucha lista para tu proxima replica'}
           </Text>
@@ -1113,6 +1147,41 @@ export const RehearsalView: React.FC<Props> = ({
       </View>
     </View>
   );
+
+  if (isListeningSupported && listenModeSelection === 'pending') {
+    return (
+      <View style={styles.container}>
+        {renderHeader('Configurar ensayo')}
+        <View style={styles.intro}>
+          <View style={styles.preflightCard}>
+            <Text style={styles.preflightTitle}>Como quieres ensayar?</Text>
+            <Text style={styles.preflightText}>
+              Puedes activar el micro para que detectemos cuando terminas tus replicas o empezar sin
+              micro y avanzar manualmente.
+            </Text>
+            <Text style={styles.preflightStatus}>
+              Selecciona Ensayar sin micro si todavia no estas confiado con tus frases y necesitas
+              leerlas con calma.
+            </Text>
+            <View style={styles.preflightActions}>
+              <TouchableOpacity
+                style={[styles.preflightActionButton, styles.preflightConfirmButton]}
+                onPress={handleChooseAutomaticListen}
+              >
+                <Text style={styles.preflightConfirmText}>Usar micro automatico</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.preflightActionButton, styles.preflightManualButton]}
+                onPress={() => void handleChooseManualListen()}
+              >
+                <Text style={styles.preflightManualText}>Ensayar sin micro</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   const renderCurrentAudioPanel = () => {
     if (!currentLine || !shouldShowCurrentAudioOptions) {
@@ -1548,6 +1617,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(43, 147, 72, 0.84)',
     borderColor: 'rgba(43, 147, 72, 0.95)',
   },
+  preflightManualButton: {
+    backgroundColor: '#f5ede3',
+    borderColor: '#e4d1b3',
+  },
   preflightFallbackButton: {
     backgroundColor: 'rgba(255,255,255,0.9)',
     borderColor: '#f1c8c8',
@@ -1558,6 +1631,10 @@ const styles = StyleSheet.create({
   },
   preflightFallbackText: {
     color: '#c62828',
+    fontWeight: '700',
+  },
+  preflightManualText: {
+    color: '#6f4c19',
     fontWeight: '700',
   },
   buttonDisabled: {
