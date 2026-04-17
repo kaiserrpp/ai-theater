@@ -276,10 +276,10 @@ export const syncSharedMusicalNumbersWithScript = (
         return null;
       }
 
-      const normalizedRange = normalizeRangeBoundaries(
-        linkedSongs[0].lineIndex,
-        linkedSongs[linkedSongs.length - 1].lineIndex
-      );
+      const normalizedRange =
+        startLineIndex >= 0 && endLineIndex >= 0
+          ? normalizeRangeBoundaries(startLineIndex, endLineIndex)
+          : normalizeRangeBoundaries(linkedSongs[0].lineIndex, linkedSongs[linkedSongs.length - 1].lineIndex);
 
       return {
         id:
