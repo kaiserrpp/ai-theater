@@ -82,7 +82,7 @@ module.exports = async (request, response) => {
       const title =
         typeof payload.title === 'string' && payload.title.trim()
           ? payload.title.trim()
-          : 'Numero musical';
+          : '';
       const sceneTitle =
         typeof payload.sceneTitle === 'string' && payload.sceneTitle.trim()
           ? payload.sceneTitle.trim()
@@ -90,6 +90,11 @@ module.exports = async (request, response) => {
       const startLineIndex =
         typeof payload.startLineIndex === 'number' ? payload.startLineIndex : -1;
       const endLineIndex = typeof payload.endLineIndex === 'number' ? payload.endLineIndex : -1;
+
+      if (!title) {
+        response.status(400).json({ error: 'Pon un nombre al numero musical antes de guardarlo.' });
+        return;
+      }
 
       if (!sceneTitle || startLineIndex < 0 || endLineIndex < 0) {
         response.status(400).json({ error: 'Selecciona la escena y el tramo del numero musical.' });
@@ -156,7 +161,7 @@ module.exports = async (request, response) => {
     const title =
       typeof payload.title === 'string' && payload.title.trim()
         ? payload.title.trim()
-        : existingMusicalNumber.title;
+        : '';
     const sceneTitle =
       typeof payload.sceneTitle === 'string' && payload.sceneTitle.trim()
         ? payload.sceneTitle.trim()
@@ -169,6 +174,11 @@ module.exports = async (request, response) => {
       typeof payload.endLineIndex === 'number'
         ? payload.endLineIndex
         : existingMusicalNumber.endLineIndex;
+
+    if (!title) {
+      response.status(400).json({ error: 'Pon un nombre al numero musical antes de guardarlo.' });
+      return;
+    }
 
     if (!sceneTitle || startLineIndex < 0 || endLineIndex < 0) {
       response.status(400).json({ error: 'Selecciona la escena y el tramo del numero musical.' });

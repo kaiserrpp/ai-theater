@@ -96,11 +96,25 @@ module.exports = async (request, response) => {
       }
 
       const kind = resolveKind(payload.kind);
+      const label =
+        typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : '';
+      const guideRoles = normalizeGuideRoles(payload.guideRoles);
+
+      if (!label) {
+        response.status(400).json({ error: 'Pon un nombre al audio antes de guardarlo.' });
+        return;
+      }
+
+      if (guideRoles.length === 0) {
+        response.status(400).json({ error: 'Selecciona al menos un personaje para este audio.' });
+        return;
+      }
+
       const nextAudio = {
         id: `audio-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
-        label: resolveLabel(payload.label, kind),
+        label: resolveLabel(label, kind),
         kind,
-        guideRoles: normalizeGuideRoles(payload.guideRoles),
+        guideRoles,
         audioUrl,
         audioFileName:
           typeof payload.audioFileName === 'string' && payload.audioFileName.trim()
@@ -170,6 +184,22 @@ module.exports = async (request, response) => {
     }
 
     const kind = resolveKind(payload.kind, existingAudio.kind);
+    const nextLabel =
+      typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : '';
+    const nextGuideRoles = Array.isArray(payload.guideRoles)
+      ? normalizeGuideRoles(payload.guideRoles)
+      : existingAudio.guideRoles;
+
+    if (!nextLabel) {
+      response.status(400).json({ error: 'Pon un nombre al audio antes de guardarlo.' });
+      return;
+    }
+
+    if (nextGuideRoles.length === 0) {
+      response.status(400).json({ error: 'Selecciona al menos un personaje para este audio.' });
+      return;
+    }
+
     const songs = manifest.songs.map((candidateSong) =>
       candidateSong.id === songId
         ? {
@@ -178,11 +208,9 @@ module.exports = async (request, response) => {
               audio.id === audioId
                 ? {
                     ...audio,
-                    label: resolveLabel(payload.label, kind, existingAudio.label),
+                    label: resolveLabel(nextLabel, kind, existingAudio.label),
                     kind,
-                    guideRoles: Array.isArray(payload.guideRoles)
-                      ? normalizeGuideRoles(payload.guideRoles)
-                      : existingAudio.guideRoles,
+                    guideRoles: nextGuideRoles,
                     audioUrl:
                       typeof payload.audioUrl === 'string' && payload.audioUrl.trim()
                         ? payload.audioUrl.trim()

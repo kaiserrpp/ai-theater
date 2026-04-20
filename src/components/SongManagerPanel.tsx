@@ -87,6 +87,24 @@ const buildDefaultMusicalNumberTitle = (songs: SharedSongAsset[]) => {
   return `${songs[0].title} -> ${songs[songs.length - 1].title}`;
 };
 
+const validateAudioMetadata = ({
+  label,
+  guideRoles,
+}: {
+  label: string;
+  guideRoles: string[];
+}) => {
+  if (!label.trim()) {
+    return 'Pon un nombre al audio antes de guardarlo.';
+  }
+
+  if (guideRoles.length === 0) {
+    return 'Selecciona al menos un personaje para este audio.';
+  }
+
+  return null;
+};
+
 const normalizeRange = (startLineIndex: number, endLineIndex: number) =>
   startLineIndex <= endLineIndex
     ? { startLineIndex, endLineIndex }
@@ -1009,6 +1027,13 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
+    const nextLabel = audioLabel.trim();
+    const validationError = validateAudioMetadata({ label: nextLabel, guideRoles });
+    if (validationError) {
+      setManagerError(validationError);
+      return;
+    }
+
     setManagerError(null);
     setIsUploading(true);
 
@@ -1017,7 +1042,6 @@ export const SongManagerPanel: React.FC<Props> = ({
       if (!uploadedAudio) {
         return;
       }
-      const nextLabel = audioLabel.trim() || buildDefaultAudioLabel(audioKind, guideRoles);
 
       const manifest = await registerSharedSongAudio({
         shareId: sharedScript.shareId,
@@ -1046,6 +1070,13 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
+    const nextLabel = audioLabel.trim();
+    const validationError = validateAudioMetadata({ label: nextLabel, guideRoles });
+    if (validationError) {
+      setManagerError(validationError);
+      return;
+    }
+
     setIsSavingEdit(true);
     setManagerError(null);
 
@@ -1055,7 +1086,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         songId: selectedSong.id,
         audioId: editingAudio.id,
         password: password.trim(),
-        label: audioLabel.trim() || buildDefaultAudioLabel(audioKind, guideRoles),
+        label: nextLabel,
         kind: audioKind,
         guideRoles,
       });
@@ -1076,6 +1107,13 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
+    const nextLabel = audioLabel.trim();
+    const validationError = validateAudioMetadata({ label: nextLabel, guideRoles });
+    if (validationError) {
+      setManagerError(validationError);
+      return;
+    }
+
     setIsSavingEdit(true);
     setManagerError(null);
 
@@ -1090,7 +1128,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         songId: selectedSong.id,
         audioId: editingAudio.id,
         password: password.trim(),
-        label: audioLabel.trim() || buildDefaultAudioLabel(audioKind, guideRoles),
+        label: nextLabel,
         kind: audioKind,
         guideRoles,
         audioUrl: uploadedAudio.url,
@@ -1173,11 +1211,16 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
+    const title = musicalNumberTitle.trim();
+    if (!title) {
+      setManagerError('Pon un nombre al numero musical antes de guardarlo.');
+      return;
+    }
+
     setIsSavingMusicalNumber(true);
     setManagerError(null);
 
     try {
-      const title = musicalNumberTitle.trim() || 'Numero musical';
       const sceneTitle = musicalNumberSceneTitle?.trim() ?? '';
       const normalizedRange =
         musicalNumberStartLineIndex !== null && musicalNumberEndLineIndex !== null
@@ -1294,6 +1337,16 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
+    const nextLabel = musicalNumberAudioLabel.trim();
+    const validationError = validateAudioMetadata({
+      label: nextLabel,
+      guideRoles: musicalNumberGuideRoles,
+    });
+    if (validationError) {
+      setManagerError(validationError);
+      return;
+    }
+
     setManagerError(null);
     setIsMusicalNumberUploading(true);
 
@@ -1312,9 +1365,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
         password: password.trim(),
-        label:
-          musicalNumberAudioLabel.trim() ||
-          buildDefaultAudioLabel(musicalNumberAudioKind, musicalNumberGuideRoles),
+        label: nextLabel,
         kind: musicalNumberAudioKind,
         guideRoles: musicalNumberGuideRoles,
         audioUrl: uploadedAudio.url,
@@ -1337,6 +1388,16 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
+    const nextLabel = musicalNumberAudioLabel.trim();
+    const validationError = validateAudioMetadata({
+      label: nextLabel,
+      guideRoles: musicalNumberGuideRoles,
+    });
+    if (validationError) {
+      setManagerError(validationError);
+      return;
+    }
+
     setIsSavingMusicalNumberAudio(true);
     setManagerError(null);
 
@@ -1351,9 +1412,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
         password: password.trim(),
-        label:
-          musicalNumberAudioLabel.trim() ||
-          buildDefaultAudioLabel(musicalNumberAudioKind, musicalNumberGuideRoles),
+        label: nextLabel,
         kind: musicalNumberAudioKind,
         guideRoles: musicalNumberGuideRoles,
       });
@@ -1371,6 +1430,16 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const handleReplaceMusicalNumberAudio = async () => {
     if (!sharedScript || !selectedMusicalNumber || !editingMusicalNumberAudio) {
+      return;
+    }
+
+    const nextLabel = musicalNumberAudioLabel.trim();
+    const validationError = validateAudioMetadata({
+      label: nextLabel,
+      guideRoles: musicalNumberGuideRoles,
+    });
+    if (validationError) {
+      setManagerError(validationError);
       return;
     }
 
@@ -1393,9 +1462,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
         password: password.trim(),
-        label:
-          musicalNumberAudioLabel.trim() ||
-          buildDefaultAudioLabel(musicalNumberAudioKind, musicalNumberGuideRoles),
+        label: nextLabel,
         kind: musicalNumberAudioKind,
         guideRoles: musicalNumberGuideRoles,
         audioUrl: uploadedAudio.url,
