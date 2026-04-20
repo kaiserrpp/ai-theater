@@ -768,12 +768,23 @@ export const SongManagerPanel: React.FC<Props> = ({
         audio.guideRoles.some((role) => myRoles.includes(role))
       );
 
-      if (mode === 'vocal_guide' && roleMatchedAudio) {
+      if ((mode === 'karaoke' || mode === 'vocal_guide') && roleMatchedAudio) {
         return roleMatchedAudio;
       }
 
       if (mode === 'all') {
-        return candidates.find((audio) => audio.kind === 'karaoke') ?? roleMatchedAudio ?? candidates[0];
+        const karaokeRoleMatchedAudio = candidates.find(
+          (audio) =>
+            audio.kind === 'karaoke' &&
+            audio.guideRoles.some((role) => myRoles.includes(role))
+        );
+
+        return (
+          karaokeRoleMatchedAudio ??
+          candidates.find((audio) => audio.kind === 'karaoke') ??
+          roleMatchedAudio ??
+          candidates[0]
+        );
       }
 
       return candidates[0];
