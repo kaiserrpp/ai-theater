@@ -532,15 +532,24 @@ export const HomeScreen = () => {
     setSharedStatusText(sharedScript ? 'Actualizando obra compartida...' : 'Publicando obra compartida...');
 
     try {
+      const freshestSharedScript =
+        sharedScript?.shareId
+          ? await fetchSharedScript(sharedScript.shareId).catch(() => sharedScript)
+          : null;
+      const baseSharedSongs = syncSharedSongsWithScript(
+        scriptData.guion,
+        freshestSharedScript?.songs ?? sharedScript?.songs
+      );
+
       const response = await publishSharedScript({
         shareId: sharedScript?.shareId ?? null,
         fileName: currentScriptFileName ?? scriptData.obra,
         scriptData,
         mergeMap,
-        songs: syncSharedSongsWithScript(scriptData.guion, sharedScript?.songs),
+        songs: baseSharedSongs,
         musicalNumbers: syncSharedMusicalNumbersWithScript(
-          syncSharedSongsWithScript(scriptData.guion, sharedScript?.songs),
-          sharedScript?.musicalNumbers
+          baseSharedSongs,
+          freshestSharedScript?.musicalNumbers ?? sharedScript?.musicalNumbers
         ),
       });
 
