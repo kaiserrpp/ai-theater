@@ -121,17 +121,13 @@ const getPreferredRehearsalAudios = (
     return [];
   }
 
-  const taggedAudios = audios.filter((audio) => audio.guideRoles.length > 0);
-  const userParticipatesInTaggedAudio = taggedAudios.some((audio) =>
-    audio.guideRoles.some((role) => myRoles.includes(role))
+  const karaokeAudios = audios.filter((audio) => audio.kind === 'karaoke');
+  const vocalGuideAudios = audios.filter((audio) => audio.kind === 'vocal_guide');
+  const participantRoles = Array.from(
+    new Set(audios.flatMap((audio) => audio.guideRoles))
   );
-  const resolvedPreferredKind =
-    preferredKind === 'karaoke' &&
-    taggedAudios.length > 0 &&
-    !userParticipatesInTaggedAudio &&
-    audios.some((audio) => audio.kind === 'vocal_guide')
-      ? 'vocal_guide'
-      : preferredKind;
+  const allParticipantsCovered =
+    participantRoles.length > 0 && participantRoles.every((role) => myRoles.includes(role));
 
   const rememberedAudio = rememberedAudioId
     ? audios.find((audio) => audio.id === rememberedAudioId) ?? null
@@ -141,34 +137,100 @@ const getPreferredRehearsalAudios = (
     ? audios.filter((audio) => audio.id !== rememberedAudio.id)
     : audios;
 
-  const scoreAudio = (audio: SharedSongAudioAsset) => {
-    let score = 0;
+  const getAudioRoleStats = (audio: SharedSongAudioAsset) => {
+    const overlapCount = audio.guideRoles.filter((role) => myRoles.includes(role)).length;
+    const outsideCount = audio.guideRoles.filter((role) => !myRoles.includes(role)).length;
 
-    if (audio.kind === resolvedPreferredKind) {
-      score += 100;
-    }
-
-    if (audio.guideRoles.some((role) => myRoles.includes(role))) {
-      score += 10;
-    }
-
-    if (audio.kind === 'karaoke') {
-      score += 1;
-    }
-
-    return score;
+    return {
+      overlapCount,
+      outsideCount,
+      taggedCount: audio.guideRoles.length,
+    };
   };
 
-  const sortedAudios = [...remainingAudios].sort((leftAudio, rightAudio) => {
-    const scoreDifference = scoreAudio(rightAudio) - scoreAudio(leftAudio);
-    if (scoreDifference !== 0) {
-      return scoreDifference;
+  const sortByRoleStats = (
+    audioList: SharedSongAudioAsset[],
+    mode: 'matching-vocal' | 'complement-vocal' | 'broad-vocal' | 'karaoke'
+  ) =>
+    [...audioList].sort((leftAudio, rightAudio) => {
+      const leftStats = getAudioRoleStats(leftAudio);
+      const rightStats = getAudioRoleStats(rightAudio);
+
+      if (mode === 'matching-vocal') {
+        if (rightStats.overlapCount !== leftStats.overlapCount) {
+          return rightStats.overlapCount - leftStats.overlapCount;
+        }
+      }
+
+      if (mode === 'complement-vocal' || mode === 'broad-vocal') {
+        if (rightStats.outsideCount !== leftStats.outsideCount) {
+          return rightStats.outsideCount - leftStats.outsideCount;
+        }
+      }
+
+      if (mode === 'broad-vocal') {
+        if (leftStats.overlapCount !== rightStats.overlapCount) {
+          return leftStats.overlapCount - rightStats.overlapCount;
+        }
+      }
+
+      if (mode === 'karaoke') {
+        if (rightStats.overlapCount !== leftStats.overlapCount) {
+          return rightStats.overlapCount - leftStats.overlapCount;
+        }
+      }
+
+      if (rightStats.taggedCount !== leftStats.taggedCount) {
+        return rightStats.taggedCount - leftStats.taggedCount;
+      }
+
+      return leftAudio.label.localeCompare(rightAudio.label);
+    });
+
+  const matchingVocalGuides = sortByRoleStats(
+    vocalGuideAudios.filter((audio) => getAudioRoleStats(audio).overlapCount > 0),
+    'matching-vocal'
+  );
+  const complementaryVocalGuides = sortByRoleStats(
+    vocalGuideAudios.filter((audio) => {
+      const stats = getAudioRoleStats(audio);
+      return stats.overlapCount === 0 && stats.outsideCount > 0;
+    }),
+    'complement-vocal'
+  );
+  const broadVocalGuides = sortByRoleStats(
+    vocalGuideAudios.filter((audio) => getAudioRoleStats(audio).outsideCount > 0),
+    'broad-vocal'
+  );
+  const sortedKaraokes = sortByRoleStats(karaokeAudios, 'karaoke');
+
+  const preferredAudios =
+    preferredKind === 'karaoke'
+      ? allParticipantsCovered && sortedKaraokes.length > 0
+        ? [...sortedKaraokes, ...complementaryVocalGuides, ...broadVocalGuides]
+        : complementaryVocalGuides.length > 0
+          ? [...complementaryVocalGuides, ...sortedKaraokes, ...broadVocalGuides]
+          : sortedKaraokes.length > 0
+            ? [...sortedKaraokes, ...broadVocalGuides]
+            : [...broadVocalGuides, ...matchingVocalGuides]
+      : matchingVocalGuides.length > 0
+        ? [...matchingVocalGuides, ...sortedKaraokes, ...broadVocalGuides]
+        : sortedKaraokes.length > 0
+          ? [...sortedKaraokes, ...broadVocalGuides]
+          : [...broadVocalGuides];
+
+  const seenAudioIds = new Set<string>();
+  const sortedAudios = preferredAudios.filter((audio) => {
+    if (seenAudioIds.has(audio.id)) {
+      return false;
     }
 
-    return leftAudio.label.localeCompare(rightAudio.label);
+    seenAudioIds.add(audio.id);
+    return remainingAudios.some((candidate) => candidate.id === audio.id);
   });
 
-  return rememberedAudio ? [rememberedAudio, ...sortedAudios] : sortedAudios;
+  const trailingAudios = remainingAudios.filter((audio) => !seenAudioIds.has(audio.id));
+  return rememberedAudio ? [rememberedAudio, ...sortedAudios, ...trailingAudios] : [...sortedAudios, ...trailingAudios];
 };
 
 export const RehearsalView: React.FC<Props> = ({

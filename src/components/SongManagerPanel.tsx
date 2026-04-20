@@ -764,27 +764,96 @@ export const SongManagerPanel: React.FC<Props> = ({
         return null;
       }
 
-      const roleMatchedAudio = candidates.find((audio) =>
-        audio.guideRoles.some((role) => myRoles.includes(role))
-      );
-
-      if ((mode === 'karaoke' || mode === 'vocal_guide') && roleMatchedAudio) {
-        return roleMatchedAudio;
-      }
-
       if (mode === 'all') {
         const karaokeRoleMatchedAudio = candidates.find(
           (audio) =>
             audio.kind === 'karaoke' &&
             audio.guideRoles.some((role) => myRoles.includes(role))
         );
+        const anyRoleMatchedAudio = candidates.find((audio) =>
+          audio.guideRoles.some((role) => myRoles.includes(role))
+        );
 
         return (
           karaokeRoleMatchedAudio ??
           candidates.find((audio) => audio.kind === 'karaoke') ??
-          roleMatchedAudio ??
+          anyRoleMatchedAudio ??
           candidates[0]
         );
+      }
+
+      const karaokeAudios = candidates.filter((audio) => audio.kind === 'karaoke');
+      const vocalGuideAudios = candidates.filter((audio) => audio.kind === 'vocal_guide');
+      const participantRoles = Array.from(
+        new Set(candidates.flatMap((audio) => audio.guideRoles))
+      );
+      const allParticipantsCovered =
+        participantRoles.length > 0 && participantRoles.every((role) => myRoles.includes(role));
+      const getRoleStats = (audio: SharedSongAudioAsset) => ({
+        overlapCount: audio.guideRoles.filter((role) => myRoles.includes(role)).length,
+        outsideCount: audio.guideRoles.filter((role) => !myRoles.includes(role)).length,
+        taggedCount: audio.guideRoles.length,
+      });
+      const sortAudioList = (
+        audioList: SharedSongAudioAsset[],
+        sortMode: 'matching-vocal' | 'complement-vocal' | 'karaoke'
+      ) =>
+        [...audioList].sort((leftAudio, rightAudio) => {
+          const leftStats = getRoleStats(leftAudio);
+          const rightStats = getRoleStats(rightAudio);
+
+          if (sortMode === 'matching-vocal') {
+            if (rightStats.overlapCount !== leftStats.overlapCount) {
+              return rightStats.overlapCount - leftStats.overlapCount;
+            }
+          }
+
+          if (sortMode === 'complement-vocal') {
+            if (rightStats.outsideCount !== leftStats.outsideCount) {
+              return rightStats.outsideCount - leftStats.outsideCount;
+            }
+          }
+
+          if (sortMode === 'karaoke') {
+            if (rightStats.overlapCount !== leftStats.overlapCount) {
+              return rightStats.overlapCount - leftStats.overlapCount;
+            }
+          }
+
+          if (rightStats.taggedCount !== leftStats.taggedCount) {
+            return rightStats.taggedCount - leftStats.taggedCount;
+          }
+
+          return leftAudio.label.localeCompare(rightAudio.label);
+        });
+
+      const matchingVocalGuides = sortAudioList(
+        vocalGuideAudios.filter((audio) => getRoleStats(audio).overlapCount > 0),
+        'matching-vocal'
+      );
+      const complementaryVocalGuides = sortAudioList(
+        vocalGuideAudios.filter((audio) => {
+          const stats = getRoleStats(audio);
+          return stats.overlapCount === 0 && stats.outsideCount > 0;
+        }),
+        'complement-vocal'
+      );
+      const sortedKaraokes = sortAudioList(karaokeAudios, 'karaoke');
+
+      if (mode === 'karaoke') {
+        if (allParticipantsCovered && sortedKaraokes.length > 0) {
+          return sortedKaraokes[0];
+        }
+
+        if (complementaryVocalGuides.length > 0) {
+          return complementaryVocalGuides[0];
+        }
+
+        return sortedKaraokes[0] ?? matchingVocalGuides[0] ?? vocalGuideAudios[0] ?? candidates[0];
+      }
+
+      if (mode === 'vocal_guide') {
+        return matchingVocalGuides[0] ?? sortedKaraokes[0] ?? vocalGuideAudios[0] ?? candidates[0];
       }
 
       return candidates[0];
