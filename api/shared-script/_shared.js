@@ -180,7 +180,8 @@ const getSongIdsForLineRange = (songs, sceneTitle, startLineIndex, endLineIndex)
       );
     })
     .sort((leftSong, rightSong) => leftSong.lineIndex - rightSong.lineIndex)
-    .map((song) => song.id);
+    .map((song) => song.id)
+    .filter((songId, index, allSongIds) => allSongIds.indexOf(songId) === index);
 };
 
 const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
@@ -224,7 +225,9 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
             )
           )
         : [];
-      const songIds = songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds;
+      const songIds = Array.from(
+        new Set(songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds)
+      );
       const resolvedIndexes = resolveMusicalNumberIndexes(songIds, songs);
       const normalizedRange =
         rawStartLineIndex >= 0 && rawEndLineIndex >= 0

@@ -136,7 +136,10 @@ export const getSongIdsForLineRange = (
   sceneTitle: string | null,
   startLineIndex: number,
   endLineIndex: number
-) => getSongsForLineRange(songs, sceneTitle, startLineIndex, endLineIndex).map((song) => song.id);
+) =>
+  Array.from(
+    new Set(getSongsForLineRange(songs, sceneTitle, startLineIndex, endLineIndex).map((song) => song.id))
+  );
 
 export const buildSharedSongPlaceholders = (guion: Dialogue[]): SharedSongAsset[] => {
   const occurrences = new Map<string, number>();
@@ -262,7 +265,7 @@ export const syncSharedMusicalNumbersWithScript = (
             )
           )
         : [];
-      const songIds = songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds;
+      const songIds = Array.from(new Set(songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds));
       const linkedSongs = getSongsForLineRange(
         songs,
         sceneTitle ?? null,

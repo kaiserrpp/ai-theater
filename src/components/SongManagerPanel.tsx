@@ -131,6 +131,31 @@ const buildDialogueEntryLabel = (line: Dialogue) => {
 const buildMusicalNumberEntryMeta = (entry: MusicalNumberSceneEntry) =>
   entry.kind === 'song' ? 'Bloque de cancion' : 'Linea hablada';
 
+const groupCueSongsByTitle = (songs: SharedSongAsset[]) => {
+  const groupedSongs = new Map<
+    string,
+    { key: string; title: string; count: number; lineIndexes: number[] }
+  >();
+
+  songs.forEach((song) => {
+    const currentGroup = groupedSongs.get(song.title);
+    if (currentGroup) {
+      currentGroup.count += 1;
+      currentGroup.lineIndexes.push(song.lineIndex);
+      return;
+    }
+
+    groupedSongs.set(song.title, {
+      key: `${song.title}:${song.id}`,
+      title: song.title,
+      count: 1,
+      lineIndexes: [song.lineIndex],
+    });
+  });
+
+  return Array.from(groupedSongs.values());
+};
+
 const resolveAssetBlob = async (asset: DocumentPicker.DocumentPickerAsset) => {
   const assetWithFile = asset as DocumentPicker.DocumentPickerAsset & { file?: File };
 
@@ -1816,6 +1841,7 @@ export const SongManagerPanel: React.FC<Props> = ({
           .map((songId) => sharedScript.songs.find((song) => song.id === songId) ?? null)
           .filter((song): song is SharedSongAsset => Boolean(song))
       : [];
+    const groupedCueSongs = groupCueSongsByTitle(cueSongs);
 
     return (
       <View style={styles.songDetailBox}>
@@ -1827,9 +1853,12 @@ export const SongManagerPanel: React.FC<Props> = ({
         </Text>
 
         <View style={styles.numberCueList}>
-          {cueSongs.map((song) => (
-            <View key={song.id} style={styles.numberCueChip}>
-              <Text style={styles.numberCueChipText}>{song.title}</Text>
+          {groupedCueSongs.map((songGroup) => (
+            <View key={songGroup.key} style={styles.numberCueChip}>
+              <Text style={styles.numberCueChipText}>
+                {songGroup.title}
+                {songGroup.count > 1 ? ` (${songGroup.count} bloques)` : ''}
+              </Text>
             </View>
           ))}
         </View>
@@ -2120,6 +2149,7 @@ export const SongManagerPanel: React.FC<Props> = ({
               .map((songId) => sharedScript.songs.find((song) => song.id === songId) ?? null)
               .filter((song): song is SharedSongAsset => Boolean(song))
           : [];
+        const groupedCueSongs = groupCueSongsByTitle(cueSongs);
 
         return (
           <View key={musicalNumber.id} style={styles.songListItem}>
@@ -2133,7 +2163,8 @@ export const SongManagerPanel: React.FC<Props> = ({
                 </Text>
                 <Text style={styles.songRowMeta}>
                   {musicalNumber.sceneTitle || 'Sin escena'} · {cueSongs.length} bloque
-                  {cueSongs.length === 1 ? '' : 's'} ·{' '}
+                  {cueSongs.length === 1 ? '' : 's'} · {groupedCueSongs.length} cancion
+                  {groupedCueSongs.length === 1 ? '' : 'es'} ·{' '}
                   {musicalNumber.audios.length} audio{musicalNumber.audios.length === 1 ? '' : 's'}
                 </Text>
                 <Text style={styles.songRowMeta}>
