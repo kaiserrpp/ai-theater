@@ -398,7 +398,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     return (
       musicalNumbersForCurrentView.find(
         (musicalNumber) => musicalNumber.id === selectedMusicalNumberId
-      ) ?? musicalNumbersForCurrentView[0]
+      ) ?? null
     );
   }, [musicalNumbersForCurrentView, selectedMusicalNumberId, viewMode]);
 
@@ -1204,7 +1204,9 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const handleSelectMusicalNumber = (musicalNumberId: string) => {
     stopPreviewAudio();
-    setSelectedMusicalNumberId(musicalNumberId);
+    setSelectedMusicalNumberId((previousMusicalNumberId) =>
+      previousMusicalNumberId === musicalNumberId ? null : musicalNumberId
+    );
     setPreviewAudioError(null);
   };
 

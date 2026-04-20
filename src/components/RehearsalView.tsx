@@ -547,9 +547,9 @@ export const RehearsalView: React.FC<Props> = ({
 
   const goBackLine = useCallback(() => {
     stopRehearsalSpeech();
-    stopSongAudio();
+    stopStandaloneSongAudio();
     setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
-  }, [stopSongAudio]);
+  }, [stopStandaloneSongAudio]);
 
   useEffect(() => {
     const safeInitialIndex = Math.max(0, Math.min(initialIndex, filteredGuion.length));
