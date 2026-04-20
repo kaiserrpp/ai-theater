@@ -24,6 +24,7 @@ import {
   SharedSongAudioKind,
 } from '../types/sharedScript';
 import {
+  countSharedLibraryAudios,
   formatSongAudioKind,
   getSongsForLineRange,
 } from '../utils/sharedSongs';
@@ -57,6 +58,7 @@ type MusicalNumberSceneEntry = {
 type PracticeMusicalNumberAsset = SharedMusicalNumberAsset & {
   cueSongs: SharedSongAsset[];
   rangeEntries: MusicalNumberSceneEntry[];
+  practiceAudios: SharedSongAudioAsset[];
 };
 type PlaylistEntry = {
   musicalNumber: PracticeMusicalNumberAsset;
@@ -156,6 +158,54 @@ const groupCueSongsByTitle = (songs: SharedSongAsset[]) => {
   return Array.from(groupedSongs.values());
 };
 
+const buildPracticeMusicalNumberAudioLabel = (
+  sourceTitle: string,
+  audio: SharedSongAudioAsset
+) => {
+  const trimmedSourceTitle = sourceTitle.trim();
+  const trimmedAudioLabel = audio.label.trim();
+
+  if (!trimmedSourceTitle || !trimmedAudioLabel) {
+    return trimmedAudioLabel || trimmedSourceTitle || 'Audio';
+  }
+
+  const normalizedSourceTitle = trimmedSourceTitle.toLowerCase();
+  const normalizedAudioLabel = trimmedAudioLabel.toLowerCase();
+
+  if (normalizedAudioLabel.startsWith(normalizedSourceTitle)) {
+    return trimmedAudioLabel;
+  }
+
+  return `${trimmedSourceTitle} · ${trimmedAudioLabel}`;
+};
+
+const getManifestUpdatedAt = (manifest: SharedScriptManifest) => {
+  const timestamp = Date.parse(manifest.updatedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const pickFreshestManifest = (
+  fallbackManifest: SharedScriptManifest,
+  refreshedManifest: SharedScriptManifest
+) => {
+  const fallbackUpdatedAt = getManifestUpdatedAt(fallbackManifest);
+  const refreshedUpdatedAt = getManifestUpdatedAt(refreshedManifest);
+
+  if (refreshedUpdatedAt < fallbackUpdatedAt) {
+    return fallbackManifest;
+  }
+
+  if (
+    refreshedUpdatedAt === fallbackUpdatedAt &&
+    countSharedLibraryAudios(refreshedManifest.songs, refreshedManifest.musicalNumbers) <
+      countSharedLibraryAudios(fallbackManifest.songs, fallbackManifest.musicalNumbers)
+  ) {
+    return fallbackManifest;
+  }
+
+  return refreshedManifest;
+};
+
 const resolveAssetBlob = async (asset: DocumentPicker.DocumentPickerAsset) => {
   const assetWithFile = asset as DocumentPicker.DocumentPickerAsset & { file?: File };
 
@@ -239,6 +289,29 @@ export const SongManagerPanel: React.FC<Props> = ({
     [sharedSongs]
   );
 
+  const buildPracticeMusicalNumberAudios = useCallback(
+    (
+      musicalNumber: SharedMusicalNumberAsset,
+      cueSongs: SharedSongAsset[]
+    ): SharedSongAudioAsset[] => {
+      const directAudios = musicalNumber.audios.map((audio) => ({
+        ...audio,
+        id: `musical-number:${musicalNumber.id}:${audio.id}`,
+      }));
+
+      const inheritedAudios = cueSongs.flatMap((song) =>
+        song.audios.map((audio) => ({
+          ...audio,
+          id: `song:${song.id}:${audio.id}`,
+          label: buildPracticeMusicalNumberAudioLabel(song.title, audio),
+        }))
+      );
+
+      return [...directAudios, ...inheritedAudios];
+    },
+    []
+  );
+
   const buildMusicalNumberRangeEntries = useCallback(
     (musicalNumber: SharedMusicalNumberAsset): MusicalNumberSceneEntry[] => {
       if (!sharedScript || !musicalNumber.sceneTitle) {
@@ -294,18 +367,28 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const practiceMusicalNumbers = useMemo<PracticeMusicalNumberAsset[]>(
     () =>
-      musicalNumbers.map((musicalNumber) => ({
-        ...musicalNumber,
-        cueSongs: buildMusicalNumberCueSongs(musicalNumber),
-        rangeEntries: buildMusicalNumberRangeEntries(musicalNumber),
-      })),
-    [buildMusicalNumberCueSongs, buildMusicalNumberRangeEntries, musicalNumbers]
+      musicalNumbers.map((musicalNumber) => {
+        const cueSongs = buildMusicalNumberCueSongs(musicalNumber);
+
+        return {
+          ...musicalNumber,
+          cueSongs,
+          rangeEntries: buildMusicalNumberRangeEntries(musicalNumber),
+          practiceAudios: buildPracticeMusicalNumberAudios(musicalNumber, cueSongs),
+        };
+      }),
+    [
+      buildMusicalNumberCueSongs,
+      buildMusicalNumberRangeEntries,
+      buildPracticeMusicalNumberAudios,
+      musicalNumbers,
+    ]
   );
 
   const myPracticeMusicalNumbers = useMemo(
     () =>
       practiceMusicalNumbers.filter((musicalNumber) =>
-        musicalNumber.audios.some((audio) =>
+        musicalNumber.practiceAudios.some((audio) =>
           audio.guideRoles.some((role) => myRoles.includes(role))
         )
       ),
@@ -603,8 +686,9 @@ export const SongManagerPanel: React.FC<Props> = ({
 
       try {
         const refreshedManifest = await fetchSharedScript(sharedScript.shareId);
-        onManifestUpdated(refreshedManifest);
-        return refreshedManifest;
+        const nextManifest = pickFreshestManifest(fallbackManifest, refreshedManifest);
+        onManifestUpdated(nextManifest);
+        return nextManifest;
       } catch {
         onManifestUpdated(fallbackManifest);
         return fallbackManifest;
@@ -668,13 +752,13 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const pickPlaylistAudio = useCallback(
     (
-      musicalNumber: SharedMusicalNumberAsset,
+      musicalNumber: PracticeMusicalNumberAsset,
       mode: SongPlaybackMode
     ): SharedSongAudioAsset | null => {
       const candidates =
         mode === 'all'
-          ? musicalNumber.audios
-          : musicalNumber.audios.filter((audio) => audio.kind === mode);
+          ? musicalNumber.practiceAudios
+          : musicalNumber.practiceAudios.filter((audio) => audio.kind === mode);
 
       if (!candidates.length) {
         return null;
@@ -1709,10 +1793,10 @@ export const SongManagerPanel: React.FC<Props> = ({
           {describeMusicalNumberBoundary(musicalNumber, 'end')}
         </Text>
 
-        {musicalNumber.audios.length > 0 ? (
+        {musicalNumber.practiceAudios.length > 0 ? (
           <View style={styles.audioList}>
             <Text style={styles.sectionTitle}>Audios disponibles</Text>
-            {musicalNumber.audios.map((audio) => {
+            {musicalNumber.practiceAudios.map((audio) => {
               const isPlaying = playingPreviewAudioId === audio.id;
               const isPaused = isPlaying && isPreviewAudioPaused;
 

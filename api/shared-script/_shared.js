@@ -331,8 +331,19 @@ const parseJsonBody = (request) => {
   return request.body || {};
 };
 
+const buildManifestReadUrl = (url) => {
+  try {
+    const nextUrl = new URL(url);
+    nextUrl.searchParams.set('_ts', Date.now().toString());
+    return nextUrl.toString();
+  } catch {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}_ts=${Date.now()}`;
+  }
+};
+
 const readManifestFromUrl = async (url) => {
-  const response = await fetch(url, { cache: 'no-store' });
+  const response = await fetch(buildManifestReadUrl(url), { cache: 'no-store' });
 
   if (!response.ok) {
     throw new Error('No se pudo descargar la obra compartida.');
