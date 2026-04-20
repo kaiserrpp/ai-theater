@@ -7,7 +7,12 @@ import {
   REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
 } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
-import { SharedMusicalNumberAsset, SharedSongAsset, SharedSongAudioAsset } from '../types/sharedScript';
+import {
+  SharedMusicalNumberAsset,
+  SharedSongAsset,
+  SharedSongAudioAsset,
+  SharedSongAudioKind,
+} from '../types/sharedScript';
 import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
@@ -25,6 +30,7 @@ interface Props {
 
 type RehearsalPreflightPhase = 'auto-initial' | 'manual-check' | 'auto-final' | null;
 type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual';
+type RehearsalAudioModeSelection = 'pending' | SharedSongAudioKind;
 
 const createWavObjectUrl = ({
   frequencyHz = 0,
@@ -105,6 +111,54 @@ const formatPlaybackProbeError = (error: unknown) => {
   return normalizedMessage || 'error-desconocido';
 };
 
+const getPreferredRehearsalAudios = (
+  audios: SharedSongAudioAsset[],
+  preferredKind: SharedSongAudioKind,
+  myRoles: string[],
+  rememberedAudioId?: string | null
+) => {
+  if (!audios.length) {
+    return [];
+  }
+
+  const rememberedAudio = rememberedAudioId
+    ? audios.find((audio) => audio.id === rememberedAudioId) ?? null
+    : null;
+
+  const remainingAudios = rememberedAudio
+    ? audios.filter((audio) => audio.id !== rememberedAudio.id)
+    : audios;
+
+  const scoreAudio = (audio: SharedSongAudioAsset) => {
+    let score = 0;
+
+    if (audio.kind === preferredKind) {
+      score += 100;
+    }
+
+    if (audio.guideRoles.some((role) => myRoles.includes(role))) {
+      score += 10;
+    }
+
+    if (audio.kind === 'karaoke') {
+      score += 1;
+    }
+
+    return score;
+  };
+
+  const sortedAudios = [...remainingAudios].sort((leftAudio, rightAudio) => {
+    const scoreDifference = scoreAudio(rightAudio) - scoreAudio(leftAudio);
+    if (scoreDifference !== 0) {
+      return scoreDifference;
+    }
+
+    return leftAudio.label.localeCompare(rightAudio.label);
+  });
+
+  return rememberedAudio ? [rememberedAudio, ...sortedAudios] : sortedAudios;
+};
+
 export const RehearsalView: React.FC<Props> = ({
   guion,
   myRoles,
@@ -122,6 +176,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [autoListenEnabled, setAutoListenEnabled] = useState(true);
   const [listenModeSelection, setListenModeSelection] =
     useState<RehearsalListenModeSelection>('pending');
+  const [rehearsalAudioModeSelection, setRehearsalAudioModeSelection] =
+    useState<RehearsalAudioModeSelection>('pending');
   const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
@@ -181,43 +237,53 @@ export const RehearsalView: React.FC<Props> = ({
           ) ?? null,
     [currentLineIndexInScript, musicalNumbers]
   );
+  const effectiveRehearsalAudioKind: SharedSongAudioKind =
+    rehearsalAudioModeSelection === 'pending' ? 'karaoke' : rehearsalAudioModeSelection;
   const preferredMusicalNumberAudio = useMemo<SharedSongAudioAsset | null>(() => {
     if (!currentMusicalNumber?.audios.length) {
       return null;
     }
 
     const rememberedAudioId = selectedMusicalNumberAudioIdsRef.current[currentMusicalNumber.id];
-    if (rememberedAudioId) {
-      const rememberedAudio = currentMusicalNumber.audios.find((audio) => audio.id === rememberedAudioId);
-      if (rememberedAudio) {
-        return rememberedAudio;
-      }
-    }
-
-    if (currentMusicalNumber.audios.length === 1) {
-      return currentMusicalNumber.audios[0];
-    }
-
-    const karaokeAudios = currentMusicalNumber.audios.filter((audio) => audio.kind === 'karaoke');
-    if (karaokeAudios.length === 1) {
-      return karaokeAudios[0];
-    }
-
-    const matchingRoleAudios = currentMusicalNumber.audios.filter((audio) =>
-      audio.guideRoles.some((role) => myRoles.includes(role))
+    return (
+      getPreferredRehearsalAudios(
+        currentMusicalNumber.audios,
+        effectiveRehearsalAudioKind,
+        myRoles,
+        rememberedAudioId
+      )[0] ?? null
     );
-    if (matchingRoleAudios.length === 1) {
-      return matchingRoleAudios[0];
+  }, [currentMusicalNumber, effectiveRehearsalAudioKind, myRoles]);
+  const preferredSongAudio = useMemo<SharedSongAudioAsset | null>(() => {
+    if (currentMusicalNumber || !currentSongAsset?.audios.length) {
+      return null;
     }
 
-    return null;
-  }, [currentMusicalNumber, myRoles]);
+    return (
+      getPreferredRehearsalAudios(
+        currentSongAsset.audios,
+        effectiveRehearsalAudioKind,
+        myRoles
+      )[0] ?? null
+    );
+  }, [currentMusicalNumber, currentSongAsset, effectiveRehearsalAudioKind, myRoles]);
   const currentRehearsalAudioOptions = useMemo(
-    () =>
-      currentMusicalNumber?.audios.length
+    () => {
+      const baseAudios = currentMusicalNumber?.audios.length
         ? currentMusicalNumber.audios
-        : currentSongAsset?.audios ?? [],
-    [currentMusicalNumber, currentSongAsset]
+        : currentSongAsset?.audios ?? [];
+      const rememberedAudioId = currentMusicalNumber
+        ? selectedMusicalNumberAudioIdsRef.current[currentMusicalNumber.id]
+        : null;
+
+      return getPreferredRehearsalAudios(
+        baseAudios,
+        effectiveRehearsalAudioKind,
+        myRoles,
+        rememberedAudioId
+      );
+    },
+    [currentMusicalNumber, currentSongAsset, effectiveRehearsalAudioKind, myRoles]
   );
   const currentSongKey = isSongCue(currentLine)
     ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
@@ -863,10 +929,6 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalMediaStatus(null);
   }, [prepareRehearsalMedia, primeSongPlayback, rehearsalPreflightPhase]);
 
-  const handleChooseAutomaticListen = useCallback(() => {
-    void enableAutoListenForDevice();
-  }, [enableAutoListenForDevice]);
-
   const handleChooseManualListen = useCallback(async () => {
     setListenModeSelection('manual');
     setAutoListenEnabled(false);
@@ -1071,7 +1133,7 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
-    if (!currentSongAsset || currentSongAsset.audios.length !== 1) {
+    if (!currentSongAsset || !preferredSongAudio) {
       return;
     }
 
@@ -1080,12 +1142,11 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     autoStartedSongKeyRef.current = currentSongKey;
-    const [singleAudio] = currentSongAsset.audios;
-    handlePlaySongAudio(singleAudio.audioUrl, singleAudio.id, {
+    handlePlaySongAudio(preferredSongAudio.audioUrl, preferredSongAudio.id, {
       advanceOnEnd: true,
       autoStart: true,
     });
-  }, [currentMusicalNumber, currentSongAsset, currentSongKey, handlePlaySongAudio]);
+  }, [currentMusicalNumber, currentSongAsset, currentSongKey, handlePlaySongAudio, preferredSongAudio]);
 
   const renderHeader = (title: string) => (
     <View style={styles.header}>
@@ -1149,7 +1210,28 @@ export const RehearsalView: React.FC<Props> = ({
     </View>
   );
 
-  if (isListeningSupported && listenModeSelection === 'pending') {
+  const shouldShowInitialSetup =
+    listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending';
+
+  const handleStartConfiguredRehearsal = useCallback(() => {
+    if (rehearsalAudioModeSelection === 'pending') {
+      return;
+    }
+
+    if (listenModeSelection === 'auto') {
+      void enableAutoListenForDevice();
+      return;
+    }
+
+    void handleChooseManualListen();
+  }, [
+    enableAutoListenForDevice,
+    handleChooseManualListen,
+    listenModeSelection,
+    rehearsalAudioModeSelection,
+  ]);
+
+  if (shouldShowInitialSetup) {
     return (
       <View style={styles.container}>
         {renderHeader('Configurar ensayo')}
@@ -1164,20 +1246,102 @@ export const RehearsalView: React.FC<Props> = ({
               Selecciona Ensayar sin micro si todavia no estas confiado con tus frases y necesitas
               leerlas con calma.
             </Text>
+            <Text style={styles.preflightSectionTitle}>Modo de dialogo</Text>
             <View style={styles.preflightActions}>
               <TouchableOpacity
-                style={[styles.preflightActionButton, styles.preflightConfirmButton]}
-                onPress={handleChooseAutomaticListen}
+                style={[
+                  styles.preflightActionButton,
+                  listenModeSelection === 'auto'
+                    ? styles.preflightConfirmButton
+                    : styles.preflightUnselectedButton,
+                ]}
+                onPress={() => setListenModeSelection('auto')}
               >
-                <Text style={styles.preflightConfirmText}>Usar micro automatico</Text>
+                <Text
+                  style={[
+                    styles.preflightConfirmText,
+                    listenModeSelection !== 'auto' && styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Usar micro automatico
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.preflightActionButton, styles.preflightManualButton]}
-                onPress={() => void handleChooseManualListen()}
+                style={[
+                  styles.preflightActionButton,
+                  listenModeSelection === 'manual'
+                    ? styles.preflightManualButton
+                    : styles.preflightUnselectedButton,
+                ]}
+                onPress={() => setListenModeSelection('manual')}
               >
-                <Text style={styles.preflightManualText}>Ensayar sin micro</Text>
+                <Text
+                  style={[
+                    styles.preflightManualText,
+                    listenModeSelection !== 'manual' && styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Ensayar sin micro
+                </Text>
               </TouchableOpacity>
             </View>
+            <Text style={styles.preflightSectionTitle}>Modo musical</Text>
+            <Text style={styles.preflightText}>
+              Priorizaremos ese tipo de audio en canciones y numeros musicales. Si no existe,
+              usaremos automaticamente el otro.
+            </Text>
+            <View style={styles.preflightActions}>
+              <TouchableOpacity
+                style={[
+                  styles.preflightActionButton,
+                  rehearsalAudioModeSelection === 'karaoke'
+                    ? styles.preflightMusicKaraokeButton
+                    : styles.preflightUnselectedButton,
+                ]}
+                onPress={() => setRehearsalAudioModeSelection('karaoke')}
+              >
+                <Text
+                  style={[
+                    styles.preflightConfirmText,
+                    rehearsalAudioModeSelection !== 'karaoke' && styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Karaoke
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.preflightActionButton,
+                  rehearsalAudioModeSelection === 'vocal_guide'
+                    ? styles.preflightMusicGuideButton
+                    : styles.preflightUnselectedButton,
+                ]}
+                onPress={() => setRehearsalAudioModeSelection('vocal_guide')}
+              >
+                <Text
+                  style={[
+                    styles.preflightConfirmText,
+                    rehearsalAudioModeSelection !== 'vocal_guide' &&
+                      styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Vocal guide
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.btnNext,
+                (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') &&
+                  styles.buttonDisabled,
+              ]}
+              onPress={handleStartConfiguredRehearsal}
+              disabled={
+                listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending'
+              }
+            >
+              <Text style={styles.btnText}>Empezar ensayo</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -1603,6 +1767,13 @@ const styles = StyleSheet.create({
     color: '#7a4d00',
     fontWeight: '600',
   },
+  preflightSectionTitle: {
+    marginTop: 6,
+    textAlign: 'center',
+    color: '#17324c',
+    fontWeight: '800',
+    fontSize: 16,
+  },
   preflightActions: {
     gap: 10,
     marginTop: 4,
@@ -1617,9 +1788,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(43, 147, 72, 0.84)',
     borderColor: 'rgba(43, 147, 72, 0.95)',
   },
+  preflightMusicKaraokeButton: {
+    backgroundColor: 'rgba(165, 37, 88, 0.9)',
+    borderColor: 'rgba(165, 37, 88, 0.96)',
+  },
+  preflightMusicGuideButton: {
+    backgroundColor: 'rgba(91, 63, 140, 0.9)',
+    borderColor: 'rgba(91, 63, 140, 0.96)',
+  },
   preflightManualButton: {
     backgroundColor: '#f5ede3',
     borderColor: '#e4d1b3',
+  },
+  preflightUnselectedButton: {
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderColor: '#d7e6f5',
   },
   preflightFallbackButton: {
     backgroundColor: 'rgba(255,255,255,0.9)',
@@ -1636,6 +1819,9 @@ const styles = StyleSheet.create({
   preflightManualText: {
     color: '#6f4c19',
     fontWeight: '700',
+  },
+  preflightUnselectedButtonText: {
+    color: '#17324c',
   },
   buttonDisabled: {
     opacity: 0.5,
