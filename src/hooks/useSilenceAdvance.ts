@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type ListeningStatus = 'unsupported' | 'idle' | 'requesting' | 'active' | 'error';
+export type SilenceAdvancePreset = 'fast' | 'normal' | 'calm';
+
+interface SilenceAdvanceTuning {
+  minVoiceThreshold: number;
+  thresholdMultiplier: number;
+  thresholdReleaseFactor: number;
+  silenceMs: number;
+  linePrepMs: number;
+  voiceConfirmMs: number;
+  signalSmoothing: number;
+}
 
 interface UseSilenceAdvanceOptions {
   enabledForCurrentLine: boolean;
   lineKey: string | null;
   onSilenceDetected: () => void;
+  preset?: SilenceAdvancePreset;
 }
 
 interface UseSilenceAdvanceResult {
@@ -25,12 +37,35 @@ interface UseSilenceAdvanceResult {
   releaseListening: () => Promise<void>;
 }
 
-const MIN_VOICE_THRESHOLD = 0.012;
-const THRESHOLD_MULTIPLIER = 3;
-const THRESHOLD_RELEASE_FACTOR = 0.74;
-const SILENCE_MS = 1000;
-const LINE_PREP_MS = 280;
-const VOICE_CONFIRM_MS = 140;
+const SILENCE_ADVANCE_TUNING: Record<SilenceAdvancePreset, SilenceAdvanceTuning> = {
+  fast: {
+    minVoiceThreshold: 0.012,
+    thresholdMultiplier: 3,
+    thresholdReleaseFactor: 0.74,
+    silenceMs: 1000,
+    linePrepMs: 280,
+    voiceConfirmMs: 140,
+    signalSmoothing: 0.26,
+  },
+  normal: {
+    minVoiceThreshold: 0.01,
+    thresholdMultiplier: 2.6,
+    thresholdReleaseFactor: 0.7,
+    silenceMs: 1400,
+    linePrepMs: 320,
+    voiceConfirmMs: 230,
+    signalSmoothing: 0.22,
+  },
+  calm: {
+    minVoiceThreshold: 0.009,
+    thresholdMultiplier: 2.35,
+    thresholdReleaseFactor: 0.68,
+    silenceMs: 1800,
+    linePrepMs: 360,
+    voiceConfirmMs: 300,
+    signalSmoothing: 0.18,
+  },
+};
 
 type WindowWithWebkitAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
@@ -54,6 +89,7 @@ export const useSilenceAdvance = ({
   enabledForCurrentLine,
   lineKey,
   onSilenceDetected,
+  preset = 'normal',
 }: UseSilenceAdvanceOptions): UseSilenceAdvanceResult => {
   const onSilenceDetectedRef = useRef(onSilenceDetected);
   const currentLineKeyRef = useRef<string | null>(lineKey);
@@ -68,8 +104,11 @@ export const useSilenceAdvance = ({
   const lineStartedAtRef = useRef(0);
   const baselineSumRef = useRef(0);
   const baselineFramesRef = useRef(0);
-  const currentThresholdRef = useRef(MIN_VOICE_THRESHOLD);
-  const releaseThresholdRef = useRef(MIN_VOICE_THRESHOLD * THRESHOLD_RELEASE_FACTOR);
+  const currentThresholdRef = useRef(SILENCE_ADVANCE_TUNING.normal.minVoiceThreshold);
+  const releaseThresholdRef = useRef(
+    SILENCE_ADVANCE_TUNING.normal.minVoiceThreshold *
+      SILENCE_ADVANCE_TUNING.normal.thresholdReleaseFactor
+  );
   const voiceBurstMsRef = useRef(0);
   const lastVoiceTimestampRef = useRef(0);
   const silenceStartedAtRef = useRef(0);
@@ -78,8 +117,13 @@ export const useSilenceAdvance = ({
   const lastUiUpdateRef = useRef(0);
   const lastFrameTimestampRef = useRef(0);
   const requestVersionRef = useRef(0);
+  const smoothedRmsRef = useRef(0);
 
   const isListeningSupported = useMemo(isListeningSupportedOnDevice, []);
+  const presetTuning = useMemo(
+    () => SILENCE_ADVANCE_TUNING[preset] ?? SILENCE_ADVANCE_TUNING.normal,
+    [preset]
+  );
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>(
     isListeningSupported ? 'idle' : 'unsupported'
   );
@@ -89,7 +133,7 @@ export const useSilenceAdvance = ({
   const [hasSpeechStarted, setHasSpeechStarted] = useState(false);
   const [isSignalAboveThreshold, setIsSignalAboveThreshold] = useState(false);
   const [silenceElapsedMs, setSilenceElapsedMs] = useState(0);
-  const [voiceThreshold, setVoiceThreshold] = useState(MIN_VOICE_THRESHOLD);
+  const [voiceThreshold, setVoiceThreshold] = useState(presetTuning.minVoiceThreshold);
   const [lineStateLabel, setLineStateLabel] = useState('detector en espera');
 
   onSilenceDetectedRef.current = onSilenceDetected;
@@ -100,8 +144,9 @@ export const useSilenceAdvance = ({
     lineStartedAtRef.current = 0;
     baselineSumRef.current = 0;
     baselineFramesRef.current = 0;
-    currentThresholdRef.current = MIN_VOICE_THRESHOLD;
-    releaseThresholdRef.current = MIN_VOICE_THRESHOLD * THRESHOLD_RELEASE_FACTOR;
+    currentThresholdRef.current = presetTuning.minVoiceThreshold;
+    releaseThresholdRef.current =
+      presetTuning.minVoiceThreshold * presetTuning.thresholdReleaseFactor;
     voiceBurstMsRef.current = 0;
     lastVoiceTimestampRef.current = 0;
     silenceStartedAtRef.current = 0;
@@ -109,14 +154,15 @@ export const useSilenceAdvance = ({
     lineCompletedRef.current = false;
     lastFrameTimestampRef.current = 0;
     lastUiUpdateRef.current = 0;
+    smoothedRmsRef.current = 0;
     setSignalLevel(0);
     setRawLevel(0);
     setHasSpeechStarted(false);
     setIsSignalAboveThreshold(false);
     setSilenceElapsedMs(0);
-    setVoiceThreshold(MIN_VOICE_THRESHOLD);
+    setVoiceThreshold(presetTuning.minVoiceThreshold);
     setLineStateLabel(nextLineLabel);
-  }, []);
+  }, [presetTuning]);
 
   const getReusableStream = useCallback(() => {
     const currentStream = streamRef.current;
@@ -167,8 +213,9 @@ export const useSilenceAdvance = ({
     lineStartedAtRef.current = timestamp;
     baselineSumRef.current = 0;
     baselineFramesRef.current = 0;
-    currentThresholdRef.current = MIN_VOICE_THRESHOLD;
-    releaseThresholdRef.current = MIN_VOICE_THRESHOLD * THRESHOLD_RELEASE_FACTOR;
+    currentThresholdRef.current = presetTuning.minVoiceThreshold;
+    releaseThresholdRef.current =
+      presetTuning.minVoiceThreshold * presetTuning.thresholdReleaseFactor;
     voiceBurstMsRef.current = 0;
     lastVoiceTimestampRef.current = 0;
     silenceStartedAtRef.current = 0;
@@ -176,14 +223,15 @@ export const useSilenceAdvance = ({
     lineCompletedRef.current = false;
     lastFrameTimestampRef.current = timestamp;
     lastUiUpdateRef.current = 0;
+    smoothedRmsRef.current = 0;
     setSignalLevel(0);
     setRawLevel(0);
     setHasSpeechStarted(false);
     setIsSignalAboveThreshold(false);
     setSilenceElapsedMs(0);
-    setVoiceThreshold(MIN_VOICE_THRESHOLD);
+    setVoiceThreshold(presetTuning.minVoiceThreshold);
     setLineStateLabel('preparando linea');
-  }, []);
+  }, [presetTuning]);
 
   const stopListening = useCallback(async () => {
     requestVersionRef.current += 1;
@@ -241,6 +289,12 @@ export const useSilenceAdvance = ({
     }
 
     const rms = Math.sqrt(sumSquares / samples.length);
+    const previousSmoothedRms = smoothedRmsRef.current;
+    const smoothedRms =
+      previousSmoothedRms > 0
+        ? previousSmoothedRms + (rms - previousSmoothedRms) * presetTuning.signalSmoothing
+        : rms;
+    smoothedRmsRef.current = smoothedRms;
     const now =
       typeof performance !== 'undefined' && typeof performance.now === 'function'
         ? performance.now()
@@ -270,15 +324,21 @@ export const useSilenceAdvance = ({
 
       const lineAgeMs = now - lineStartedAtRef.current;
 
-      if (lineAgeMs < LINE_PREP_MS) {
-        baselineSumRef.current += rms;
+      if (lineAgeMs < presetTuning.linePrepMs) {
+        baselineSumRef.current += smoothedRms;
         baselineFramesRef.current += 1;
         nextLineState = 'preparando linea';
       } else {
-        if (baselineFramesRef.current > 0 && currentThresholdRef.current === MIN_VOICE_THRESHOLD) {
+        if (
+          baselineFramesRef.current > 0 &&
+          currentThresholdRef.current === presetTuning.minVoiceThreshold
+        ) {
           const baselineAverage = baselineSumRef.current / baselineFramesRef.current;
-          activeThreshold = Math.max(MIN_VOICE_THRESHOLD, baselineAverage * THRESHOLD_MULTIPLIER);
-          activeReleaseThreshold = activeThreshold * THRESHOLD_RELEASE_FACTOR;
+          activeThreshold = Math.max(
+            presetTuning.minVoiceThreshold,
+            baselineAverage * presetTuning.thresholdMultiplier
+          );
+          activeReleaseThreshold = activeThreshold * presetTuning.thresholdReleaseFactor;
           currentThresholdRef.current = activeThreshold;
           releaseThresholdRef.current = activeReleaseThreshold;
           baselineFramesRef.current = 0;
@@ -288,17 +348,17 @@ export const useSilenceAdvance = ({
           activeReleaseThreshold = releaseThresholdRef.current;
         }
 
-        isAboveThreshold = rms >= activeThreshold;
+        isAboveThreshold = smoothedRms >= activeThreshold;
 
         if (lineCompletedRef.current) {
           nextLineState = 'linea completada';
-          nextSilenceElapsedMs = SILENCE_MS;
+          nextSilenceElapsedMs = presetTuning.silenceMs;
         } else if (!hasDetectedVoiceRef.current) {
           if (isAboveThreshold) {
             voiceBurstMsRef.current += frameDeltaMs;
             nextLineState = 'armando voz';
 
-            if (voiceBurstMsRef.current >= VOICE_CONFIRM_MS) {
+            if (voiceBurstMsRef.current >= presetTuning.voiceConfirmMs) {
               hasDetectedVoiceRef.current = true;
               lastVoiceTimestampRef.current = now;
               silenceStartedAtRef.current = 0;
@@ -308,7 +368,7 @@ export const useSilenceAdvance = ({
             voiceBurstMsRef.current = 0;
             nextLineState = 'esperando voz';
           }
-        } else if (isAboveThreshold || rms >= activeReleaseThreshold) {
+        } else if (isAboveThreshold || smoothedRms >= activeReleaseThreshold) {
           lastVoiceTimestampRef.current = now;
           silenceStartedAtRef.current = 0;
           nextLineState = 'hablando';
@@ -320,7 +380,7 @@ export const useSilenceAdvance = ({
           nextSilenceElapsedMs = Math.max(0, Math.round(now - silenceStartedAtRef.current));
           nextLineState = 'silencio detectado';
 
-          if (nextSilenceElapsedMs >= SILENCE_MS) {
+          if (nextSilenceElapsedMs >= presetTuning.silenceMs) {
             lineCompletedRef.current = true;
             nextLineState = 'linea completada';
             onSilenceDetectedRef.current();
@@ -332,9 +392,13 @@ export const useSilenceAdvance = ({
     if (now - lastUiUpdateRef.current >= 120) {
       lastUiUpdateRef.current = now;
       setSignalLevel(
-        Math.min(1, rms / Math.max(activeThreshold * 2.4, MIN_VOICE_THRESHOLD * 2.4))
+        Math.min(
+          1,
+          smoothedRms /
+            Math.max(activeThreshold * 2.4, presetTuning.minVoiceThreshold * 2.4)
+        )
       );
-      setRawLevel(rms);
+      setRawLevel(smoothedRms);
       setHasSpeechStarted(hasDetectedVoiceRef.current);
       setIsSignalAboveThreshold(isAboveThreshold);
       setSilenceElapsedMs(nextSilenceElapsedMs);
@@ -343,7 +407,7 @@ export const useSilenceAdvance = ({
     }
 
     frameRef.current = requestAnimationFrame(monitorSignal);
-  }, [prepareLineTracking]);
+  }, [prepareLineTracking, presetTuning]);
 
   const startListening = useCallback(async () => {
     if (!isListeningSupported) {

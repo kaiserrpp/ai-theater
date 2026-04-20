@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
+import { SilenceAdvancePreset, useSilenceAdvance } from '../hooks/useSilenceAdvance';
 import {
   LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
   REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
@@ -250,6 +250,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [autoListenEnabled, setAutoListenEnabled] = useState(true);
   const [listenModeSelection, setListenModeSelection] =
     useState<RehearsalListenModeSelection>('pending');
+  const [rehearsalSilencePreset, setRehearsalSilencePreset] =
+    useState<SilenceAdvancePreset>('normal');
   const [rehearsalAudioModeSelection, setRehearsalAudioModeSelection] =
     useState<RehearsalAudioModeSelection>('pending');
   const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
@@ -427,6 +429,7 @@ export const RehearsalView: React.FC<Props> = ({
     enabledForCurrentLine: shouldArmListeningForCurrentLine,
     lineKey: currentDialogueKey,
     onSilenceDetected: advanceLine,
+    preset: rehearsalSilencePreset,
   });
 
   const disableAutoListenForDevice = useCallback(
@@ -1447,6 +1450,71 @@ export const RehearsalView: React.FC<Props> = ({
                 </Text>
               </TouchableOpacity>
             </View>
+            <Text style={styles.preflightSectionTitle}>Sensibilidad del micro</Text>
+            <Text style={styles.preflightText}>
+              Ajusta cuanto silencio necesitas antes de pasar de linea. Si notas que corta
+              demasiado pronto, usa Pausado.
+            </Text>
+            <View style={styles.preflightActions}>
+              <TouchableOpacity
+                style={[
+                  styles.preflightActionButton,
+                  rehearsalSilencePreset === 'fast'
+                    ? styles.preflightSensitivityFastButton
+                    : styles.preflightUnselectedButton,
+                ]}
+                onPress={() => setRehearsalSilencePreset('fast')}
+              >
+                <Text
+                  style={[
+                    styles.preflightConfirmText,
+                    rehearsalSilencePreset !== 'fast' && styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Rapido
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.preflightActionButton,
+                  rehearsalSilencePreset === 'normal'
+                    ? styles.preflightSensitivityNormalButton
+                    : styles.preflightUnselectedButton,
+                ]}
+                onPress={() => setRehearsalSilencePreset('normal')}
+              >
+                <Text
+                  style={[
+                    styles.preflightConfirmText,
+                    rehearsalSilencePreset !== 'normal' && styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Normal
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.preflightActionButton,
+                  rehearsalSilencePreset === 'calm'
+                    ? styles.preflightSensitivityCalmButton
+                    : styles.preflightUnselectedButton,
+                ]}
+                onPress={() => setRehearsalSilencePreset('calm')}
+              >
+                <Text
+                  style={[
+                    styles.preflightConfirmText,
+                    rehearsalSilencePreset !== 'calm' && styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Pausado
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.preflightStatusSecondary}>
+              Rapido reacciona antes. Normal equilibra. Pausado espera mas silencio y suele ir
+              mejor si el micro te corta demasiado pronto.
+            </Text>
             <TouchableOpacity
               style={[
                 styles.btnNext,
@@ -1913,6 +1981,18 @@ const styles = StyleSheet.create({
   preflightMusicGuideButton: {
     backgroundColor: 'rgba(91, 63, 140, 0.9)',
     borderColor: 'rgba(91, 63, 140, 0.96)',
+  },
+  preflightSensitivityFastButton: {
+    backgroundColor: 'rgba(211, 102, 43, 0.9)',
+    borderColor: 'rgba(211, 102, 43, 0.96)',
+  },
+  preflightSensitivityNormalButton: {
+    backgroundColor: 'rgba(18, 112, 152, 0.92)',
+    borderColor: 'rgba(18, 112, 152, 0.98)',
+  },
+  preflightSensitivityCalmButton: {
+    backgroundColor: 'rgba(95, 128, 54, 0.92)',
+    borderColor: 'rgba(95, 128, 54, 0.98)',
   },
   preflightManualButton: {
     backgroundColor: '#f5ede3',
