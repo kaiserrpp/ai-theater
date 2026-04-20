@@ -22,6 +22,7 @@ interface UseSilenceAdvanceResult {
   lineStateLabel: string;
   startListening: () => Promise<void>;
   stopListening: () => Promise<void>;
+  releaseListening: () => Promise<void>;
 }
 
 const MIN_VOICE_THRESHOLD = 0.012;
@@ -117,6 +118,50 @@ export const useSilenceAdvance = ({
     setLineStateLabel(nextLineLabel);
   }, []);
 
+  const getReusableStream = useCallback(() => {
+    const currentStream = streamRef.current;
+    if (!currentStream) {
+      return null;
+    }
+
+    const liveTracks = currentStream
+      .getAudioTracks()
+      .filter((track) => track.readyState !== 'ended');
+
+    if (liveTracks.length === 0) {
+      currentStream.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      return null;
+    }
+
+    return currentStream;
+  }, []);
+
+  const teardownAudioGraph = useCallback(async () => {
+    if (frameRef.current !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      const context = audioContextRef.current;
+      audioContextRef.current = null;
+      await context.close().catch(() => undefined);
+    }
+
+    samplesRef.current = null;
+  }, []);
+
   const prepareLineTracking = useCallback((lineToken: string, timestamp: number) => {
     processedLineKeyRef.current = lineToken;
     lineStartedAtRef.current = timestamp;
@@ -142,43 +187,35 @@ export const useSilenceAdvance = ({
 
   const stopListening = useCallback(async () => {
     requestVersionRef.current += 1;
-
-    if (frameRef.current !== null && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
-
-    if (sourceNodeRef.current) {
-      sourceNodeRef.current.disconnect();
-      sourceNodeRef.current = null;
-    }
-
-    if (analyserRef.current) {
-      analyserRef.current.disconnect();
-      analyserRef.current = null;
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    if (audioContextRef.current) {
-      const context = audioContextRef.current;
-      audioContextRef.current = null;
-      await context.close().catch(() => undefined);
-    }
-
-    samplesRef.current = null;
+    await teardownAudioGraph();
+    getReusableStream()?.getAudioTracks().forEach((track) => {
+      track.enabled = false;
+    });
     processedLineKeyRef.current = null;
     resetTrackingState();
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
     setListeningError(null);
-  }, [isListeningSupported, resetTrackingState]);
+  }, [getReusableStream, isListeningSupported, resetTrackingState, teardownAudioGraph]);
+
+  const releaseListening = useCallback(async () => {
+    requestVersionRef.current += 1;
+    await teardownAudioGraph();
+
+    const currentStream = streamRef.current;
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    processedLineKeyRef.current = null;
+    resetTrackingState();
+    setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
+    setListeningError(null);
+  }, [isListeningSupported, resetTrackingState, teardownAudioGraph]);
 
   useEffect(() => () => {
-    void stopListening();
-  }, [stopListening]);
+    void releaseListening();
+  }, [releaseListening]);
 
   useEffect(() => {
     if (!enabledForCurrentLine) {
@@ -325,12 +362,19 @@ export const useSilenceAdvance = ({
     try {
       const requestVersion = requestVersionRef.current + 1;
       requestVersionRef.current = requestVersion;
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+      const reusableStream = getReusableStream();
+      const mediaStream =
+        reusableStream ??
+        (await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        }));
+
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.enabled = true;
       });
 
       const AudioContextConstructor = getAudioContextConstructor();
@@ -351,7 +395,9 @@ export const useSilenceAdvance = ({
       if (requestVersionRef.current !== requestVersion) {
         sourceNode.disconnect();
         analyser.disconnect();
-        mediaStream.getTracks().forEach((track) => track.stop());
+        if (!reusableStream) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+        }
         void audioContext.close().catch(() => undefined);
         return;
       }
@@ -366,7 +412,7 @@ export const useSilenceAdvance = ({
       setListeningStatus('active');
       monitorSignal();
     } catch (error) {
-      stopListening();
+      releaseListening();
 
       const errorName =
         error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
@@ -379,7 +425,14 @@ export const useSilenceAdvance = ({
 
       setListeningStatus('error');
     }
-  }, [isListeningSupported, listeningStatus, monitorSignal, resetTrackingState, stopListening]);
+  }, [
+    getReusableStream,
+    isListeningSupported,
+    listeningStatus,
+    monitorSignal,
+    releaseListening,
+    resetTrackingState,
+  ]);
 
   return {
     listeningStatus,
@@ -395,5 +448,6 @@ export const useSilenceAdvance = ({
     lineStateLabel,
     startListening,
     stopListening,
+    releaseListening,
   };
 };

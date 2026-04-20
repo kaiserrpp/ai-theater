@@ -8,6 +8,7 @@ import {
   deleteSharedMusicalNumber,
   deleteSharedMusicalNumberAudio,
   deleteSharedSongAudio,
+  fetchSharedScript,
   registerSharedSongAudio,
   registerSharedMusicalNumberAudio,
   updateSharedMusicalNumber,
@@ -550,6 +551,25 @@ export const SongManagerPanel: React.FC<Props> = ({
     );
   }, [editingMusicalNumberAudioId, selectedMusicalNumber]);
 
+  const refreshSharedManifest = useCallback(
+    async (fallbackManifest: SharedScriptManifest) => {
+      if (!sharedScript?.shareId) {
+        onManifestUpdated(fallbackManifest);
+        return fallbackManifest;
+      }
+
+      try {
+        const refreshedManifest = await fetchSharedScript(sharedScript.shareId);
+        onManifestUpdated(refreshedManifest);
+        return refreshedManifest;
+      } catch {
+        onManifestUpdated(fallbackManifest);
+        return fallbackManifest;
+      }
+    },
+    [onManifestUpdated, sharedScript?.shareId]
+  );
+
   const toggleGuideRole = (role: string) => {
     setGuideRoles((previousRoles) =>
       previousRoles.includes(role)
@@ -1012,7 +1032,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         size: uploadedAudio.size,
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       resetAudioForm();
     } catch (error) {
       setManagerError(error instanceof Error ? error.message : 'No se pudo subir el audio.');
@@ -1040,7 +1060,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         guideRoles,
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       resetAudioForm();
     } catch (error) {
       setManagerError(
@@ -1079,7 +1099,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         size: uploadedAudio.size,
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       resetAudioForm();
     } catch (error) {
       setManagerError(
@@ -1106,7 +1126,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         password: password.trim(),
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       if (editingAudioId === audioId) {
         resetAudioForm();
       }
@@ -1183,11 +1203,11 @@ export const SongManagerPanel: React.FC<Props> = ({
             endLineIndex: normalizedRange?.endLineIndex ?? -1,
           });
 
-      onManifestUpdated(manifest);
+      const refreshedManifest = await refreshSharedManifest(manifest);
       const nextMusicalNumber =
-        manifest.musicalNumbers.find((candidate) =>
+        refreshedManifest.musicalNumbers.find((candidate) =>
           editingMusicalNumberId ? candidate.id === editingMusicalNumberId : candidate.title === title
-        ) ?? manifest.musicalNumbers[0] ?? null;
+        ) ?? refreshedManifest.musicalNumbers[0] ?? null;
 
       setSelectedMusicalNumberId(nextMusicalNumber?.id ?? null);
       resetMusicalNumberForm();
@@ -1220,7 +1240,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         password: password.trim(),
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       returnToMusicalNumberCatalog();
     } catch (error) {
       setManagerError(
@@ -1303,7 +1323,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         size: uploadedAudio.size,
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       resetMusicalNumberAudioForm();
     } catch (error) {
       setManagerError(error instanceof Error ? error.message : 'No se pudo subir el audio.');
@@ -1338,7 +1358,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         guideRoles: musicalNumberGuideRoles,
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       resetMusicalNumberAudioForm();
     } catch (error) {
       setManagerError(
@@ -1384,7 +1404,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         size: uploadedAudio.size,
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       resetMusicalNumberAudioForm();
     } catch (error) {
       setManagerError(
@@ -1416,7 +1436,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         password: password.trim(),
       });
 
-      onManifestUpdated(manifest);
+      await refreshSharedManifest(manifest);
       if (editingMusicalNumberAudioId === audioId) {
         resetMusicalNumberAudioForm();
       }

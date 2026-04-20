@@ -277,6 +277,7 @@ export const RehearsalView: React.FC<Props> = ({
     lineStateLabel,
     startListening,
     stopListening,
+    releaseListening,
   } = useSilenceAdvance({
     enabledForCurrentLine: shouldArmListeningForCurrentLine,
     lineKey: currentDialogueKey,
@@ -296,7 +297,7 @@ export const RehearsalView: React.FC<Props> = ({
       setRehearsalMediaStatus(null);
       setCompatibilityMessage(reasonMessage);
       setShowCompatibilityInfo(false);
-      await stopListening();
+      await releaseListening();
 
       try {
         await AsyncStorage.setItem(REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY, storedValue);
@@ -304,7 +305,7 @@ export const RehearsalView: React.FC<Props> = ({
         console.error('Error guardando compatibilidad de audio', error);
       }
     },
-    [stopListening]
+    [releaseListening]
   );
 
   const enableAutoListenForDevice = useCallback(async () => {
@@ -760,7 +761,7 @@ export const RehearsalView: React.FC<Props> = ({
   const handleExit = () => {
     stopRehearsalSpeech();
     disposeSongAudio();
-    void stopListening();
+    void releaseListening();
     onExit();
   };
 
@@ -878,8 +879,8 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalMediaStatus(null);
     setCompatibilityMessage(null);
     setShowCompatibilityInfo(false);
-    await stopListening();
-  }, [stopListening]);
+    await releaseListening();
+  }, [releaseListening]);
 
   const handlePreflightMissedVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'auto-initial') {

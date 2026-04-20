@@ -49,12 +49,16 @@ export const replaceSharedScriptIdInUrl = (shareId: string | null) => {
 };
 
 export const fetchSharedScript = async (shareId: string) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}?shareId=${encodeURIComponent(shareId)}`, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const response = await fetch(
+    `${SHARED_SCRIPT_API_URL}?shareId=${encodeURIComponent(shareId)}&ts=${Date.now()}`,
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    }
+  );
 
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response));
@@ -84,11 +88,12 @@ export const publishSharedScript = async (input: SharedScriptPublishInput) => {
 };
 
 export const fetchSharedScriptList = async () => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/list`, {
+  const response = await fetch(`${SHARED_SCRIPT_API_URL}/list?ts=${Date.now()}`, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
     },
+    cache: 'no-store',
   });
 
   if (!response.ok) {
