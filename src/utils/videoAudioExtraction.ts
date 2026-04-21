@@ -5,6 +5,59 @@ type WindowWithWebkitAudioContext = Window &
     webkitAudioContext?: typeof AudioContext;
   };
 
+const formatFileSize = (size: number) => {
+  if (!Number.isFinite(size) || size <= 0) {
+    return 'tamano-desconocido';
+  }
+
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  if (size >= 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${size} B`;
+};
+
+const getFileExtension = (fileName: string | undefined) => {
+  if (!fileName) {
+    return 'sin-extension';
+  }
+
+  const match = /\.([^.]+)$/.exec(fileName.trim());
+  return match?.[1]?.toLowerCase() ?? 'sin-extension';
+};
+
+const buildDiagnosticsLabel = (videoFile: BlobWithMetadata) => {
+  const fileName = videoFile.name?.trim() || 'sin-nombre';
+  const mimeType = videoFile.type?.trim() || 'mime-desconocido';
+  const extension = getFileExtension(videoFile.name);
+  const fileSize = formatFileSize(videoFile.size);
+
+  return `Archivo: ${fileName} · extension: ${extension} · MIME: ${mimeType} · tamano: ${fileSize}`;
+};
+
+const formatStepError = (step: string, error: unknown, videoFile: BlobWithMetadata) => {
+  const errorName =
+    error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+  const errorMessage =
+    error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
+  const details = [errorName, errorMessage].filter(Boolean).join(': ') || 'sin-detalle';
+  const baseMessage = `Fallo al ${step}. ${buildDiagnosticsLabel(videoFile)} · detalle: ${details}`;
+
+  const mimeType = videoFile.type?.trim().toLowerCase() || '';
+  const extension = getFileExtension(videoFile.name);
+  const likelyIPhoneVideo = mimeType === 'video/quicktime' || extension === 'mov';
+
+  if (step === 'decodificar el audio del video' && likelyIPhoneVideo) {
+    return `${baseMessage}. Pinta a video de iPhone (.mov / QuickTime) que este navegador reproduce pero no consigue decodificar para extraer audio.`;
+  }
+
+  return baseMessage;
+};
+
 const getAudioContextConstructor = () => {
   if (typeof window === 'undefined') {
     return null;
@@ -100,14 +153,31 @@ export const isVideoAsset = (file: BlobWithMetadata) =>
 export const extractAudioFileFromVideo = async (videoFile: BlobWithMetadata) => {
   const AudioContextConstructor = getAudioContextConstructor();
   if (!AudioContextConstructor) {
-    throw new Error('Este navegador no permite extraer audio de videos automaticamente.');
+    throw new Error(
+      `Este navegador no permite extraer audio de videos automaticamente. ${buildDiagnosticsLabel(
+        videoFile
+      )}`
+    );
   }
 
   const audioContext = new AudioContextConstructor();
 
   try {
-    const arrayBuffer = await videoFile.arrayBuffer();
-    const decodedAudio = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    let arrayBuffer: ArrayBuffer;
+
+    try {
+      arrayBuffer = await videoFile.arrayBuffer();
+    } catch (error) {
+      throw new Error(formatStepError('leer el video seleccionado', error, videoFile));
+    }
+
+    let decodedAudio: AudioBuffer;
+    try {
+      decodedAudio = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    } catch (error) {
+      throw new Error(formatStepError('decodificar el audio del video', error, videoFile));
+    }
+
     const wavBlob = encodeAudioBufferToWavBlob(decodedAudio);
     const nextFileName = changeFileExtension(videoFile.name ?? 'audio-extraido', 'wav');
     return createFileFromBlob(wavBlob, nextFileName);
@@ -115,7 +185,7 @@ export const extractAudioFileFromVideo = async (videoFile: BlobWithMetadata) => 
     const message =
       error instanceof Error && error.message.trim().length > 0
         ? error.message
-        : 'No se pudo extraer el audio del video.';
+        : `No se pudo extraer el audio del video. ${buildDiagnosticsLabel(videoFile)}`;
     throw new Error(`${message} Prueba con otro video o conviertelo manualmente a audio.`);
   } finally {
     await audioContext.close().catch(() => undefined);
