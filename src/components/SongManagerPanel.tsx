@@ -130,6 +130,11 @@ const buildDialogueEntryLabel = (line: Dialogue) => {
   return line.p;
 };
 
+const getMusicalNumberSortIndex = (musicalNumber: SharedMusicalNumberAsset) =>
+  typeof musicalNumber.startLineIndex === 'number' && musicalNumber.startLineIndex >= 0
+    ? musicalNumber.startLineIndex
+    : Number.MAX_SAFE_INTEGER;
+
 const buildMusicalNumberEntryMeta = (entry: MusicalNumberSceneEntry) =>
   entry.kind === 'song' ? 'Bloque de cancion' : 'Linea hablada';
 
@@ -288,6 +293,24 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [activePlaylistMode, setActivePlaylistMode] = useState<SongPlaybackMode | null>(null);
   const sharedSongs = useMemo(() => sharedScript?.songs ?? [], [sharedScript]);
   const musicalNumbers = useMemo(() => sharedScript?.musicalNumbers ?? [], [sharedScript]);
+  const orderedMusicalNumbers = useMemo(
+    () =>
+      [...musicalNumbers].sort((leftNumber, rightNumber) => {
+        const lineDelta =
+          getMusicalNumberSortIndex(leftNumber) - getMusicalNumberSortIndex(rightNumber);
+        if (lineDelta !== 0) {
+          return lineDelta;
+        }
+
+        const endDelta = leftNumber.endLineIndex - rightNumber.endLineIndex;
+        if (endDelta !== 0) {
+          return endDelta;
+        }
+
+        return leftNumber.title.localeCompare(rightNumber.title, 'es', { sensitivity: 'base' });
+      }),
+    [musicalNumbers]
+  );
   const musicalNumberAudioCount = useMemo(
     () => musicalNumbers.reduce((count, musicalNumber) => count + musicalNumber.audios.length, 0),
     [musicalNumbers]
@@ -379,7 +402,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const practiceMusicalNumbers = useMemo<PracticeMusicalNumberAsset[]>(
     () =>
-      musicalNumbers.map((musicalNumber) => {
+      orderedMusicalNumbers.map((musicalNumber) => {
         const cueSongs = buildMusicalNumberCueSongs(musicalNumber);
 
         return {
@@ -393,7 +416,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       buildMusicalNumberCueSongs,
       buildMusicalNumberRangeEntries,
       buildPracticeMusicalNumberAudios,
-      musicalNumbers,
+      orderedMusicalNumbers,
     ]
   );
 
@@ -433,18 +456,18 @@ export const SongManagerPanel: React.FC<Props> = ({
   }, [sharedSongs]);
 
   useEffect(() => {
-    if (!musicalNumbers.length) {
+    if (!orderedMusicalNumbers.length) {
       setSelectedMusicalNumberId(null);
       return;
     }
 
     setSelectedMusicalNumberId((previousMusicalNumberId) =>
       previousMusicalNumberId &&
-      musicalNumbers.some((musicalNumber) => musicalNumber.id === previousMusicalNumberId)
+      orderedMusicalNumbers.some((musicalNumber) => musicalNumber.id === previousMusicalNumberId)
         ? previousMusicalNumberId
         : null
     );
-  }, [musicalNumbers]);
+  }, [orderedMusicalNumbers]);
 
   useEffect(() => {
     setAudioLabel('');
@@ -478,8 +501,11 @@ export const SongManagerPanel: React.FC<Props> = ({
       return null;
     }
 
-    return musicalNumbers.find((musicalNumber) => musicalNumber.id === selectedMusicalNumberId) ?? null;
-  }, [musicalNumbers, selectedMusicalNumberId]);
+    return (
+      orderedMusicalNumbers.find((musicalNumber) => musicalNumber.id === selectedMusicalNumberId) ??
+      null
+    );
+  }, [orderedMusicalNumbers, selectedMusicalNumberId]);
 
   const selectedPracticeMusicalNumber = useMemo<PracticeMusicalNumberAsset | null>(() => {
     if (viewMode !== 'my-songs' && viewMode !== 'all-songs') {
@@ -2354,10 +2380,10 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const renderMusicalNumberList = () => (
     <View style={styles.songList}>
-      {musicalNumbers.map((musicalNumber) => {
-        const isSelected = selectedMusicalNumber?.id === musicalNumber.id;
-        const cueSongs = sharedScript
-          ? musicalNumber.songIds
+      {orderedMusicalNumbers.map((musicalNumber) => {
+          const isSelected = selectedMusicalNumber?.id === musicalNumber.id;
+          const cueSongs = sharedScript
+            ? musicalNumber.songIds
               .map((songId) => sharedScript.songs.find((song) => song.id === songId) ?? null)
               .filter((song): song is SharedSongAsset => Boolean(song))
           : [];
@@ -3121,7 +3147,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                         </View>
                       ) : null}
 
-                      {musicalNumbers.length > 0 ? (
+                      {orderedMusicalNumbers.length > 0 ? (
                         renderMusicalNumberList()
                       ) : (
                         <Text style={styles.infoText}>
