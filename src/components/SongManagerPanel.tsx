@@ -30,6 +30,7 @@ import {
 } from '../utils/sharedSongs';
 import { Dialogue } from '../types/script';
 import { isSceneMarker, isSongCue } from '../utils/scriptScenes';
+import { extractAudioFileFromVideo, isVideoAsset } from '../utils/videoAudioExtraction';
 
 interface Props {
   sharedScript: SharedScriptManifest | null;
@@ -206,15 +207,26 @@ const pickFreshestManifest = (
   return refreshedManifest;
 };
 
-const resolveAssetBlob = async (asset: DocumentPicker.DocumentPickerAsset) => {
+const resolveAssetUploadFile = async (asset: DocumentPicker.DocumentPickerAsset) => {
   const assetWithFile = asset as DocumentPicker.DocumentPickerAsset & { file?: File };
 
   if (assetWithFile.file instanceof File) {
-    return assetWithFile.file;
+    return isVideoAsset(assetWithFile.file)
+      ? extractAudioFileFromVideo(assetWithFile.file)
+      : assetWithFile.file;
   }
 
   const response = await fetch(asset.uri);
-  return response.blob();
+  const fetchedBlob = await response.blob();
+  const resolvedBlob =
+    !fetchedBlob.type && typeof asset.mimeType === 'string' && asset.mimeType.trim().length > 0
+      ? new Blob([await fetchedBlob.arrayBuffer()], { type: asset.mimeType })
+      : fetchedBlob;
+  const blob = resolvedBlob as Blob & { name?: string };
+  blob.name =
+    typeof asset.name === 'string' && asset.name.trim().length > 0 ? asset.name.trim() : 'audio';
+
+  return isVideoAsset(blob) ? extractAudioFileFromVideo(blob) : blob;
 };
 
 export const SongManagerPanel: React.FC<Props> = ({
@@ -1190,7 +1202,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
 
     const result = await DocumentPicker.getDocumentAsync({
-      type: ['audio/*', 'audio/mp4', 'video/mp4'],
+      type: ['audio/*', 'audio/mp4', 'video/*'],
       copyToCacheDirectory: false,
     });
 
@@ -1198,7 +1210,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       return null;
     }
 
-    const file = await resolveAssetBlob(result.assets[0]);
+    const file = await resolveAssetUploadFile(result.assets[0]);
     setUploadProgress(0);
 
     return uploadSharedSongAudio({
@@ -1491,7 +1503,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
 
     const result = await DocumentPicker.getDocumentAsync({
-      type: ['audio/*', 'audio/mp4', 'video/mp4'],
+      type: ['audio/*', 'audio/mp4', 'video/*'],
       copyToCacheDirectory: false,
     });
 
@@ -1499,7 +1511,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       return null;
     }
 
-    const file = await resolveAssetBlob(result.assets[0]);
+    const file = await resolveAssetUploadFile(result.assets[0]);
     setMusicalNumberUploadProgress(0);
 
     return uploadSharedSongAudio({
@@ -2273,7 +2285,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                 disabled={isMusicalNumberUploading}
               >
                 <Text style={styles.primaryActionText}>
-                  {isMusicalNumberUploading ? 'Subiendo audio...' : 'Seleccionar audio'}
+                  {isMusicalNumberUploading ? 'Subiendo audio...' : 'Seleccionar audio o video'}
                 </Text>
               </TouchableOpacity>
             )}
@@ -2912,7 +2924,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                             disabled={isUploading}
                           >
                             <Text style={styles.primaryActionText}>
-                              {isUploading ? 'Subiendo audio...' : 'Seleccionar audio'}
+                              {isUploading ? 'Subiendo audio...' : 'Seleccionar audio o video'}
                             </Text>
                           </TouchableOpacity>
                         )}
@@ -3232,7 +3244,9 @@ export const SongManagerPanel: React.FC<Props> = ({
                                   disabled={isMusicalNumberUploading}
                                 >
                                   <Text style={styles.primaryActionText}>
-                                    {isMusicalNumberUploading ? 'Subiendo audio...' : 'Seleccionar audio'}
+                                    {isMusicalNumberUploading
+                                      ? 'Subiendo audio...'
+                                      : 'Seleccionar audio o video'}
                                   </Text>
                                 </TouchableOpacity>
                               )}
