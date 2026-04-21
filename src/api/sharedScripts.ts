@@ -15,6 +15,39 @@ import type {
 
 const SHARED_SCRIPT_API_URL = '/api/shared-script';
 
+const buildProtectedApiUrl = (
+  path = '',
+  searchParams?: Record<string, string | number | null | undefined>
+) => {
+  const baseUrl =
+    typeof window !== 'undefined'
+      ? new URL(`${SHARED_SCRIPT_API_URL}${path}`, window.location.origin)
+      : new URL(`http://localhost${SHARED_SCRIPT_API_URL}${path}`);
+
+  if (typeof window !== 'undefined') {
+    const currentParams = new URLSearchParams(window.location.search);
+    currentParams.forEach((value, key) => {
+      if (!baseUrl.searchParams.has(key)) {
+        baseUrl.searchParams.append(key, value);
+      }
+    });
+  }
+
+  if (searchParams) {
+    Object.entries(searchParams).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') {
+        return;
+      }
+
+      baseUrl.searchParams.set(key, String(value));
+    });
+  }
+
+  return typeof window !== 'undefined'
+    ? `${baseUrl.pathname}${baseUrl.search}`
+    : `${SHARED_SCRIPT_API_URL}${path}${baseUrl.search}`;
+};
+
 const parseErrorMessage = async (response: Response) => {
   try {
     const payload = (await response.json()) as { error?: string };
@@ -49,16 +82,14 @@ export const replaceSharedScriptIdInUrl = (shareId: string | null) => {
 };
 
 export const fetchSharedScript = async (shareId: string) => {
-  const response = await fetch(
-    `${SHARED_SCRIPT_API_URL}?shareId=${encodeURIComponent(shareId)}&ts=${Date.now()}`,
-    {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    }
-  );
+  const response = await fetch(buildProtectedApiUrl('', { shareId, ts: Date.now() }), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+    cache: 'no-store',
+    credentials: 'include',
+  });
 
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response));
@@ -68,12 +99,13 @@ export const fetchSharedScript = async (shareId: string) => {
 };
 
 export const publishSharedScript = async (input: SharedScriptPublishInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/publish`, {
+  const response = await fetch(buildProtectedApiUrl('/publish'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -88,12 +120,13 @@ export const publishSharedScript = async (input: SharedScriptPublishInput) => {
 };
 
 export const fetchSharedScriptList = async () => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/list?ts=${Date.now()}`, {
+  const response = await fetch(buildProtectedApiUrl('/list', { ts: Date.now() }), {
     method: 'GET',
     headers: {
       Accept: 'application/json',
     },
     cache: 'no-store',
+    credentials: 'include',
   });
 
   if (!response.ok) {
@@ -104,12 +137,13 @@ export const fetchSharedScriptList = async () => {
 };
 
 export const verifySongAdminPassword = async (password: string) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-auth`, {
+  const response = await fetch(buildProtectedApiUrl('/song-auth'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify({ password }),
   });
 
@@ -121,12 +155,13 @@ export const verifySongAdminPassword = async (password: string) => {
 };
 
 export const registerSharedSongAudio = async (input: SharedSongAudioRegistrationInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
+  const response = await fetch(buildProtectedApiUrl('/song-audio'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -138,12 +173,13 @@ export const registerSharedSongAudio = async (input: SharedSongAudioRegistration
 };
 
 export const updateSharedSongAudio = async (input: SharedSongAudioUpdateInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
+  const response = await fetch(buildProtectedApiUrl('/song-audio'), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -155,12 +191,13 @@ export const updateSharedSongAudio = async (input: SharedSongAudioUpdateInput) =
 };
 
 export const deleteSharedSongAudio = async (input: SharedSongAudioDeleteInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/song-audio`, {
+  const response = await fetch(buildProtectedApiUrl('/song-audio'), {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -172,12 +209,13 @@ export const deleteSharedSongAudio = async (input: SharedSongAudioDeleteInput) =
 };
 
 export const createSharedMusicalNumber = async (input: SharedMusicalNumberCreateInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number`, {
+  const response = await fetch(buildProtectedApiUrl('/musical-number'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -189,12 +227,13 @@ export const createSharedMusicalNumber = async (input: SharedMusicalNumberCreate
 };
 
 export const updateSharedMusicalNumber = async (input: SharedMusicalNumberUpdateInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number`, {
+  const response = await fetch(buildProtectedApiUrl('/musical-number'), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -206,12 +245,13 @@ export const updateSharedMusicalNumber = async (input: SharedMusicalNumberUpdate
 };
 
 export const deleteSharedMusicalNumber = async (input: SharedMusicalNumberDeleteInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number`, {
+  const response = await fetch(buildProtectedApiUrl('/musical-number'), {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -225,12 +265,13 @@ export const deleteSharedMusicalNumber = async (input: SharedMusicalNumberDelete
 export const registerSharedMusicalNumberAudio = async (
   input: SharedMusicalNumberAudioRegistrationInput
 ) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number-audio`, {
+  const response = await fetch(buildProtectedApiUrl('/musical-number-audio'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -242,12 +283,13 @@ export const registerSharedMusicalNumberAudio = async (
 };
 
 export const updateSharedMusicalNumberAudio = async (input: SharedMusicalNumberAudioUpdateInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number-audio`, {
+  const response = await fetch(buildProtectedApiUrl('/musical-number-audio'), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 
@@ -259,12 +301,13 @@ export const updateSharedMusicalNumberAudio = async (input: SharedMusicalNumberA
 };
 
 export const deleteSharedMusicalNumberAudio = async (input: SharedMusicalNumberAudioDeleteInput) => {
-  const response = await fetch(`${SHARED_SCRIPT_API_URL}/musical-number-audio`, {
+  const response = await fetch(buildProtectedApiUrl('/musical-number-audio'), {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(input),
   });
 

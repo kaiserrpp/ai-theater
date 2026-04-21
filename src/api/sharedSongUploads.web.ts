@@ -1,6 +1,37 @@
 const BLOB_API_URL = 'https://vercel.com/api/blob';
 const BLOB_API_VERSION = '12';
 
+const buildProtectedApiUrl = (
+  path: string,
+  searchParams?: Record<string, string | number | null | undefined>
+) => {
+  const baseUrl =
+    typeof window !== 'undefined'
+      ? new URL(path, window.location.origin)
+      : new URL(`http://localhost${path}`);
+
+  if (typeof window !== 'undefined') {
+    const currentParams = new URLSearchParams(window.location.search);
+    currentParams.forEach((value, key) => {
+      if (!baseUrl.searchParams.has(key)) {
+        baseUrl.searchParams.append(key, value);
+      }
+    });
+  }
+
+  if (searchParams) {
+    Object.entries(searchParams).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') {
+        return;
+      }
+
+      baseUrl.searchParams.set(key, String(value));
+    });
+  }
+
+  return typeof window !== 'undefined' ? `${baseUrl.pathname}${baseUrl.search}` : `${path}${baseUrl.search}`;
+};
+
 export interface SharedSongUploadResult {
   url: string;
   pathname: string;
@@ -44,11 +75,12 @@ const sanitizeFileName = (value: string) =>
 
 const fetchSharedStorageNamespace = async () => {
   if (!sharedStorageNamespacePromise) {
-    sharedStorageNamespacePromise = fetch('/api/shared-script/storage-context', {
+    sharedStorageNamespacePromise = fetch(buildProtectedApiUrl('/api/shared-script/storage-context'), {
       method: 'GET',
       headers: {
         Accept: 'application/json',
       },
+      credentials: 'include',
     })
       .then(async (response) => {
         if (!response.ok) {
@@ -85,12 +117,13 @@ const fetchClientToken = async ({
   targetId: string;
   targetType: 'song' | 'musical-number';
 }) => {
-  const response = await fetch('/api/shared-script/song-upload', {
+  const response = await fetch(buildProtectedApiUrl('/api/shared-script/song-upload'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-song-admin-password': password,
     },
+    credentials: 'include',
     body: JSON.stringify({
       type: 'blob.generate-client-token',
       payload: {
