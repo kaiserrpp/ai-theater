@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { uploadSharedSongAudio } from '../api/sharedSongUploads';
+import { extractSharedSongAudioFromVideo, uploadSharedSongAudio } from '../api/sharedSongUploads';
 import {
   createSharedMusicalNumber,
   deleteSharedMusicalNumber,
@@ -30,7 +30,6 @@ import {
 } from '../utils/sharedSongs';
 import { Dialogue } from '../types/script';
 import { isSceneMarker, isSongCue } from '../utils/scriptScenes';
-import { extractAudioFileFromVideo, isVideoAsset } from '../utils/videoAudioExtraction';
 
 interface Props {
   sharedScript: SharedScriptManifest | null;
@@ -211,9 +210,7 @@ const resolveAssetUploadFile = async (asset: DocumentPicker.DocumentPickerAsset)
   const assetWithFile = asset as DocumentPicker.DocumentPickerAsset & { file?: File };
 
   if (assetWithFile.file instanceof File) {
-    return isVideoAsset(assetWithFile.file)
-      ? extractAudioFileFromVideo(assetWithFile.file)
-      : assetWithFile.file;
+    return assetWithFile.file;
   }
 
   const response = await fetch(asset.uri);
@@ -226,8 +223,11 @@ const resolveAssetUploadFile = async (asset: DocumentPicker.DocumentPickerAsset)
   blob.name =
     typeof asset.name === 'string' && asset.name.trim().length > 0 ? asset.name.trim() : 'audio';
 
-  return isVideoAsset(blob) ? extractAudioFileFromVideo(blob) : blob;
+  return blob;
 };
+
+const isVideoAsset = (file: Blob & { type?: string }) =>
+  typeof file.type === 'string' && file.type.trim().toLowerCase().startsWith('video/');
 
 export const SongManagerPanel: React.FC<Props> = ({
   sharedScript,
@@ -1212,14 +1212,31 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     const file = await resolveAssetUploadFile(result.assets[0]);
     setUploadProgress(0);
-
-    return uploadSharedSongAudio({
+    const uploadedSource = await uploadSharedSongAudio({
       shareId: sharedScript.shareId,
       targetId: selectedSong.id,
       targetType: 'song',
       file,
       password: password.trim(),
       onUploadProgress: (percentage) => setUploadProgress(Math.round(percentage)),
+    });
+
+    if (!isVideoAsset(file)) {
+      return uploadedSource;
+    }
+
+    setUploadProgress(null);
+    setManagerError('Convirtiendo el video a audio en servidor...');
+
+    return extractSharedSongAudioFromVideo({
+      shareId: sharedScript.shareId,
+      targetId: selectedSong.id,
+      targetType: 'song',
+      password: password.trim(),
+      sourceUrl: uploadedSource.url,
+      sourcePathname: uploadedSource.pathname,
+      sourceFileName: uploadedSource.fileName,
+      sourceContentType: uploadedSource.contentType,
     });
   };
 
@@ -1513,14 +1530,31 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     const file = await resolveAssetUploadFile(result.assets[0]);
     setMusicalNumberUploadProgress(0);
-
-    return uploadSharedSongAudio({
+    const uploadedSource = await uploadSharedSongAudio({
       shareId: sharedScript.shareId,
       targetId: selectedMusicalNumber.id,
       targetType: 'musical-number',
       file,
       password: password.trim(),
       onUploadProgress: (percentage) => setMusicalNumberUploadProgress(Math.round(percentage)),
+    });
+
+    if (!isVideoAsset(file)) {
+      return uploadedSource;
+    }
+
+    setMusicalNumberUploadProgress(null);
+    setManagerError('Convirtiendo el video a audio en servidor...');
+
+    return extractSharedSongAudioFromVideo({
+      shareId: sharedScript.shareId,
+      targetId: selectedMusicalNumber.id,
+      targetType: 'musical-number',
+      password: password.trim(),
+      sourceUrl: uploadedSource.url,
+      sourcePathname: uploadedSource.pathname,
+      sourceFileName: uploadedSource.fileName,
+      sourceContentType: uploadedSource.contentType,
     });
   };
 

@@ -40,6 +40,17 @@ export interface SharedSongUploadResult {
   size: number | null;
 }
 
+interface ExtractSharedSongVideoAudioInput {
+  shareId: string;
+  targetId: string;
+  targetType?: 'song' | 'musical-number';
+  password: string;
+  sourceUrl: string;
+  sourcePathname?: string | null;
+  sourceFileName?: string | null;
+  sourceContentType?: string | null;
+}
+
 interface UploadSharedSongAudioInput {
   shareId: string;
   targetId: string;
@@ -247,4 +258,41 @@ export const uploadSharedSongAudio = async ({
     contentType: blob.contentType ?? contentType ?? null,
     size: fileSize,
   };
+};
+
+export const extractSharedSongAudioFromVideo = async ({
+  shareId,
+  targetId,
+  targetType = 'song',
+  password,
+  sourceUrl,
+  sourcePathname,
+  sourceFileName,
+  sourceContentType,
+}: ExtractSharedSongVideoAudioInput): Promise<SharedSongUploadResult> => {
+  const response = await fetch(buildProtectedApiUrl('/api/shared-script/video-audio-extract'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify({
+      shareId,
+      targetId,
+      targetType,
+      password,
+      sourceUrl,
+      sourcePathname,
+      sourceFileName,
+      sourceContentType,
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error || 'No se pudo extraer el audio del video en servidor.');
+  }
+
+  return (await response.json()) as SharedSongUploadResult;
 };
