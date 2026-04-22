@@ -3754,10 +3754,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   floatingPlaybackBar: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
+    marginHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
