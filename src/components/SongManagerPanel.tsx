@@ -247,7 +247,7 @@ export const SongManagerPanel: React.FC<Props> = ({
           position: 'fixed',
           left: 12,
           right: 12,
-          bottom: 12,
+          top: 12,
           zIndex: 1000,
         } as const)
       : null;
@@ -561,9 +561,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     };
   })();
 
-  const shouldShowFloatingPlaybackControls = Boolean(
-    (viewMode === 'my-songs' || viewMode === 'all-songs') && activePlaybackEntry
-  );
+  const shouldShowFloatingPlaybackControls = Boolean(activePlaybackEntry);
 
   const musicalNumberSceneOptions = useMemo<MusicalNumberSceneOption[]>(() => {
     if (!sharedScript) {
@@ -724,7 +722,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   ]);
 
   const activePlaylistDescription = useMemo(() => {
-    if (!activePlaylistMode || (viewMode !== 'my-songs' && viewMode !== 'all-songs')) {
+    if (!activePlaylistMode) {
       return null;
     }
 
@@ -1073,6 +1071,11 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
   }, [activePlaybackEntry, isPreviewAudioPaused, playingPreviewAudioId, previewAudioElement]);
 
+  const handleCloseFloatingPlayback = useCallback(() => {
+    stopPreviewAudio();
+    setPreviewAudioError(null);
+  }, [stopPreviewAudio]);
+
   const handlePlayPreviewAudio = useCallback(
     async (audio: SharedSongAudioAsset) => {
       if (!previewAudioElement) {
@@ -1206,14 +1209,12 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const handleSelectSong = (songId: string) => {
-    stopPreviewAudio();
     setSelectedSongId(songId);
     setIsSongPickerVisible(false);
     setPreviewAudioError(null);
   };
 
   const resetAudioForm = useCallback(() => {
-    stopPreviewAudio();
     setAudioLabel('');
     setAudioKind(DEFAULT_UPLOAD_KIND);
     setGuideRoles([]);
@@ -1221,7 +1222,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setManagerError(null);
     setIsUploadFormVisible(false);
     setEditingAudioId(null);
-  }, [stopPreviewAudio]);
+  }, []);
 
   const resetMusicalNumberForm = useCallback(() => {
     setMusicalNumberTitle('');
@@ -1234,17 +1235,15 @@ export const SongManagerPanel: React.FC<Props> = ({
   }, []);
 
   const resetMusicalNumberAudioForm = useCallback(() => {
-    stopPreviewAudio();
     setMusicalNumberAudioLabel('');
     setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
     setMusicalNumberGuideRoles([]);
     setMusicalNumberUploadProgress(null);
     setEditingMusicalNumberAudioId(null);
     setIsMusicalNumberAudioFormVisible(false);
-  }, [stopPreviewAudio]);
+  }, []);
 
   const returnToMusicalNumberCatalog = useCallback(() => {
-    stopPreviewAudio();
     resetAudioForm();
     resetMusicalNumberForm();
     resetMusicalNumberAudioForm();
@@ -1252,7 +1251,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setSelectedMusicalNumberId(null);
     setManagerError(null);
     setPreviewAudioError(null);
-  }, [resetAudioForm, resetMusicalNumberAudioForm, resetMusicalNumberForm, stopPreviewAudio]);
+  }, [resetAudioForm, resetMusicalNumberAudioForm, resetMusicalNumberForm]);
 
   const confirmMusicalNumberDeletion = useCallback(
     async (musicalNumber: SharedMusicalNumberAsset) => {
@@ -1299,7 +1298,6 @@ export const SongManagerPanel: React.FC<Props> = ({
   );
 
   const startEditingAudio = (audio: SharedSongAudioAsset) => {
-    stopPreviewAudio();
     setEditingAudioId(audio.id);
     setAudioLabel(audio.label);
     setAudioKind(audio.kind);
@@ -1509,7 +1507,6 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const handleSelectMusicalNumber = (musicalNumberId: string) => {
-    stopPreviewAudio();
     setSelectedMusicalNumberId((previousMusicalNumberId) =>
       previousMusicalNumberId === musicalNumberId ? null : musicalNumberId
     );
@@ -1672,7 +1669,6 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const startEditingMusicalNumberAudio = (audio: SharedSongAudioAsset) => {
-    stopPreviewAudio();
     setEditingMusicalNumberAudioId(audio.id);
     setMusicalNumberAudioLabel(audio.label);
     setMusicalNumberAudioKind(audio.kind);
@@ -1892,8 +1888,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setManagerError(null);
     setPasswordError(null);
     setPreviewAudioError(null);
-    stopPreviewAudio();
-  }, [stopPreviewAudio]);
+  }, []);
 
   const openViewMode = useCallback(
     (nextViewMode: SongManagerViewMode) => {
@@ -2681,7 +2676,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       ) : null}
 
       {!isPanelVisible ? null : (
-        <View style={[styles.panel, shouldShowFloatingPlaybackControls && styles.panelWithFloatingControls]}>
+        <View style={styles.panel}>
           {!sharedScript ? (
             <Text style={styles.infoText}>Comparte esta obra antes de gestionar sus canciones.</Text>
           ) : (
@@ -3407,67 +3402,73 @@ export const SongManagerPanel: React.FC<Props> = ({
               )}
                 </>
               )}
-              {shouldShowFloatingPlaybackControls && activePlaybackEntry ? (
-                <View
-                  style={[
-                    styles.floatingPlaybackBar,
-                    floatingPlaybackBarOverlayStyle as never,
-                  ]}
-                >
-                  <View style={styles.floatingPlaybackText}>
-                    <Text style={styles.floatingPlaybackTitle} numberOfLines={1}>
-                      {activePlaybackEntry.musicalNumber?.title || activePlaybackEntry.audio.label}
-                    </Text>
-                    <Text style={styles.floatingPlaybackMeta} numberOfLines={1}>
-                      {isPreviewAudioPaused
-                        ? 'Pausado'
-                        : activePlaylistMode
-                          ? activePlaylistDescription || 'Reproduciendo lista'
-                          : 'Reproduciendo cancion'}
-                    </Text>
-                  </View>
-                  <View style={styles.floatingPlaybackActions}>
-                    <TouchableOpacity
-                      style={[
-                        styles.floatingPlaybackButton,
-                        activePlaybackEntry.kind !== 'playlist' ||
-                        activePlaybackEntry.total < 2
-                          ? styles.floatingPlaybackButtonDisabled
-                          : null,
-                      ]}
-                      onPress={() => void handleNavigateFloatingPlaylist('previous')}
-                      disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
-                    >
-                      <MaterialCommunityIcons name="skip-previous" size={22} color="#fff" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.floatingPlaybackButton}
-                      onPress={() => void handleToggleFloatingPlayback()}
-                    >
-                      <MaterialCommunityIcons
-                        name={isPreviewAudioPaused ? 'play' : 'pause'}
-                        size={22}
-                        color="#fff"
-                      />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.floatingPlaybackButton,
-                        activePlaybackEntry.kind !== 'playlist' ||
-                        activePlaybackEntry.total < 2
-                          ? styles.floatingPlaybackButtonDisabled
-                          : null,
-                      ]}
-                      onPress={() => void handleNavigateFloatingPlaylist('next')}
-                      disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
-                    >
-                      <MaterialCommunityIcons name="skip-next" size={22} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : null}
         </View>
       )}
+      {shouldShowFloatingPlaybackControls && activePlaybackEntry ? (
+        <View
+          style={[
+            styles.floatingPlaybackBar,
+            floatingPlaybackBarOverlayStyle as never,
+          ]}
+        >
+          <View style={styles.floatingPlaybackText}>
+            <Text style={styles.floatingPlaybackTitle} numberOfLines={1}>
+              {activePlaybackEntry.musicalNumber?.title || activePlaybackEntry.audio.label}
+            </Text>
+            <Text style={styles.floatingPlaybackMeta} numberOfLines={1}>
+              {isPreviewAudioPaused
+                ? 'Pausado'
+                : activePlaylistMode
+                  ? activePlaylistDescription || 'Reproduciendo lista'
+                  : 'Reproduciendo cancion'}
+            </Text>
+          </View>
+          <View style={styles.floatingPlaybackActions}>
+            <TouchableOpacity
+              style={[
+                styles.floatingPlaybackButton,
+                activePlaybackEntry.kind !== 'playlist' ||
+                activePlaybackEntry.total < 2
+                  ? styles.floatingPlaybackButtonDisabled
+                  : null,
+              ]}
+              onPress={() => void handleNavigateFloatingPlaylist('previous')}
+              disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
+            >
+              <MaterialCommunityIcons name="skip-previous" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.floatingPlaybackButton}
+              onPress={() => void handleToggleFloatingPlayback()}
+            >
+              <MaterialCommunityIcons
+                name={isPreviewAudioPaused ? 'play' : 'pause'}
+                size={22}
+                color="#fff"
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.floatingPlaybackButton,
+                activePlaybackEntry.kind !== 'playlist' ||
+                activePlaybackEntry.total < 2
+                  ? styles.floatingPlaybackButtonDisabled
+                  : null,
+              ]}
+              onPress={() => void handleNavigateFloatingPlaylist('next')}
+              disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
+            >
+              <MaterialCommunityIcons name="skip-next" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.floatingPlaybackCloseButton}
+              onPress={handleCloseFloatingPlayback}
+            >
+              <MaterialCommunityIcons name="close" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 };
@@ -3499,9 +3500,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.9)',
     borderWidth: 1,
     borderColor: '#eadfca',
-  },
-  panelWithFloatingControls: {
-    paddingBottom: 104,
   },
   panelTitle: {
     fontSize: 18,
@@ -3806,6 +3804,14 @@ const styles = StyleSheet.create({
   },
   floatingPlaybackButtonDisabled: {
     opacity: 0.4,
+  },
+  floatingPlaybackCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   infoText: {
     textAlign: 'center',
