@@ -37,6 +37,8 @@ interface Props {
   myRoles: string[];
   onManifestUpdated: (manifest: SharedScriptManifest) => void;
   standalone?: boolean;
+  forcePanelVisible?: boolean;
+  hideLauncher?: boolean;
 }
 
 const DEFAULT_UPLOAD_KIND: SharedSongAudioKind = 'karaoke';
@@ -240,6 +242,8 @@ export const SongManagerPanel: React.FC<Props> = ({
   myRoles,
   onManifestUpdated,
   standalone = false,
+  forcePanelVisible,
+  hideLauncher = false,
 }) => {
   const floatingPlaybackBarOverlayStyle =
     Platform.OS === 'web'
@@ -1863,8 +1867,21 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const isDisabled = !sharedScript;
-  const isPanelVisible = standalone || isVisible;
+  const isPanelVisible = forcePanelVisible ?? (standalone || isVisible);
   const canManageSongs = Platform.OS === 'web';
+  const previousSharedScriptIdRef = useRef<string | null>(sharedScript?.shareId ?? null);
+
+  useEffect(() => {
+    const previousSharedScriptId = previousSharedScriptIdRef.current;
+    const currentSharedScriptId = sharedScript?.shareId ?? null;
+
+    if (previousSharedScriptId !== null && previousSharedScriptId !== currentSharedScriptId) {
+      stopPreviewAudio();
+      setPreviewAudioError(null);
+    }
+
+    previousSharedScriptIdRef.current = currentSharedScriptId;
+  }, [sharedScript?.shareId, stopPreviewAudio]);
 
   const resetManagerPanels = useCallback(() => {
     setIsSongPickerVisible(false);
@@ -2662,7 +2679,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   return (
     <View style={styles.wrapper}>
-      {!standalone ? (
+      {!standalone && !hideLauncher ? (
         <TouchableOpacity
           style={[styles.toggleButton, isDisabled && styles.toggleButtonDisabled]}
           onPress={() => setIsVisible((previousValue) => !previousValue)}

@@ -770,6 +770,31 @@ export const HomeScreen = () => {
     );
   };
 
+  const renderManagingSongsScreen = () => {
+    if (!displayScriptData) {
+      return null;
+    }
+
+    return (
+      <View style={styles.section}>
+        <View style={styles.scriptTitlePanel}>
+          <Text style={styles.status}>Gestion de canciones</Text>
+          <Text style={styles.obraTitle}>{displayScriptData.obra}</Text>
+        </View>
+
+        <View style={styles.songManagerScreen}>
+          <Text style={styles.selectionPreview}>
+            Vuelve a la obra cuando quieras. La reproduccion puede seguir sonando desde el mini reproductor.
+          </Text>
+        </View>
+
+        <TouchableOpacity onPress={() => setIsManagingSongs(false)} style={styles.btnBack}>
+          <Text style={styles.btnBackText}>Volver a la obra</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   if (isRehearsing && displayScriptData) {
     return (
       <ScreenWrapper>
@@ -787,43 +812,6 @@ export const HomeScreen = () => {
     );
   }
 
-  if (isManagingSongs && displayScriptData) {
-    return (
-      <ScreenWrapper>
-        <ScrollView contentContainerStyle={styles.container}>
-          <View style={styles.titlePanel}>
-            <Text style={styles.title}>AI-Theatre</Text>
-          </View>
-
-          <View style={styles.scriptTitlePanel}>
-            <Text style={styles.status}>Gestion de canciones</Text>
-            <Text style={styles.obraTitle}>{displayScriptData.obra}</Text>
-          </View>
-
-          {effectiveError && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{effectiveError}</Text>
-            </View>
-          )}
-
-          <View style={styles.songManagerScreen}>
-            <SongManagerPanel
-              sharedScript={sharedScript}
-              availableRoles={displayScriptData.personajes}
-              myRoles={myRoles}
-              onManifestUpdated={handleSharedScriptManifestUpdate}
-              standalone
-            />
-          </View>
-
-          <TouchableOpacity onPress={() => setIsManagingSongs(false)} style={styles.btnBack}>
-            <Text style={styles.btnBackText}>Volver a la obra</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </ScreenWrapper>
-    );
-  }
-
   return (
     <ScreenWrapper>
       <ScrollView contentContainerStyle={styles.container}>
@@ -837,6 +825,10 @@ export const HomeScreen = () => {
           </View>
         )}
 
+        {isManagingSongs && displayScriptData ? (
+          renderManagingSongsScreen()
+        ) : (
+          <>
         {pendingJob && !effectiveLoading && !scriptData && (
           <View style={styles.resumeBox}>
             <Text style={styles.resumeTitle}>Guion incompleto detectado</Text>
@@ -1333,6 +1325,19 @@ export const HomeScreen = () => {
             </View>
           </View>
         )}
+          </>
+        )}
+        {displayScriptData ? (
+          <SongManagerPanel
+            sharedScript={sharedScript}
+            availableRoles={displayScriptData.personajes}
+            myRoles={myRoles}
+            onManifestUpdated={handleSharedScriptManifestUpdate}
+            standalone={isManagingSongs}
+            forcePanelVisible={isManagingSongs}
+            hideLauncher
+          />
+        ) : null}
         <VersionBadge />
       </ScrollView>
     </ScreenWrapper>
