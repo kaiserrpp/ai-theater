@@ -241,6 +241,16 @@ export const SongManagerPanel: React.FC<Props> = ({
   onManifestUpdated,
   standalone = false,
 }) => {
+  const floatingPlaybackBarOverlayStyle =
+    Platform.OS === 'web'
+      ? ({
+          position: 'fixed',
+          left: 12,
+          right: 12,
+          bottom: 12,
+          zIndex: 1000,
+        } as const)
+      : null;
   const [isVisible, setIsVisible] = useState(false);
   const [viewMode, setViewMode] = useState<SongManagerViewMode>('menu');
   const [isUnlocked, setIsUnlocked] = useState(Boolean(cachedSongAdminPassword));
@@ -3398,7 +3408,12 @@ export const SongManagerPanel: React.FC<Props> = ({
                 </>
               )}
               {shouldShowFloatingPlaybackControls && activePlaybackEntry ? (
-                <View style={styles.floatingPlaybackBar}>
+                <View
+                  style={[
+                    styles.floatingPlaybackBar,
+                    floatingPlaybackBarOverlayStyle as never,
+                  ]}
+                >
                   <View style={styles.floatingPlaybackText}>
                     <Text style={styles.floatingPlaybackTitle} numberOfLines={1}>
                       {activePlaybackEntry.musicalNumber?.title || activePlaybackEntry.audio.label}
