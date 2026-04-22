@@ -523,6 +523,38 @@ export const SongManagerPanel: React.FC<Props> = ({
     );
   }, [musicalNumbersForCurrentView, selectedMusicalNumberId, viewMode]);
 
+  const activePlaybackEntry = (() => {
+    const session = playbackSessionRef.current;
+    if (!session) {
+      return null;
+    }
+
+    if (session.kind === 'playlist') {
+      const currentEntry = session.entries[session.index] ?? null;
+      return currentEntry
+        ? {
+            kind: 'playlist' as const,
+            audio: currentEntry.audio,
+            musicalNumber: currentEntry.musicalNumber,
+            index: session.index,
+            total: session.entries.length,
+          }
+        : null;
+    }
+
+    return {
+      kind: 'single' as const,
+      audio: session.audio,
+      musicalNumber: selectedPracticeMusicalNumber,
+      index: 0,
+      total: 1,
+    };
+  })();
+
+  const shouldShowFloatingPlaybackControls = Boolean(
+    (viewMode === 'my-songs' || viewMode === 'all-songs') && activePlaybackEntry
+  );
+
   const musicalNumberSceneOptions = useMemo<MusicalNumberSceneOption[]>(() => {
     if (!sharedScript) {
       return [];
@@ -1010,6 +1042,27 @@ export const SongManagerPanel: React.FC<Props> = ({
     [isPreviewAudioPaused, playingPreviewAudioId, previewAudioElement]
   );
 
+  const handleToggleFloatingPlayback = useCallback(async () => {
+    if (!previewAudioElement || !activePlaybackEntry) {
+      return;
+    }
+
+    if (playingPreviewAudioId === activePlaybackEntry.audio.id && !isPreviewAudioPaused) {
+      previewAudioElement.pause();
+      setIsPreviewAudioPaused(true);
+      return;
+    }
+
+    try {
+      setPreviewAudioError(null);
+      await previewAudioElement.play();
+      setPlayingPreviewAudioId(activePlaybackEntry.audio.id);
+      setIsPreviewAudioPaused(false);
+    } catch {
+      setPreviewAudioError('No se pudo reanudar este audio.');
+    }
+  }, [activePlaybackEntry, isPreviewAudioPaused, playingPreviewAudioId, previewAudioElement]);
+
   const handlePlayPreviewAudio = useCallback(
     async (audio: SharedSongAudioAsset) => {
       if (!previewAudioElement) {
@@ -1090,6 +1143,30 @@ export const SongManagerPanel: React.FC<Props> = ({
       startPreviewPlayback,
       stopPreviewAudio,
     ]
+  );
+
+  const handleNavigateFloatingPlaylist = useCallback(
+    async (direction: 'previous' | 'next') => {
+      const session = playbackSessionRef.current;
+      if (!previewAudioElement || !session || session.kind !== 'playlist' || session.entries.length < 2) {
+        return;
+      }
+
+      const delta = direction === 'previous' ? -1 : 1;
+      const nextIndex = (session.index + delta + session.entries.length) % session.entries.length;
+      const nextEntry = session.entries[nextIndex];
+
+      setPreviewAudioError(null);
+      cancelQueuedReplay(false);
+      stopPreviewAudio({ cancelLoop: false });
+      playbackSessionRef.current = { ...session, index: nextIndex };
+      setActivePlaylistMode(session.mode);
+      setSelectedMusicalNumberId(nextEntry.musicalNumber.id);
+
+      const cycleId = replayCycleRef.current;
+      await startPreviewPlayback(nextEntry.audio, cycleId);
+    },
+    [cancelQueuedReplay, previewAudioElement, startPreviewPlayback, stopPreviewAudio]
   );
 
   useEffect(() => () => {
@@ -2594,7 +2671,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       ) : null}
 
       {!isPanelVisible ? null : (
-        <View style={styles.panel}>
+        <View style={[styles.panel, shouldShowFloatingPlaybackControls && styles.panelWithFloatingControls]}>
           {!sharedScript ? (
             <Text style={styles.infoText}>Comparte esta obra antes de gestionar sus canciones.</Text>
           ) : (
@@ -3318,8 +3395,62 @@ export const SongManagerPanel: React.FC<Props> = ({
                   )}
                 </>
               )}
-            </>
-          )}
+                </>
+              )}
+              {shouldShowFloatingPlaybackControls && activePlaybackEntry ? (
+                <View style={styles.floatingPlaybackBar}>
+                  <View style={styles.floatingPlaybackText}>
+                    <Text style={styles.floatingPlaybackTitle} numberOfLines={1}>
+                      {activePlaybackEntry.musicalNumber?.title || activePlaybackEntry.audio.label}
+                    </Text>
+                    <Text style={styles.floatingPlaybackMeta} numberOfLines={1}>
+                      {isPreviewAudioPaused
+                        ? 'Pausado'
+                        : activePlaylistMode
+                          ? activePlaylistDescription || 'Reproduciendo lista'
+                          : 'Reproduciendo cancion'}
+                    </Text>
+                  </View>
+                  <View style={styles.floatingPlaybackActions}>
+                    <TouchableOpacity
+                      style={[
+                        styles.floatingPlaybackButton,
+                        activePlaybackEntry.kind !== 'playlist' ||
+                        activePlaybackEntry.total < 2
+                          ? styles.floatingPlaybackButtonDisabled
+                          : null,
+                      ]}
+                      onPress={() => void handleNavigateFloatingPlaylist('previous')}
+                      disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
+                    >
+                      <MaterialCommunityIcons name="skip-previous" size={22} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.floatingPlaybackButton}
+                      onPress={() => void handleToggleFloatingPlayback()}
+                    >
+                      <MaterialCommunityIcons
+                        name={isPreviewAudioPaused ? 'play' : 'pause'}
+                        size={22}
+                        color="#fff"
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.floatingPlaybackButton,
+                        activePlaybackEntry.kind !== 'playlist' ||
+                        activePlaybackEntry.total < 2
+                          ? styles.floatingPlaybackButtonDisabled
+                          : null,
+                      ]}
+                      onPress={() => void handleNavigateFloatingPlaylist('next')}
+                      disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
+                    >
+                      <MaterialCommunityIcons name="skip-next" size={22} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
         </View>
       )}
     </View>
@@ -3353,6 +3484,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.9)',
     borderWidth: 1,
     borderColor: '#eadfca',
+  },
+  panelWithFloatingControls: {
+    paddingBottom: 104,
   },
   panelTitle: {
     fontSize: 18,
@@ -3605,6 +3739,58 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 6,
+  },
+  floatingPlaybackBar: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(95, 12, 20, 0.22)',
+    backgroundColor: 'rgba(95, 12, 20, 0.92)',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  floatingPlaybackText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  floatingPlaybackTitle: {
+    color: '#fffaf2',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  floatingPlaybackMeta: {
+    color: 'rgba(255, 245, 230, 0.82)',
+    fontSize: 12.5,
+  },
+  floatingPlaybackActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  floatingPlaybackButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  floatingPlaybackButtonDisabled: {
+    opacity: 0.4,
   },
   infoText: {
     textAlign: 'center',
