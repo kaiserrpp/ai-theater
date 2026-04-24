@@ -1,6 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Alert, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { extractSharedSongAudioFromVideo, uploadSharedSongAudio } from '../api/sharedSongUploads';
 import {
@@ -259,10 +260,9 @@ export const SongManagerPanel: React.FC<Props> = ({
     Platform.OS === 'web'
       ? ({
           position: 'fixed',
-          left: 12,
-          right: 12,
+          right: 18,
           bottom: 18,
-          zIndex: 990,
+          zIndex: 2000,
         } as const)
       : null;
   const [isVisible, setIsVisible] = useState(false);
@@ -2695,6 +2695,40 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
   void _renderSongPracticeDetailLegacy;
 
+  const floatingMusicalNumberActions = shouldShowFloatingMusicalNumberActions ? (
+    <View
+      style={[
+        styles.floatingMusicalNumberActionsBar,
+        floatingMusicalNumberActionsOverlayStyle as never,
+      ]}
+    >
+      <TouchableOpacity
+        style={[
+          styles.floatingMusicalNumberActionButton,
+          styles.floatingMusicalNumberCancelButton,
+          isSavingMusicalNumber && styles.buttonDisabled,
+        ]}
+        onPress={resetMusicalNumberForm}
+        disabled={isSavingMusicalNumber}
+      >
+        <Text style={styles.floatingMusicalNumberCancelText}>Cancelar</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.floatingMusicalNumberActionButton,
+          styles.floatingMusicalNumberSaveButton,
+          isSavingMusicalNumber && styles.buttonDisabled,
+        ]}
+        onPress={() => void handleSaveMusicalNumber()}
+        disabled={isSavingMusicalNumber}
+      >
+        <Text style={styles.floatingMusicalNumberSaveText}>
+          {isSavingMusicalNumber ? 'Guardando...' : 'Guardar'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  ) : null;
+
   return (
     <View style={styles.wrapper}>
       {!standalone && !hideLauncher ? (
@@ -3498,39 +3532,9 @@ export const SongManagerPanel: React.FC<Props> = ({
           </View>
         </View>
       ) : null}
-      {shouldShowFloatingMusicalNumberActions ? (
-        <View
-          style={[
-            styles.floatingMusicalNumberActionsBar,
-            floatingMusicalNumberActionsOverlayStyle as never,
-          ]}
-        >
-          <TouchableOpacity
-            style={[
-              styles.floatingMusicalNumberActionButton,
-              styles.floatingMusicalNumberCancelButton,
-              isSavingMusicalNumber && styles.buttonDisabled,
-            ]}
-            onPress={resetMusicalNumberForm}
-            disabled={isSavingMusicalNumber}
-          >
-            <Text style={styles.floatingMusicalNumberCancelText}>Cancelar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.floatingMusicalNumberActionButton,
-              styles.floatingMusicalNumberSaveButton,
-              isSavingMusicalNumber && styles.buttonDisabled,
-            ]}
-            onPress={() => void handleSaveMusicalNumber()}
-            disabled={isSavingMusicalNumber}
-          >
-            <Text style={styles.floatingMusicalNumberSaveText}>
-              {isSavingMusicalNumber ? 'Guardando...' : 'Guardar numero musical'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+      {floatingMusicalNumberActions && Platform.OS === 'web' && typeof document !== 'undefined'
+        ? createPortal(floatingMusicalNumberActions, document.body)
+        : floatingMusicalNumberActions}
     </View>
   );
 };
@@ -3876,7 +3880,8 @@ const styles = StyleSheet.create({
     height: 84,
   },
   floatingMusicalNumberActionsBar: {
-    marginHorizontal: 12,
+    width: 304,
+    maxWidth: '92%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
