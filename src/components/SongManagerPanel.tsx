@@ -255,6 +255,16 @@ export const SongManagerPanel: React.FC<Props> = ({
           zIndex: 1000,
         } as const)
       : null;
+  const floatingMusicalNumberActionsOverlayStyle =
+    Platform.OS === 'web'
+      ? ({
+          position: 'fixed',
+          left: 12,
+          right: 12,
+          bottom: 18,
+          zIndex: 990,
+        } as const)
+      : null;
   const [isVisible, setIsVisible] = useState(false);
   const [viewMode, setViewMode] = useState<SongManagerViewMode>('menu');
   const [isUnlocked, setIsUnlocked] = useState(Boolean(cachedSongAdminPassword));
@@ -1869,6 +1879,14 @@ export const SongManagerPanel: React.FC<Props> = ({
   const isDisabled = !sharedScript;
   const isPanelVisible = forcePanelVisible ?? (standalone || isVisible);
   const canManageSongs = Platform.OS === 'web';
+  const canSaveMusicalNumberForm =
+    Boolean(musicalNumberTitle.trim()) &&
+    Boolean(musicalNumberSceneTitle) &&
+    Boolean(selectedMusicalNumberStartEntry) &&
+    Boolean(selectedMusicalNumberEndEntry) &&
+    selectedMusicalNumberFormSongs.length > 0;
+  const shouldShowFloatingMusicalNumberActions =
+    isMusicalNumberFormVisible && canSaveMusicalNumberForm;
   const previousSharedScriptIdRef = useRef<string | null>(sharedScript?.shareId ?? null);
 
   useEffect(() => {
@@ -3211,38 +3229,32 @@ export const SongManagerPanel: React.FC<Props> = ({
                             </Text>
                           ) : null}
                           {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
-                          <TouchableOpacity
-                            style={[
-                              styles.primaryAction,
-                              (
-                                isSavingMusicalNumber ||
-                                !musicalNumberSceneTitle ||
-                                !selectedMusicalNumberStartEntry ||
-                                !selectedMusicalNumberEndEntry ||
-                                selectedMusicalNumberFormSongs.length === 0
-                              ) &&
-                                styles.buttonDisabled,
-                            ]}
-                            onPress={() => void handleSaveMusicalNumber()}
-                            disabled={
-                              isSavingMusicalNumber ||
-                              !musicalNumberSceneTitle ||
-                              !selectedMusicalNumberStartEntry ||
-                              !selectedMusicalNumberEndEntry ||
-                              selectedMusicalNumberFormSongs.length === 0
-                            }
-                          >
-                            <Text style={styles.primaryActionText}>
-                              {isSavingMusicalNumber ? 'Guardando...' : 'Guardar numero musical'}
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.cancelLink}
-                            onPress={resetMusicalNumberForm}
-                            disabled={isSavingMusicalNumber}
-                          >
-                            <Text style={styles.cancelLinkText}>Cancelar</Text>
-                          </TouchableOpacity>
+                          {shouldShowFloatingMusicalNumberActions ? (
+                            <View style={styles.floatingMusicalNumberActionsSpacer} />
+                          ) : (
+                            <View style={styles.editActionStack}>
+                              <TouchableOpacity
+                                style={[
+                                  styles.primaryAction,
+                                  (!canSaveMusicalNumberForm || isSavingMusicalNumber) &&
+                                    styles.buttonDisabled,
+                                ]}
+                                onPress={() => void handleSaveMusicalNumber()}
+                                disabled={!canSaveMusicalNumberForm || isSavingMusicalNumber}
+                              >
+                                <Text style={styles.primaryActionText}>
+                                  {isSavingMusicalNumber ? 'Guardando...' : 'Guardar numero musical'}
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.cancelLink}
+                                onPress={resetMusicalNumberForm}
+                                disabled={isSavingMusicalNumber}
+                              >
+                                <Text style={styles.cancelLinkText}>Cancelar</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
                         </View>
                       ) : null}
 
@@ -3484,6 +3496,39 @@ export const SongManagerPanel: React.FC<Props> = ({
               <MaterialCommunityIcons name="close" size={18} color="#fff" />
             </TouchableOpacity>
           </View>
+        </View>
+      ) : null}
+      {shouldShowFloatingMusicalNumberActions ? (
+        <View
+          style={[
+            styles.floatingMusicalNumberActionsBar,
+            floatingMusicalNumberActionsOverlayStyle as never,
+          ]}
+        >
+          <TouchableOpacity
+            style={[
+              styles.floatingMusicalNumberActionButton,
+              styles.floatingMusicalNumberCancelButton,
+              isSavingMusicalNumber && styles.buttonDisabled,
+            ]}
+            onPress={resetMusicalNumberForm}
+            disabled={isSavingMusicalNumber}
+          >
+            <Text style={styles.floatingMusicalNumberCancelText}>Cancelar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.floatingMusicalNumberActionButton,
+              styles.floatingMusicalNumberSaveButton,
+              isSavingMusicalNumber && styles.buttonDisabled,
+            ]}
+            onPress={() => void handleSaveMusicalNumber()}
+            disabled={isSavingMusicalNumber}
+          >
+            <Text style={styles.floatingMusicalNumberSaveText}>
+              {isSavingMusicalNumber ? 'Guardando...' : 'Guardar numero musical'}
+            </Text>
+          </TouchableOpacity>
         </View>
       ) : null}
     </View>
@@ -3826,6 +3871,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  floatingMusicalNumberActionsSpacer: {
+    height: 84,
+  },
+  floatingMusicalNumberActionsBar: {
+    marginHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(95, 12, 20, 0.16)',
+    backgroundColor: 'rgba(255, 248, 239, 0.97)',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  floatingMusicalNumberActionButton: {
+    flex: 1,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  floatingMusicalNumberCancelButton: {
+    backgroundColor: '#f5ede3',
+    borderColor: '#e4d1b3',
+  },
+  floatingMusicalNumberSaveButton: {
+    backgroundColor: 'rgba(24, 78, 119, 0.94)',
+    borderColor: 'rgba(24, 78, 119, 1)',
+  },
+  floatingMusicalNumberCancelText: {
+    color: '#6f4c19',
+    fontWeight: '700',
+  },
+  floatingMusicalNumberSaveText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   infoText: {
     textAlign: 'center',
