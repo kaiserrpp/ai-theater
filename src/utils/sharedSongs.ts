@@ -275,14 +275,12 @@ export const syncSharedMusicalNumbersWithScript = (
           : songs.find((song) => song.id === songIds[songIds.length - 1])?.lineIndex ?? -1
       );
 
-      if (linkedSongs.length === 0) {
-        return null;
-      }
-
       const normalizedRange =
         startLineIndex >= 0 && endLineIndex >= 0
           ? normalizeRangeBoundaries(startLineIndex, endLineIndex)
-          : normalizeRangeBoundaries(linkedSongs[0].lineIndex, linkedSongs[linkedSongs.length - 1].lineIndex);
+          : linkedSongs.length > 0
+            ? normalizeRangeBoundaries(linkedSongs[0].lineIndex, linkedSongs[linkedSongs.length - 1].lineIndex)
+            : normalizeRangeBoundaries(startLineIndex, endLineIndex);
 
       return {
         id:
@@ -292,8 +290,8 @@ export const syncSharedMusicalNumbersWithScript = (
         title:
           typeof musicalNumber.title === 'string' && musicalNumber.title.trim().length > 0
             ? musicalNumber.title.trim()
-            : linkedSongs[0].title,
-        sceneTitle: sceneTitle ?? linkedSongs[0].sceneTitle ?? null,
+            : 'Numero musical',
+        sceneTitle: sceneTitle ?? linkedSongs[0]?.sceneTitle ?? null,
         startLineIndex: normalizedRange.startLineIndex,
         endLineIndex: normalizedRange.endLineIndex,
         songIds,
@@ -304,7 +302,12 @@ export const syncSharedMusicalNumbersWithScript = (
             : new Date().toISOString(),
       };
     })
-    .filter((musicalNumber): musicalNumber is SharedMusicalNumberAsset => Boolean(musicalNumber));
+    .filter(
+      (musicalNumber): musicalNumber is SharedMusicalNumberAsset =>
+        Boolean(musicalNumber) &&
+        musicalNumber.startLineIndex >= 0 &&
+        musicalNumber.endLineIndex >= 0
+    );
 };
 
 const buildProjectedMusicalNumberAudioLabel = (

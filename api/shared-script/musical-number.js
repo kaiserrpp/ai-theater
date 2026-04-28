@@ -103,11 +103,6 @@ module.exports = async (request, response) => {
 
       const selection = buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
 
-      if (selection.songIds.length === 0) {
-        response.status(400).json({ error: 'El tramo seleccionado no incluye ninguna cancion.' });
-        return;
-      }
-
       const nextMusicalNumber = {
         id: `musical-number-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
         title,
@@ -186,11 +181,6 @@ module.exports = async (request, response) => {
     }
 
     const selection = buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
-
-    if (selection.songIds.length === 0) {
-      response.status(400).json({ error: 'El tramo seleccionado no incluye ninguna cancion.' });
-      return;
-    }
 
     const updatedManifest = await writeManifest({
       ...manifest,

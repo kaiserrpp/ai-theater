@@ -80,18 +80,6 @@ const buildDefaultAudioLabel = (kind: SharedSongAudioKind, guideRoles: string[])
   return 'Karaoke';
 };
 
-const buildDefaultMusicalNumberTitle = (songs: SharedSongAsset[]) => {
-  if (songs.length === 0) {
-    return 'Numero musical';
-  }
-
-  if (songs.length === 1) {
-    return songs[0].title;
-  }
-
-  return `${songs[0].title} -> ${songs[songs.length - 1].title}`;
-};
-
 const validateAudioMetadata = ({
   label,
   guideRoles,
@@ -604,12 +592,10 @@ export const SongManagerPanel: React.FC<Props> = ({
       }
     });
 
-    return sceneOrder
-      .map((title) => ({
-        title,
-        songCount: sceneSongCounts.get(title) ?? 0,
-      }))
-      .filter((scene) => scene.songCount > 0);
+    return sceneOrder.map((title) => ({
+      title,
+      songCount: sceneSongCounts.get(title) ?? 0,
+    }));
   }, [sharedScript]);
 
   const musicalNumberSceneEntries = useMemo<MusicalNumberSceneEntry[]>(() => {
@@ -694,18 +680,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         : musicalNumberSceneEntries.find((entry) => entry.lineIndex === musicalNumberEndLineIndex) ?? null,
     [musicalNumberEndLineIndex, musicalNumberSceneEntries]
   );
-
-  useEffect(() => {
-    if (
-      editingMusicalNumberId ||
-      musicalNumberTitle.trim().length > 0 ||
-      selectedMusicalNumberFormSongs.length === 0
-    ) {
-      return;
-    }
-
-    setMusicalNumberTitle(buildDefaultMusicalNumberTitle(selectedMusicalNumberFormSongs));
-  }, [editingMusicalNumberId, musicalNumberTitle, selectedMusicalNumberFormSongs]);
 
   useEffect(() => {
     if (
@@ -1521,6 +1495,14 @@ export const SongManagerPanel: React.FC<Props> = ({
   };
 
   const handleSelectMusicalNumber = (musicalNumberId: string) => {
+    if (editingMusicalNumberId === musicalNumberId && isMusicalNumberFormVisible) {
+      return;
+    }
+
+    if (editingMusicalNumberId) {
+      resetMusicalNumberForm();
+    }
+
     setSelectedMusicalNumberId((previousMusicalNumberId) =>
       previousMusicalNumberId === musicalNumberId ? null : musicalNumberId
     );
@@ -1565,16 +1547,17 @@ export const SongManagerPanel: React.FC<Props> = ({
     setManagerError(null);
 
     try {
+      const targetMusicalNumberId = editingMusicalNumberId;
       const sceneTitle = musicalNumberSceneTitle?.trim() ?? '';
       const normalizedRange =
         musicalNumberStartLineIndex !== null && musicalNumberEndLineIndex !== null
           ? normalizeRange(musicalNumberStartLineIndex, musicalNumberEndLineIndex)
           : null;
 
-      const manifest = editingMusicalNumberId
+      const manifest = targetMusicalNumberId
         ? await updateSharedMusicalNumber({
             shareId: sharedScript.shareId,
-            musicalNumberId: editingMusicalNumberId,
+            musicalNumberId: targetMusicalNumberId,
             password: password.trim(),
             title,
             sceneTitle,
@@ -1592,9 +1575,13 @@ export const SongManagerPanel: React.FC<Props> = ({
 
       const refreshedManifest = await refreshSharedManifest(manifest);
       const nextMusicalNumber =
-        refreshedManifest.musicalNumbers.find((candidate) =>
-          editingMusicalNumberId ? candidate.id === editingMusicalNumberId : candidate.title === title
-        ) ?? refreshedManifest.musicalNumbers[0] ?? null;
+        (targetMusicalNumberId
+          ? refreshedManifest.musicalNumbers.find(
+              (candidate) => candidate.id === targetMusicalNumberId
+            )
+          : refreshedManifest.musicalNumbers.find((candidate) => candidate.title === title)) ??
+        refreshedManifest.musicalNumbers[0] ??
+        null;
 
       setSelectedMusicalNumberId(nextMusicalNumber?.id ?? null);
       resetMusicalNumberForm();
@@ -1883,8 +1870,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     Boolean(musicalNumberTitle.trim()) &&
     Boolean(musicalNumberSceneTitle) &&
     Boolean(selectedMusicalNumberStartEntry) &&
-    Boolean(selectedMusicalNumberEndEntry) &&
-    selectedMusicalNumberFormSongs.length > 0;
+    Boolean(selectedMusicalNumberEndEntry);
   const shouldShowFloatingMusicalNumberActions =
     isMusicalNumberFormVisible && canSaveMusicalNumberForm;
   const previousSharedScriptIdRef = useRef<string | null>(sharedScript?.shareId ?? null);
@@ -2332,6 +2318,44 @@ export const SongManagerPanel: React.FC<Props> = ({
                 ) : null}
                 <View style={styles.audioActions}>
                   <TouchableOpacity
+                    style={[styles.audioActionButton, styles.audioPlayButton]}
+                    onPress={() => void handlePlayPreviewAudio(audio)}
+                  >
+                    <View style={styles.audioButtonContent}>
+                      <MaterialCommunityIcons
+                        name={
+                          playingPreviewAudioId === audio.id
+                            ? 'stop-circle-outline'
+                            : 'play-circle-outline'
+                        }
+                        size={18}
+                        color="#184e77"
+                      />
+                      <Text style={styles.audioPlayText}>
+                        {playingPreviewAudioId === audio.id ? 'Detener' : 'Reproducir'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {playingPreviewAudioId === audio.id ? (
+                    <TouchableOpacity
+                      style={[styles.audioActionButton, styles.audioPauseButton]}
+                      onPress={() => void handlePauseResumePreviewAudio(audio)}
+                    >
+                      <View style={styles.audioButtonContent}>
+                        <MaterialCommunityIcons
+                          name={
+                            isPreviewAudioPaused ? 'play-circle-outline' : 'pause-circle-outline'
+                          }
+                          size={18}
+                          color="#6f4c19"
+                        />
+                        <Text style={styles.audioPauseText}>
+                          {isPreviewAudioPaused ? 'Reanudar' : 'Pausar'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : null}
+                  <TouchableOpacity
                     style={[styles.audioActionButton, styles.audioEditButton]}
                     onPress={() => startEditingMusicalNumberAudio(audio)}
                   >
@@ -2528,7 +2552,11 @@ export const SongManagerPanel: React.FC<Props> = ({
                 </Text>
               </View>
             </TouchableOpacity>
-            {isSelected ? renderMusicalNumberDetail(musicalNumber) : null}
+            {isSelected && editingMusicalNumberId === musicalNumber.id && isMusicalNumberFormVisible
+              ? renderMusicalNumberForm()
+              : isSelected
+                ? renderMusicalNumberDetail(musicalNumber)
+                : null}
           </View>
         );
       })}
@@ -2541,6 +2569,9 @@ export const SongManagerPanel: React.FC<Props> = ({
         const isExpanded = expandedMusicalNumberFormLineIndex === entry.lineIndex;
         const isStart = musicalNumberStartLineIndex === entry.lineIndex;
         const isEnd = musicalNumberEndLineIndex === entry.lineIndex;
+        const linkedSong = entry.songId
+          ? sharedSongs.find((song) => song.id === entry.songId) ?? null
+          : null;
         const isIncludedInRange = Boolean(
           normalizedMusicalNumberRange &&
             entry.lineIndex >= normalizedMusicalNumberRange.startLineIndex &&
@@ -2602,6 +2633,64 @@ export const SongManagerPanel: React.FC<Props> = ({
                   {buildMusicalNumberEntryMeta(entry)} · linea {entry.lineIndex + 1}
                 </Text>
                 <Text style={styles.songLyrics}>{entry.detailText}</Text>
+                {linkedSong && linkedSong.audios.length > 0 ? (
+                  <View style={styles.audioList}>
+                    <Text style={styles.sectionTitle}>Audios de esta cancion</Text>
+                    {linkedSong.audios.map((audio) => {
+                      const playbackAudio = {
+                        ...audio,
+                        id: `song:${linkedSong.id}:${audio.id}`,
+                        label: buildPracticeMusicalNumberAudioLabel(linkedSong.title, audio),
+                      };
+                      const isPlaying = playingPreviewAudioId === playbackAudio.id;
+                      const isPaused = isPlaying && isPreviewAudioPaused;
+
+                      return (
+                        <View key={`range-song-audio-${linkedSong.id}-${audio.id}`} style={styles.audioChip}>
+                          <Text style={styles.audioChipTitle}>{playbackAudio.label}</Text>
+                          <Text style={styles.audioChipMeta}>
+                            {formatSongAudioKind(audio.kind)}
+                            {audio.guideRoles.length > 0 ? ` Â· ${audio.guideRoles.join(', ')}` : ''}
+                          </Text>
+                          <View style={styles.audioActions}>
+                            <TouchableOpacity
+                              style={[styles.audioActionButton, styles.audioPlayButton]}
+                              onPress={() => void handlePlayPreviewAudio(playbackAudio)}
+                            >
+                              <View style={styles.audioButtonContent}>
+                                <MaterialCommunityIcons
+                                  name={isPlaying ? 'stop-circle-outline' : 'play-circle-outline'}
+                                  size={18}
+                                  color="#184e77"
+                                />
+                                <Text style={styles.audioPlayText}>
+                                  {isPlaying ? 'Detener' : 'Reproducir'}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                            {isPlaying ? (
+                              <TouchableOpacity
+                                style={[styles.audioActionButton, styles.audioPauseButton]}
+                                onPress={() => void handlePauseResumePreviewAudio(playbackAudio)}
+                              >
+                                <View style={styles.audioButtonContent}>
+                                  <MaterialCommunityIcons
+                                    name={isPaused ? 'play-circle-outline' : 'pause-circle-outline'}
+                                    size={18}
+                                    color="#6f4c19"
+                                  />
+                                  <Text style={styles.audioPauseText}>
+                                    {isPaused ? 'Reanudar' : 'Pausar'}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
                 <View style={styles.boundaryActionRow}>
                   <TouchableOpacity
                     style={[
@@ -2641,6 +2730,117 @@ export const SongManagerPanel: React.FC<Props> = ({
           </View>
         );
       })}
+    </View>
+  );
+
+  const renderMusicalNumberForm = () => (
+    <View style={styles.formSection}>
+      <Text style={styles.sectionTitle}>
+        {editingMusicalNumberId ? 'Editar numero musical' : 'Nuevo numero musical'}
+      </Text>
+      <Text style={styles.formLabel}>Titulo</Text>
+      <TextInput
+        value={musicalNumberTitle}
+        onChangeText={setMusicalNumberTitle}
+        placeholder="Ej. Santa Fe completa"
+        style={styles.textInput}
+      />
+      <Text style={styles.formLabel}>Escena</Text>
+      {musicalNumberSceneTitle ? (
+        <View style={styles.selectedSceneBox}>
+          <Text style={styles.selectedSceneTitle}>{musicalNumberSceneTitle}</Text>
+          <Text style={styles.selectedSceneMeta}>
+            {musicalNumberSceneEntries.length} elemento
+            {musicalNumberSceneEntries.length === 1 ? '' : 's'} en la escena
+          </Text>
+          <TouchableOpacity
+            style={styles.secondaryAction}
+            onPress={() => handleSelectMusicalNumberScene('')}
+          >
+            <Text style={styles.secondaryActionText}>Cambiar escena</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.sceneSelector}>
+          {musicalNumberSceneOptions.map((scene) => {
+            const isSelectedScene = musicalNumberSceneTitle === scene.title;
+
+            return (
+              <TouchableOpacity
+                key={`musical-number-scene-${scene.title}`}
+                style={[
+                  styles.sceneChip,
+                  isSelectedScene && styles.sceneChipSelected,
+                ]}
+                onPress={() => handleSelectMusicalNumberScene(scene.title)}
+              >
+                <Text
+                  style={[
+                    styles.sceneChipText,
+                    isSelectedScene && styles.sceneChipTextSelected,
+                  ]}
+                >
+                  {scene.title}
+                </Text>
+                <Text
+                  style={[
+                    styles.sceneChipMeta,
+                    isSelectedScene && styles.sceneChipMetaSelected,
+                  ]}
+                >
+                  {scene.songCount} bloque{scene.songCount === 1 ? '' : 's'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+      {musicalNumberSceneTitle ? (
+        <>
+          <Text style={styles.formLabel}>Tramo del numero musical</Text>
+          {renderMusicalNumberSceneRangeSelectionList()}
+        </>
+      ) : null}
+      {selectedMusicalNumberStartEntry && selectedMusicalNumberEndEntry ? (
+        <Text style={styles.selectionSummary}>
+          Tramo: {selectedMusicalNumberStartEntry.title} {'->'} {selectedMusicalNumberEndEntry.title}
+          {' - '}
+          {selectedMusicalNumberFormSongs.length} bloque
+          {selectedMusicalNumberFormSongs.length === 1 ? '' : 's'} de cancion
+        </Text>
+      ) : null}
+      {editingMusicalNumberId === '__legacy__' && selectedMusicalNumberFormSongs.length > 0 ? (
+        <Text style={styles.selectionSummary}>
+          Tramo: {selectedMusicalNumberFormSongs[0].title} -{' '}
+          {selectedMusicalNumberFormSongs[selectedMusicalNumberFormSongs.length - 1].title}
+        </Text>
+      ) : null}
+      {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
+      {shouldShowFloatingMusicalNumberActions ? (
+        <View style={styles.floatingMusicalNumberActionsSpacer} />
+      ) : (
+        <View style={styles.editActionStack}>
+          <TouchableOpacity
+            style={[
+              styles.primaryAction,
+              (!canSaveMusicalNumberForm || isSavingMusicalNumber) && styles.buttonDisabled,
+            ]}
+            onPress={() => void handleSaveMusicalNumber()}
+            disabled={!canSaveMusicalNumberForm || isSavingMusicalNumber}
+          >
+            <Text style={styles.primaryActionText}>
+              {isSavingMusicalNumber ? 'Guardando...' : 'Guardar numero musical'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.cancelLink}
+            onPress={resetMusicalNumberForm}
+            disabled={isSavingMusicalNumber}
+          >
+            <Text style={styles.cancelLinkText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 
@@ -2694,6 +2894,73 @@ export const SongManagerPanel: React.FC<Props> = ({
     );
   };
   void _renderSongPracticeDetailLegacy;
+
+  const floatingPlaybackControls =
+    shouldShowFloatingPlaybackControls && activePlaybackEntry ? (
+      <View
+        style={[
+          styles.floatingPlaybackBar,
+          floatingPlaybackBarOverlayStyle as never,
+        ]}
+      >
+        <View style={styles.floatingPlaybackText}>
+          <Text style={styles.floatingPlaybackTitle} numberOfLines={1}>
+            {activePlaybackEntry.musicalNumber?.title || activePlaybackEntry.audio.label}
+          </Text>
+          <Text style={styles.floatingPlaybackMeta} numberOfLines={1}>
+            {isPreviewAudioPaused
+              ? 'Pausado'
+              : activePlaylistMode
+                ? activePlaylistDescription || 'Reproduciendo lista'
+                : 'Reproduciendo cancion'}
+          </Text>
+        </View>
+        <View style={styles.floatingPlaybackActions}>
+          <TouchableOpacity
+            style={[
+              styles.floatingPlaybackButton,
+              activePlaybackEntry.kind !== 'playlist' ||
+              activePlaybackEntry.total < 2
+                ? styles.floatingPlaybackButtonDisabled
+                : null,
+            ]}
+            onPress={() => void handleNavigateFloatingPlaylist('previous')}
+            disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
+          >
+            <MaterialCommunityIcons name="skip-previous" size={22} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.floatingPlaybackButton}
+            onPress={() => void handleToggleFloatingPlayback()}
+          >
+            <MaterialCommunityIcons
+              name={isPreviewAudioPaused ? 'play' : 'pause'}
+              size={22}
+              color="#fff"
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.floatingPlaybackButton,
+              activePlaybackEntry.kind !== 'playlist' ||
+              activePlaybackEntry.total < 2
+                ? styles.floatingPlaybackButtonDisabled
+                : null,
+            ]}
+            onPress={() => void handleNavigateFloatingPlaylist('next')}
+            disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
+          >
+            <MaterialCommunityIcons name="skip-next" size={22} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.floatingPlaybackCloseButton}
+            onPress={handleCloseFloatingPlayback}
+          >
+            <MaterialCommunityIcons name="close" size={18} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    ) : null;
 
   const floatingMusicalNumberActions = shouldShowFloatingMusicalNumberActions ? (
     <View
@@ -3176,7 +3443,10 @@ export const SongManagerPanel: React.FC<Props> = ({
                         </Text>
                       )}
 
-                      {isMusicalNumberFormVisible ? (
+                      {isMusicalNumberFormVisible && !editingMusicalNumberId ? (
+                        renderMusicalNumberForm()
+                      ) : null}
+                      {false ? (
                         <View style={styles.formSection}>
                           <Text style={styles.sectionTitle}>
                             {editingMusicalNumberId ? 'Editar numero musical' : 'Nuevo numero musical'}
@@ -3246,13 +3516,13 @@ export const SongManagerPanel: React.FC<Props> = ({
                           ) : null}
                           {selectedMusicalNumberStartEntry && selectedMusicalNumberEndEntry ? (
                             <Text style={styles.selectionSummary}>
-                              Tramo: {selectedMusicalNumberStartEntry.title} {'->'} {selectedMusicalNumberEndEntry.title}
+                              Tramo: {selectedMusicalNumberStartEntry?.title} {'->'} {selectedMusicalNumberEndEntry?.title}
                               {' · '}
                               {selectedMusicalNumberFormSongs.length} bloque
                               {selectedMusicalNumberFormSongs.length === 1 ? '' : 's'} de cancion
                             </Text>
                           ) : null}
-                          {editingMusicalNumberId === '__legacy__' ? (
+                          {editingMusicalNumberId === '__legacy__' && selectedMusicalNumberFormSongs.length > 0 ? (
                             <Text style={styles.selectionSummary}>
                               Tramo: {selectedMusicalNumberFormSongs[0].title} ·{' '}
                               {
@@ -3299,166 +3569,6 @@ export const SongManagerPanel: React.FC<Props> = ({
                           Todavia no hay numeros musicales definidos para esta obra.
                         </Text>
                       )}
-
-                      {selectedMusicalNumber ? (
-                        <>
-                          <View style={styles.manageNumberActions}>
-                            <TouchableOpacity
-                              style={styles.secondaryAction}
-                              onPress={() => startEditingMusicalNumber(selectedMusicalNumber)}
-                            >
-                              <Text style={styles.secondaryActionText}>Editar numero musical</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[styles.secondaryAction, styles.deleteAction]}
-                              onPress={() => void handleDeleteMusicalNumber(selectedMusicalNumber)}
-                              disabled={deletingMusicalNumberId === selectedMusicalNumber.id}
-                            >
-                              <Text style={styles.deleteActionText}>
-                                {deletingMusicalNumberId === selectedMusicalNumber.id
-                                  ? 'Borrando...'
-                                  : 'Borrar numero musical'}
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-
-                          <TouchableOpacity
-                            style={styles.secondaryAction}
-                            onPress={() =>
-                              setIsMusicalNumberAudioFormVisible((previousValue) => !previousValue)
-                            }
-                          >
-                            <Text style={styles.secondaryActionText}>
-                              {isMusicalNumberAudioFormVisible
-                                ? 'Ocultar menu de audio'
-                                : editingMusicalNumberAudio
-                                  ? 'Seguir editando audio'
-                                  : 'Anadir audio a este numero musical'}
-                            </Text>
-                          </TouchableOpacity>
-
-                          {isMusicalNumberAudioFormVisible ? (
-                            <View style={styles.formSection}>
-                              <Text style={styles.sectionTitle}>
-                                {editingMusicalNumberAudio ? 'Editar audio' : 'Nuevo audio'}
-                              </Text>
-                              <Text style={styles.formLabel}>Tipo de audio</Text>
-                              <View style={styles.kindActions}>
-                                {(['karaoke', 'vocal_guide'] as SharedSongAudioKind[]).map((kind) => (
-                                  <TouchableOpacity
-                                    key={`number-audio-kind-${kind}`}
-                                    style={[
-                                      styles.kindButton,
-                                      musicalNumberAudioKind === kind && styles.kindButtonSelected,
-                                    ]}
-                                    onPress={() => setMusicalNumberAudioKind(kind)}
-                                  >
-                                    <Text
-                                      style={[
-                                        styles.kindButtonText,
-                                        musicalNumberAudioKind === kind &&
-                                          styles.kindButtonTextSelected,
-                                      ]}
-                                    >
-                                      {formatSongAudioKind(kind)}
-                                    </Text>
-                                  </TouchableOpacity>
-                                ))}
-                              </View>
-                              <Text style={styles.formLabel}>Etiqueta</Text>
-                              <TextInput
-                                value={musicalNumberAudioLabel}
-                                onChangeText={setMusicalNumberAudioLabel}
-                                placeholder={buildDefaultAudioLabel(
-                                  musicalNumberAudioKind,
-                                  musicalNumberGuideRoles
-                                )}
-                                style={styles.textInput}
-                              />
-                              <Text style={styles.formLabel}>Personajes que cantan en este audio</Text>
-                              <View style={styles.roleTags}>
-                                {availableRoles.map((role) => {
-                                  const isSelected = musicalNumberGuideRoles.includes(role);
-                                  return (
-                                    <TouchableOpacity
-                                      key={`${selectedMusicalNumber.id}-${role}`}
-                                      style={[styles.roleTag, isSelected && styles.roleTagSelected]}
-                                      onPress={() => toggleMusicalNumberGuideRole(role)}
-                                    >
-                                      <Text
-                                        style={[
-                                          styles.roleTagText,
-                                          isSelected && styles.roleTagTextSelected,
-                                        ]}
-                                      >
-                                        {role}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  );
-                                })}
-                              </View>
-                              {musicalNumberUploadProgress !== null ? (
-                                <Text style={styles.progressText}>
-                                  Subiendo audio... {musicalNumberUploadProgress}%
-                                </Text>
-                              ) : null}
-                              {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
-                              {editingMusicalNumberAudio ? (
-                                <View style={styles.editActionStack}>
-                                  <TouchableOpacity
-                                    style={[
-                                      styles.primaryAction,
-                                      isSavingMusicalNumberAudio && styles.buttonDisabled,
-                                    ]}
-                                    onPress={() => void handleSaveMusicalNumberAudioEdits()}
-                                    disabled={isSavingMusicalNumberAudio}
-                                  >
-                                    <Text style={styles.primaryActionText}>
-                                      {isSavingMusicalNumberAudio ? 'Guardando...' : 'Guardar cambios'}
-                                    </Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    style={[
-                                      styles.secondaryAction,
-                                      isSavingMusicalNumberAudio && styles.buttonDisabled,
-                                    ]}
-                                    onPress={() => void handleReplaceMusicalNumberAudio()}
-                                    disabled={isSavingMusicalNumberAudio}
-                                  >
-                                    <Text style={styles.secondaryActionText}>
-                                      {isSavingMusicalNumberAudio
-                                        ? 'Actualizando audio...'
-                                        : 'Reemplazar audio'}
-                                    </Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    style={styles.cancelLink}
-                                    onPress={resetMusicalNumberAudioForm}
-                                    disabled={isSavingMusicalNumberAudio}
-                                  >
-                                    <Text style={styles.cancelLinkText}>Cancelar edicion</Text>
-                                  </TouchableOpacity>
-                                </View>
-                              ) : (
-                                <TouchableOpacity
-                                  style={[
-                                    styles.primaryAction,
-                                    isMusicalNumberUploading && styles.buttonDisabled,
-                                  ]}
-                                  onPress={() => void handleUploadMusicalNumberAudio()}
-                                  disabled={isMusicalNumberUploading}
-                                >
-                                  <Text style={styles.primaryActionText}>
-                                    {isMusicalNumberUploading
-                                      ? 'Subiendo audio...'
-                                      : 'Seleccionar audio o video'}
-                                  </Text>
-                                </TouchableOpacity>
-                              )}
-                            </View>
-                          ) : null}
-                        </>
-                      ) : null}
                     </>
                   )}
                 </>
@@ -3467,71 +3577,9 @@ export const SongManagerPanel: React.FC<Props> = ({
               )}
         </View>
       )}
-      {shouldShowFloatingPlaybackControls && activePlaybackEntry ? (
-        <View
-          style={[
-            styles.floatingPlaybackBar,
-            floatingPlaybackBarOverlayStyle as never,
-          ]}
-        >
-          <View style={styles.floatingPlaybackText}>
-            <Text style={styles.floatingPlaybackTitle} numberOfLines={1}>
-              {activePlaybackEntry.musicalNumber?.title || activePlaybackEntry.audio.label}
-            </Text>
-            <Text style={styles.floatingPlaybackMeta} numberOfLines={1}>
-              {isPreviewAudioPaused
-                ? 'Pausado'
-                : activePlaylistMode
-                  ? activePlaylistDescription || 'Reproduciendo lista'
-                  : 'Reproduciendo cancion'}
-            </Text>
-          </View>
-          <View style={styles.floatingPlaybackActions}>
-            <TouchableOpacity
-              style={[
-                styles.floatingPlaybackButton,
-                activePlaybackEntry.kind !== 'playlist' ||
-                activePlaybackEntry.total < 2
-                  ? styles.floatingPlaybackButtonDisabled
-                  : null,
-              ]}
-              onPress={() => void handleNavigateFloatingPlaylist('previous')}
-              disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
-            >
-              <MaterialCommunityIcons name="skip-previous" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.floatingPlaybackButton}
-              onPress={() => void handleToggleFloatingPlayback()}
-            >
-              <MaterialCommunityIcons
-                name={isPreviewAudioPaused ? 'play' : 'pause'}
-                size={22}
-                color="#fff"
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.floatingPlaybackButton,
-                activePlaybackEntry.kind !== 'playlist' ||
-                activePlaybackEntry.total < 2
-                  ? styles.floatingPlaybackButtonDisabled
-                  : null,
-              ]}
-              onPress={() => void handleNavigateFloatingPlaylist('next')}
-              disabled={activePlaybackEntry.kind !== 'playlist' || activePlaybackEntry.total < 2}
-            >
-              <MaterialCommunityIcons name="skip-next" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.floatingPlaybackCloseButton}
-              onPress={handleCloseFloatingPlayback}
-            >
-              <MaterialCommunityIcons name="close" size={18} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
+      {floatingPlaybackControls && Platform.OS === 'web' && typeof document !== 'undefined'
+        ? createPortal(floatingPlaybackControls, document.body)
+        : floatingPlaybackControls}
       {floatingMusicalNumberActions && Platform.OS === 'web' && typeof document !== 'undefined'
         ? createPortal(floatingMusicalNumberActions, document.body)
         : floatingMusicalNumberActions}

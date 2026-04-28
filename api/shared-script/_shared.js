@@ -263,7 +263,6 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
     })
     .filter(
       (musicalNumber) =>
-        musicalNumber.songIds.length > 0 &&
         musicalNumber.startLineIndex >= 0 &&
         musicalNumber.endLineIndex >= 0
     );
