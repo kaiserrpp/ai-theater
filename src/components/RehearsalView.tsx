@@ -28,7 +28,12 @@ interface Props {
   onExit: () => void;
 }
 
-type RehearsalPreflightPhase = 'auto-initial' | 'manual-check' | 'auto-final' | null;
+type RehearsalPreflightPhase =
+  | 'auto-initial'
+  | 'manual-check'
+  | 'auto-final'
+  | 'micro-calibration'
+  | null;
 type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual';
 type RehearsalAudioModeSelection = 'pending' | SharedSongAudioKind;
 
@@ -949,26 +954,8 @@ export const RehearsalView: React.FC<Props> = ({
 
     try {
       if (shouldUseAutoListen) {
-        resetMicrophoneCalibration();
         await startListening();
         await wait(450);
-        setRehearsalMediaStatus('Guarda silencio 2 segundos para medir el ruido de fondo.');
-        const noiseResult = await calibrateAmbientNoise();
-        setRehearsalMediaStatus(
-          `Ruido base medido (${formatMicroLevel(noiseResult.noiseFloor)}). Ahora di una frase de prueba cuando te avisemos.`
-        );
-        await wait(900);
-        setRehearsalMediaStatus('Habla ahora: por ejemplo, "estoy listo para ensayar".');
-        const voiceResult = await calibrateVoiceLevel();
-        const ratioLabel = Number.isFinite(voiceResult.voiceToNoiseRatio)
-          ? voiceResult.voiceToNoiseRatio.toFixed(1)
-          : 'alto';
-        setRehearsalMediaStatus(
-          voiceResult.status === 'weak'
-            ? `Micro calibrado, aunque la voz esta cerca del ruido (ratio ${ratioLabel}x). Si falla, acercate un poco o recalibra.`
-            : `Micro calibrado para esta sesion. Umbral ${formatMicroLevel(voiceResult.voiceThreshold)}, voz ${ratioLabel}x sobre el ruido.`
-        );
-        await wait(550);
       }
 
       setRehearsalMediaStatus('Liberando el micro para probar la voz...');
@@ -1026,19 +1013,81 @@ export const RehearsalView: React.FC<Props> = ({
       setIsPreparingRehearsalMedia(false);
     }
   }, [
-    calibrateAmbientNoise,
-    calibrateVoiceLevel,
     primeSongPlayback,
     probeSongPlayback,
     rehearsalPreflightPhase,
-    resetMicrophoneCalibration,
     startListening,
     stopListening,
+  ]);
+
+  const calibrateRehearsalMicrophone = useCallback(async () => {
+    setIsPreparingRehearsalMedia(true);
+    setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(false);
+    setSongPlaybackProbeStatus(null);
+    setRehearsalPreflightPhase('micro-calibration');
+    setAutoListenEnabled(true);
+    setTemporarilySuspendingAutoListen(false);
+    resetMicrophoneCalibration();
+
+    try {
+      setRehearsalMediaStatus('Ahora calibramos el micro. Primero, guarda silencio.');
+      await startListening();
+      await wait(450);
+
+      setRehearsalMediaStatus('Guarda silencio 2 segundos para medir el ruido de fondo.');
+      const noiseResult = await calibrateAmbientNoise();
+      setRehearsalMediaStatus(
+        `Ruido base medido (${formatMicroLevel(noiseResult.noiseFloor)}). Ahora preparate para decir una frase.`
+      );
+      await wait(900);
+
+      setRehearsalMediaStatus('Habla ahora: por ejemplo, "estoy listo para ensayar".');
+      const voiceResult = await calibrateVoiceLevel();
+      const ratioLabel = Number.isFinite(voiceResult.voiceToNoiseRatio)
+        ? voiceResult.voiceToNoiseRatio.toFixed(1)
+        : 'alto';
+      setRehearsalMediaStatus(
+        voiceResult.status === 'weak'
+          ? `Micro calibrado, aunque la voz esta cerca del ruido (ratio ${ratioLabel}x). Empezamos y lo observamos.`
+          : `Micro calibrado. Umbral ${formatMicroLevel(voiceResult.voiceThreshold)}, voz ${ratioLabel}x sobre el ruido.`
+      );
+      await wait(650);
+
+      void primeSongPlayback();
+      setIsRehearsalMediaReady(true);
+      setHasCompletedRehearsalPreflight(true);
+      setRehearsalPreflightPhase(null);
+      setRehearsalMediaStatus(null);
+    } catch {
+      setRehearsalMediaStatus('No se pudo calibrar el micro. Empezamos en modo manual para evitar saltos falsos.');
+      setAutoListenEnabled(false);
+      setListenModeSelection('manual');
+      await releaseListening();
+      setIsRehearsalMediaReady(true);
+      setHasCompletedRehearsalPreflight(true);
+      setRehearsalPreflightPhase(null);
+    } finally {
+      setHasPreparedRehearsalMedia(false);
+      setIsPreparingRehearsalMedia(false);
+    }
+  }, [
+    calibrateAmbientNoise,
+    calibrateVoiceLevel,
+    primeSongPlayback,
+    releaseListening,
+    resetMicrophoneCalibration,
+    startListening,
   ]);
 
   const handlePreflightHeardVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'manual-check') {
       void prepareRehearsalMedia('auto-final');
+      return;
+    }
+
+    if (autoListenEnabled) {
+      void calibrateRehearsalMicrophone();
       return;
     }
 
@@ -1048,7 +1097,13 @@ export const RehearsalView: React.FC<Props> = ({
     setHasCompletedRehearsalPreflight(true);
     setRehearsalPreflightPhase(null);
     setRehearsalMediaStatus(null);
-  }, [prepareRehearsalMedia, primeSongPlayback, rehearsalPreflightPhase]);
+  }, [
+    autoListenEnabled,
+    calibrateRehearsalMicrophone,
+    prepareRehearsalMedia,
+    primeSongPlayback,
+    rehearsalPreflightPhase,
+  ]);
 
   const handleChooseManualListen = useCallback(async () => {
     setListenModeSelection('manual');
@@ -1580,14 +1635,20 @@ export const RehearsalView: React.FC<Props> = ({
         {renderHeader('Preparando audio y micro')}
         <View style={styles.intro}>
           <View style={styles.preflightCard}>
-            <Text style={styles.preflightTitle}>Preparar ensayo</Text>
+            <Text style={styles.preflightTitle}>
+              {rehearsalPreflightPhase === 'micro-calibration'
+                ? 'Calibrar micro'
+                : 'Preparar ensayo'}
+            </Text>
             <Text style={styles.preflightText}>
-              Vamos a reproducir una frase corta antes de empezar. Si no se oye a la primera, probaremos automaticamente la combinacion auto, manual y auto otra vez.
+              {rehearsalPreflightPhase === 'micro-calibration'
+                ? 'Ya tenemos el audio preparado. Ahora medimos el ruido de fondo y tu voz para fijar un umbral estable antes de empezar.'
+                : 'Vamos a reproducir una frase corta antes de empezar. Si no se oye a la primera, probaremos automaticamente la combinacion auto, manual y auto otra vez.'}
             </Text>
             {rehearsalMediaStatus ? (
               <Text style={styles.preflightStatus}>{rehearsalMediaStatus}</Text>
             ) : null}
-            {autoListenEnabled && rehearsalPreflightPhase !== 'manual-check' ? (
+            {autoListenEnabled && rehearsalPreflightPhase === 'micro-calibration' ? (
               <View style={styles.microCalibrationBox}>
                 <View style={styles.microCalibrationMeterTrack}>
                   <View
