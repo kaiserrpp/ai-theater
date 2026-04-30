@@ -32,6 +32,13 @@ type RehearsalPreflightPhase = 'auto-initial' | 'manual-check' | 'auto-final' | 
 type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual';
 type RehearsalAudioModeSelection = 'pending' | SharedSongAudioKind;
 
+const wait = (durationMs: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
+
+const formatMicroLevel = (value: number) => `${(value * 100).toFixed(1)}%`;
+
 const createWavObjectUrl = ({
   frequencyHz = 0,
   durationMs = 120,
@@ -415,11 +422,19 @@ export const RehearsalView: React.FC<Props> = ({
     isListeningActive,
     isListeningSupported,
     signalLevel,
+    rawLevel,
     hasSpeechStarted,
     isSignalAboveThreshold,
     silenceElapsedMs,
     voiceThreshold,
+    microphoneCalibrationStatus,
+    microphoneCalibrationProgress,
+    microphoneNoiseFloor,
+    microphoneVoiceLevel,
     lineStateLabel,
+    calibrateAmbientNoise,
+    calibrateVoiceLevel,
+    resetMicrophoneCalibration,
     startListening,
     stopListening,
     releaseListening,
@@ -934,13 +949,31 @@ export const RehearsalView: React.FC<Props> = ({
 
     try {
       if (shouldUseAutoListen) {
+        resetMicrophoneCalibration();
         await startListening();
-        await new Promise((resolve) => setTimeout(resolve, 450));
+        await wait(450);
+        setRehearsalMediaStatus('Guarda silencio 2 segundos para medir el ruido de fondo.');
+        const noiseResult = await calibrateAmbientNoise();
+        setRehearsalMediaStatus(
+          `Ruido base medido (${formatMicroLevel(noiseResult.noiseFloor)}). Ahora di una frase de prueba cuando te avisemos.`
+        );
+        await wait(900);
+        setRehearsalMediaStatus('Habla ahora: por ejemplo, "estoy listo para ensayar".');
+        const voiceResult = await calibrateVoiceLevel();
+        const ratioLabel = Number.isFinite(voiceResult.voiceToNoiseRatio)
+          ? voiceResult.voiceToNoiseRatio.toFixed(1)
+          : 'alto';
+        setRehearsalMediaStatus(
+          voiceResult.status === 'weak'
+            ? `Micro calibrado, aunque la voz esta cerca del ruido (ratio ${ratioLabel}x). Si falla, acercate un poco o recalibra.`
+            : `Micro calibrado para esta sesion. Umbral ${formatMicroLevel(voiceResult.voiceThreshold)}, voz ${ratioLabel}x sobre el ruido.`
+        );
+        await wait(550);
       }
 
       setRehearsalMediaStatus('Liberando el micro para probar la voz...');
       await stopListening();
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      await wait(220);
 
       setRehearsalMediaStatus('Escucha la frase de prueba de Siri.');
 
@@ -992,7 +1025,16 @@ export const RehearsalView: React.FC<Props> = ({
     } finally {
       setIsPreparingRehearsalMedia(false);
     }
-  }, [primeSongPlayback, probeSongPlayback, rehearsalPreflightPhase, startListening, stopListening]);
+  }, [
+    calibrateAmbientNoise,
+    calibrateVoiceLevel,
+    primeSongPlayback,
+    probeSongPlayback,
+    rehearsalPreflightPhase,
+    resetMicrophoneCalibration,
+    startListening,
+    stopListening,
+  ]);
 
   const handlePreflightHeardVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'manual-check') {
@@ -1545,6 +1587,38 @@ export const RehearsalView: React.FC<Props> = ({
             {rehearsalMediaStatus ? (
               <Text style={styles.preflightStatus}>{rehearsalMediaStatus}</Text>
             ) : null}
+            {autoListenEnabled && rehearsalPreflightPhase !== 'manual-check' ? (
+              <View style={styles.microCalibrationBox}>
+                <View style={styles.microCalibrationMeterTrack}>
+                  <View
+                    style={[
+                      styles.microCalibrationMeterFill,
+                      {
+                        width: `${Math.max(4, Math.round(signalLevel * 100))}%`,
+                        backgroundColor:
+                          microphoneCalibrationStatus === 'weak' ? '#d98a00' : '#2b9348',
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.microCalibrationText}>
+                  Calibracion micro:{' '}
+                  {microphoneCalibrationStatus === 'measuring-silence'
+                    ? `midiendo silencio ${Math.round(microphoneCalibrationProgress * 100)}%`
+                    : microphoneCalibrationStatus === 'measuring-voice'
+                      ? `midiendo voz ${Math.round(microphoneCalibrationProgress * 100)}%`
+                      : microphoneCalibrationStatus === 'ready'
+                        ? 'lista'
+                        : microphoneCalibrationStatus === 'weak'
+                          ? 'voz debil frente al ruido'
+                          : 'pendiente'}
+                </Text>
+                <Text style={styles.microCalibrationTextSmall}>
+                  Actual {formatMicroLevel(rawLevel)} - Ruido {formatMicroLevel(microphoneNoiseFloor)} - Voz{' '}
+                  {formatMicroLevel(microphoneVoiceLevel)} - Umbral {formatMicroLevel(voiceThreshold)}
+                </Text>
+              </View>
+            ) : null}
             {songPlaybackProbeStatus ? (
               <Text style={styles.preflightStatusSecondary}>{songPlaybackProbeStatus}</Text>
             ) : null}
@@ -1940,6 +2014,36 @@ const styles = StyleSheet.create({
   },
   preflightUnselectedButtonText: {
     color: '#17324c',
+  },
+  microCalibrationBox: {
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(247, 251, 255, 0.94)',
+    borderWidth: 1,
+    borderColor: '#c9def0',
+    gap: 8,
+  },
+  microCalibrationMeterTrack: {
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: '#dce8f0',
+    overflow: 'hidden',
+  },
+  microCalibrationMeterFill: {
+    height: '100%',
+    minWidth: 8,
+    borderRadius: 999,
+  },
+  microCalibrationText: {
+    textAlign: 'center',
+    color: '#17324c',
+    fontWeight: '700',
+  },
+  microCalibrationTextSmall: {
+    textAlign: 'center',
+    color: '#47604f',
+    fontSize: 12,
+    lineHeight: 18,
   },
   buttonDisabled: {
     opacity: 0.5,
