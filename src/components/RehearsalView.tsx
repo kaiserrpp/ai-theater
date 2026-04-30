@@ -1044,6 +1044,13 @@ export const RehearsalView: React.FC<Props> = ({
 
       setRehearsalMediaStatus('Habla ahora: por ejemplo, "estoy listo para ensayar".');
       const voiceResult = await calibrateVoiceLevel();
+      if (voiceResult.status === 'error') {
+        setRehearsalMediaStatus(
+          'No he detectado voz. Cuando estes listo, pulsa Reintentar calibracion y di la frase en voz alta.'
+        );
+        return;
+      }
+
       const ratioLabel = Number.isFinite(voiceResult.voiceToNoiseRatio)
         ? voiceResult.voiceToNoiseRatio.toFixed(1)
         : 'alto';
@@ -1686,10 +1693,20 @@ export const RehearsalView: React.FC<Props> = ({
             {!hasPreparedRehearsalMedia ? (
               <TouchableOpacity
                 style={[styles.btnNext, isPreparingRehearsalMedia && styles.buttonDisabled]}
-                onPress={() => void prepareRehearsalMedia()}
+                onPress={() =>
+                  void (rehearsalPreflightPhase === 'micro-calibration'
+                    ? calibrateRehearsalMicrophone()
+                    : prepareRehearsalMedia())
+                }
                 disabled={isPreparingRehearsalMedia}
               >
-                <Text style={styles.btnText}>{isPreparingRehearsalMedia ? 'Preparando...' : 'Preparar audio y micro'}</Text>
+                <Text style={styles.btnText}>
+                  {isPreparingRehearsalMedia
+                    ? 'Preparando...'
+                    : rehearsalPreflightPhase === 'micro-calibration'
+                      ? 'Reintentar calibracion'
+                      : 'Preparar audio y micro'}
+                </Text>
               </TouchableOpacity>
             ) : null}
             {hasPreparedRehearsalMedia ? (

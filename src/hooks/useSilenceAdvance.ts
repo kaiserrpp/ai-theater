@@ -52,6 +52,7 @@ const THRESHOLD_MULTIPLIER = 3;
 const THRESHOLD_RELEASE_FACTOR = 0.74;
 const VOICE_THRESHOLD_FACTOR = 0.55;
 const MIN_HEALTHY_VOICE_TO_NOISE_RATIO = 1.8;
+const VOICE_CALIBRATION_MAX_WAIT_MS = 10000;
 const SILENCE_MS = 1000;
 const LINE_PREP_MS = 280;
 const VOICE_CONFIRM_MS = 140;
@@ -59,8 +60,11 @@ const VOICE_CONFIRM_MS = 140;
 type CalibrationRun = {
   mode: 'silence' | 'voice';
   startedAt: number;
+  sampleStartedAt: number;
   durationMs: number;
+  maxWaitMs: number;
   samples: number[];
+  voiceBurstMs: number;
   timeout: ReturnType<typeof setTimeout>;
   resolve: (result: MicrophoneCalibrationResult) => void;
 };
@@ -367,57 +371,95 @@ export const useSilenceAdvance = ({
 
     const calibrationRun = calibrationRunRef.current;
     if (calibrationRun) {
-      calibrationRun.samples.push(rms);
-      const elapsedMs = now - calibrationRun.startedAt;
-      const progress = Math.max(0, Math.min(1, elapsedMs / calibrationRun.durationMs));
-      setMicrophoneCalibrationProgress(progress);
+      if (calibrationRun.mode === 'voice' && calibrationRun.sampleStartedAt === 0) {
+        const voiceStartThreshold = Math.max(
+          MIN_VOICE_THRESHOLD,
+          microphoneNoiseFloorRef.current * THRESHOLD_MULTIPLIER
+        );
 
-      if (elapsedMs >= calibrationRun.durationMs) {
-        clearTimeout(calibrationRun.timeout);
-        calibrationRunRef.current = null;
-
-        if (calibrationRun.mode === 'silence') {
-          const noiseFloor = Math.max(getPercentile(calibrationRun.samples, 0.82), 0);
-          microphoneNoiseFloorRef.current = noiseFloor;
-          const nextThreshold = calculateSessionThreshold(noiseFloor, microphoneVoiceLevelRef.current);
-          currentThresholdRef.current = nextThreshold;
-          releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
-          setMicrophoneNoiseFloor(noiseFloor);
-          setVoiceThreshold(nextThreshold);
-          setMicrophoneCalibrationStatus('ready');
-          setMicrophoneCalibrationProgress(1);
-          calibrationRun.resolve(
-            buildCalibrationResult({
-              status: 'ready',
-              noiseFloor,
-              voiceLevel: microphoneVoiceLevelRef.current,
-              voiceThreshold: nextThreshold,
-            })
-          );
+        if (rms >= voiceStartThreshold) {
+          calibrationRun.voiceBurstMs += frameDeltaMs;
+          if (calibrationRun.voiceBurstMs >= VOICE_CONFIRM_MS) {
+            calibrationRun.sampleStartedAt = now;
+            calibrationRun.samples = [rms];
+          }
         } else {
-          const voiceLevel = Math.max(getPercentile(calibrationRun.samples, 0.86), 0);
-          const noiseFloor = microphoneNoiseFloorRef.current;
-          const nextThreshold = calculateSessionThreshold(noiseFloor, voiceLevel);
-          const voiceToNoiseRatio =
-            noiseFloor > 0 ? voiceLevel / noiseFloor : Number.POSITIVE_INFINITY;
-          const nextStatus: MicrophoneCalibrationStatus =
-            voiceToNoiseRatio >= MIN_HEALTHY_VOICE_TO_NOISE_RATIO ? 'ready' : 'weak';
+          calibrationRun.voiceBurstMs = 0;
+        }
 
-          microphoneVoiceLevelRef.current = voiceLevel;
-          currentThresholdRef.current = nextThreshold;
-          releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
-          setMicrophoneVoiceLevel(voiceLevel);
-          setVoiceThreshold(nextThreshold);
-          setMicrophoneCalibrationStatus(nextStatus);
-          setMicrophoneCalibrationProgress(1);
-          calibrationRun.resolve(
-            buildCalibrationResult({
-              status: nextStatus,
+        const waitElapsedMs = now - calibrationRun.startedAt;
+        setMicrophoneCalibrationProgress(Math.min(0.08, waitElapsedMs / calibrationRun.maxWaitMs));
+
+        if (waitElapsedMs >= calibrationRun.maxWaitMs) {
+          clearTimeout(calibrationRun.timeout);
+          calibrationRunRef.current = null;
+          const fallbackResult = buildCalibrationResult({
+            status: 'error',
+            noiseFloor: microphoneNoiseFloorRef.current,
+            voiceLevel: 0,
+            voiceThreshold: currentThresholdRef.current,
+          });
+          setMicrophoneCalibrationStatus('error');
+          setMicrophoneCalibrationProgress(0);
+          calibrationRun.resolve(fallbackResult);
+        }
+      } else {
+        calibrationRun.samples.push(rms);
+        const sampleStartedAt = calibrationRun.sampleStartedAt || calibrationRun.startedAt;
+        const elapsedMs = now - sampleStartedAt;
+        const progress = Math.max(0, Math.min(1, elapsedMs / calibrationRun.durationMs));
+        setMicrophoneCalibrationProgress(progress);
+
+        if (elapsedMs >= calibrationRun.durationMs) {
+          clearTimeout(calibrationRun.timeout);
+          calibrationRunRef.current = null;
+
+          if (calibrationRun.mode === 'silence') {
+            const noiseFloor = Math.max(getPercentile(calibrationRun.samples, 0.82), 0);
+            microphoneNoiseFloorRef.current = noiseFloor;
+            const nextThreshold = calculateSessionThreshold(
               noiseFloor,
-              voiceLevel,
-              voiceThreshold: nextThreshold,
-            })
-          );
+              microphoneVoiceLevelRef.current
+            );
+            currentThresholdRef.current = nextThreshold;
+            releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
+            setMicrophoneNoiseFloor(noiseFloor);
+            setVoiceThreshold(nextThreshold);
+            setMicrophoneCalibrationStatus('ready');
+            setMicrophoneCalibrationProgress(1);
+            calibrationRun.resolve(
+              buildCalibrationResult({
+                status: 'ready',
+                noiseFloor,
+                voiceLevel: microphoneVoiceLevelRef.current,
+                voiceThreshold: nextThreshold,
+              })
+            );
+          } else {
+            const voiceLevel = Math.max(getPercentile(calibrationRun.samples, 0.86), 0);
+            const noiseFloor = microphoneNoiseFloorRef.current;
+            const nextThreshold = calculateSessionThreshold(noiseFloor, voiceLevel);
+            const voiceToNoiseRatio =
+              noiseFloor > 0 ? voiceLevel / noiseFloor : Number.POSITIVE_INFINITY;
+            const nextStatus: MicrophoneCalibrationStatus =
+              voiceToNoiseRatio >= MIN_HEALTHY_VOICE_TO_NOISE_RATIO ? 'ready' : 'weak';
+
+            microphoneVoiceLevelRef.current = voiceLevel;
+            currentThresholdRef.current = nextThreshold;
+            releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
+            setMicrophoneVoiceLevel(voiceLevel);
+            setVoiceThreshold(nextThreshold);
+            setMicrophoneCalibrationStatus(nextStatus);
+            setMicrophoneCalibrationProgress(1);
+            calibrationRun.resolve(
+              buildCalibrationResult({
+                status: nextStatus,
+                noiseFloor,
+                voiceLevel,
+                voiceThreshold: nextThreshold,
+              })
+            );
+          }
         }
       }
     }
@@ -530,6 +572,7 @@ export const useSilenceAdvance = ({
 
       return new Promise<MicrophoneCalibrationResult>((resolve) => {
         const startedAt = getNow();
+        const maxWaitMs = mode === 'voice' ? VOICE_CALIBRATION_MAX_WAIT_MS : durationMs;
         const timeout = setTimeout(() => {
           if (!calibrationRunRef.current) {
             return;
@@ -538,6 +581,19 @@ export const useSilenceAdvance = ({
           const currentRun = calibrationRunRef.current;
           calibrationRunRef.current = null;
           const samples = currentRun.samples;
+
+          if (currentRun.mode === 'voice' && currentRun.sampleStartedAt === 0) {
+            const result = buildCalibrationResult({
+              status: 'error',
+              noiseFloor: microphoneNoiseFloorRef.current,
+              voiceLevel: 0,
+              voiceThreshold: currentThresholdRef.current,
+            });
+            setMicrophoneCalibrationStatus('error');
+            setMicrophoneCalibrationProgress(0);
+            resolve(result);
+            return;
+          }
 
           if (currentRun.mode === 'silence') {
             const noiseFloor = Math.max(getPercentile(samples, 0.82), 0);
@@ -586,13 +642,16 @@ export const useSilenceAdvance = ({
               voiceThreshold: nextThreshold,
             })
           );
-        }, durationMs + 180);
+        }, maxWaitMs + durationMs + 400);
 
         calibrationRunRef.current = {
           mode,
           startedAt,
+          sampleStartedAt: mode === 'silence' ? startedAt : 0,
           durationMs,
+          maxWaitMs,
           samples: [],
+          voiceBurstMs: 0,
           timeout,
           resolve,
         };
