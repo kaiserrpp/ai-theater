@@ -113,6 +113,9 @@ const createSilentWavObjectUrl = () => createWavObjectUrl({ durationMs: 120 });
 const createProbeToneObjectUrl = () =>
   createWavObjectUrl({ frequencyHz: 660, durationMs: 380, volume: 0.28 });
 
+const createMicroCalibrationToneObjectUrl = () =>
+  createWavObjectUrl({ frequencyHz: 880, durationMs: 260, volume: 0.34 });
+
 const formatPlaybackProbeError = (error: unknown) => {
   const errorName =
     error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
@@ -710,6 +713,39 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, [getSongAudioPlayer]);
 
+  const playMicroCalibrationBeep = useCallback(async () => {
+    const player = getSongAudioPlayer();
+    const toneObjectUrl = createMicroCalibrationToneObjectUrl();
+
+    if (!player || !toneObjectUrl) {
+      await wait(320);
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      let isResolved = false;
+
+      const finish = () => {
+        if (isResolved) {
+          return;
+        }
+        isResolved = true;
+        player.onended = null;
+        player.onerror = null;
+        URL.revokeObjectURL(toneObjectUrl);
+        resolve();
+      };
+
+      player.pause();
+      player.currentTime = 0;
+      player.src = toneObjectUrl;
+      player.onended = finish;
+      player.onerror = finish;
+      void player.play().catch(finish);
+      setTimeout(finish, 900);
+    });
+  }, [getSongAudioPlayer]);
+
   const goBackLine = useCallback(() => {
     stopRehearsalSpeech();
     stopStandaloneSongAudio();
@@ -1040,13 +1076,35 @@ export const RehearsalView: React.FC<Props> = ({
       setRehearsalMediaStatus(
         `Ruido base medido (${formatMicroLevel(noiseResult.noiseFloor)}). Ahora preparate para decir una frase.`
       );
-      await wait(900);
 
-      setRehearsalMediaStatus('Habla ahora durante unos segundos: por ejemplo, "estoy listo para ensayar".');
-      const voiceResult = await calibrateVoiceLevel();
+      setRehearsalMediaStatus('Siri te dira la frase de prueba antes del pitido.');
+      await new Promise<void>((resolve) => {
+        let isResolved = false;
+
+        const finish = () => {
+          if (isResolved) {
+            return;
+          }
+          isResolved = true;
+          resolve();
+        };
+
+        speakRehearsalSpeech('Repite esta frase: prueba de micro, despues del pitido.', {
+          onDone: finish,
+          onError: finish,
+        });
+        setTimeout(finish, 5200);
+      });
+
+      setRehearsalMediaStatus('Pitido...');
+      await playMicroCalibrationBeep();
+      await wait(450);
+
+      setRehearsalMediaStatus('Habla ahora: "prueba de micro". Te escucho durante 2 segundos.');
+      const voiceResult = await calibrateVoiceLevel(2000);
       if (voiceResult.status === 'error') {
         setRehearsalMediaStatus(
-          'No he detectado voz. Cuando estes listo, pulsa Reintentar calibracion y di la frase en voz alta.'
+          `No he detectado voz suficiente. Ruido ${formatMicroLevel(voiceResult.noiseFloor)}, voz ${formatMicroLevel(voiceResult.voiceLevel)}. Pulsa Reintentar calibracion y di "prueba de micro" despues del pitido.`
         );
         return;
       }
@@ -1081,6 +1139,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, [
     calibrateAmbientNoise,
     calibrateVoiceLevel,
+    playMicroCalibrationBeep,
     primeSongPlayback,
     releaseListening,
     resetMicrophoneCalibration,

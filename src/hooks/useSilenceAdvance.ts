@@ -53,7 +53,8 @@ const THRESHOLD_RELEASE_FACTOR = 0.74;
 const VOICE_THRESHOLD_FACTOR = 0.55;
 const MIN_HEALTHY_VOICE_TO_NOISE_RATIO = 1.8;
 const VOICE_CALIBRATION_MAX_WAIT_MS = 10000;
-const VOICE_CALIBRATION_MIN_SIGNAL_FACTOR = 1.18;
+const VOICE_CALIBRATION_MIN_SIGNAL_FACTOR = 1.04;
+const VOICE_CALIBRATION_MIN_DELTA = 0.0006;
 const SILENCE_MS = 1000;
 const LINE_PREP_MS = 280;
 const VOICE_CONFIRM_MS = 140;
@@ -141,7 +142,11 @@ const calculateSessionThreshold = (noiseFloor: number, voiceLevel: number) => {
 
 const hasUsableVoiceCalibration = (noiseFloor: number, voiceLevel: number) =>
   voiceLevel >=
-  Math.max(MIN_VOICE_THRESHOLD * 0.7, noiseFloor * VOICE_CALIBRATION_MIN_SIGNAL_FACTOR);
+  Math.max(
+    MIN_VOICE_THRESHOLD * 0.12,
+    noiseFloor + VOICE_CALIBRATION_MIN_DELTA,
+    noiseFloor * VOICE_CALIBRATION_MIN_SIGNAL_FACTOR
+  );
 
 export const useSilenceAdvance = ({
   enabledForCurrentLine,
