@@ -53,6 +53,7 @@ const THRESHOLD_RELEASE_FACTOR = 0.74;
 const VOICE_THRESHOLD_FACTOR = 0.55;
 const MIN_HEALTHY_VOICE_TO_NOISE_RATIO = 1.8;
 const VOICE_CALIBRATION_MAX_WAIT_MS = 10000;
+const VOICE_CALIBRATION_MIN_SIGNAL_FACTOR = 1.18;
 const SILENCE_MS = 1000;
 const LINE_PREP_MS = 280;
 const VOICE_CONFIRM_MS = 140;
@@ -137,6 +138,10 @@ const calculateSessionThreshold = (noiseFloor: number, voiceLevel: number) => {
     Math.min(noiseBasedThreshold, voiceLevel * VOICE_THRESHOLD_FACTOR)
   );
 };
+
+const hasUsableVoiceCalibration = (noiseFloor: number, voiceLevel: number) =>
+  voiceLevel >=
+  Math.max(MIN_VOICE_THRESHOLD * 0.7, noiseFloor * VOICE_CALIBRATION_MIN_SIGNAL_FACTOR);
 
 export const useSilenceAdvance = ({
   enabledForCurrentLine,
@@ -442,21 +447,31 @@ export const useSilenceAdvance = ({
             const voiceToNoiseRatio =
               noiseFloor > 0 ? voiceLevel / noiseFloor : Number.POSITIVE_INFINITY;
             const nextStatus: MicrophoneCalibrationStatus =
-              voiceToNoiseRatio >= MIN_HEALTHY_VOICE_TO_NOISE_RATIO ? 'ready' : 'weak';
+              hasUsableVoiceCalibration(noiseFloor, voiceLevel)
+                ? voiceToNoiseRatio >= MIN_HEALTHY_VOICE_TO_NOISE_RATIO
+                  ? 'ready'
+                  : 'weak'
+                : 'error';
 
             microphoneVoiceLevelRef.current = voiceLevel;
-            currentThresholdRef.current = nextThreshold;
-            releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
             setMicrophoneVoiceLevel(voiceLevel);
-            setVoiceThreshold(nextThreshold);
             setMicrophoneCalibrationStatus(nextStatus);
-            setMicrophoneCalibrationProgress(1);
+
+            if (nextStatus === 'error') {
+              setMicrophoneCalibrationProgress(0);
+            } else {
+              currentThresholdRef.current = nextThreshold;
+              releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
+              setVoiceThreshold(nextThreshold);
+              setMicrophoneCalibrationProgress(1);
+            }
+
             calibrationRun.resolve(
               buildCalibrationResult({
                 status: nextStatus,
                 noiseFloor,
                 voiceLevel,
-                voiceThreshold: nextThreshold,
+                voiceThreshold: nextStatus === 'error' ? currentThresholdRef.current : nextThreshold,
               })
             );
           }
@@ -625,21 +640,31 @@ export const useSilenceAdvance = ({
           const voiceToNoiseRatio =
             noiseFloor > 0 ? voiceLevel / noiseFloor : Number.POSITIVE_INFINITY;
           const nextStatus: MicrophoneCalibrationStatus =
-            voiceToNoiseRatio >= MIN_HEALTHY_VOICE_TO_NOISE_RATIO ? 'ready' : 'weak';
+            hasUsableVoiceCalibration(noiseFloor, voiceLevel)
+              ? voiceToNoiseRatio >= MIN_HEALTHY_VOICE_TO_NOISE_RATIO
+                ? 'ready'
+                : 'weak'
+              : 'error';
 
           microphoneVoiceLevelRef.current = voiceLevel;
-          currentThresholdRef.current = nextThreshold;
-          releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
           setMicrophoneVoiceLevel(voiceLevel);
-          setVoiceThreshold(nextThreshold);
           setMicrophoneCalibrationStatus(nextStatus);
-          setMicrophoneCalibrationProgress(1);
+
+          if (nextStatus === 'error') {
+            setMicrophoneCalibrationProgress(0);
+          } else {
+            currentThresholdRef.current = nextThreshold;
+            releaseThresholdRef.current = nextThreshold * THRESHOLD_RELEASE_FACTOR;
+            setVoiceThreshold(nextThreshold);
+            setMicrophoneCalibrationProgress(1);
+          }
+
           resolve(
             buildCalibrationResult({
               status: nextStatus,
               noiseFloor,
               voiceLevel,
-              voiceThreshold: nextThreshold,
+              voiceThreshold: nextStatus === 'error' ? currentThresholdRef.current : nextThreshold,
             })
           );
         }, maxWaitMs + durationMs + 400);
@@ -647,7 +672,7 @@ export const useSilenceAdvance = ({
         calibrationRunRef.current = {
           mode,
           startedAt,
-          sampleStartedAt: mode === 'silence' ? startedAt : 0,
+          sampleStartedAt: startedAt,
           durationMs,
           maxWaitMs,
           samples: [],
@@ -666,7 +691,7 @@ export const useSilenceAdvance = ({
   );
 
   const calibrateVoiceLevel = useCallback(
-    (durationMs = 2200) => runMicrophoneCalibration('voice', durationMs),
+    (durationMs = 3200) => runMicrophoneCalibration('voice', durationMs),
     [runMicrophoneCalibration]
   );
 

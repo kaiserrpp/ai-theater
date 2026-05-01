@@ -1042,7 +1042,7 @@ export const RehearsalView: React.FC<Props> = ({
       );
       await wait(900);
 
-      setRehearsalMediaStatus('Habla ahora: por ejemplo, "estoy listo para ensayar".');
+      setRehearsalMediaStatus('Habla ahora durante unos segundos: por ejemplo, "estoy listo para ensayar".');
       const voiceResult = await calibrateVoiceLevel();
       if (voiceResult.status === 'error') {
         setRehearsalMediaStatus(
