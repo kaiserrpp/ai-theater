@@ -840,115 +840,55 @@ export const SongManagerPanel: React.FC<Props> = ({
     setMusicalNumberEndLineIndex(entry.lineIndex);
   };
 
-  const pickPlaylistAudio = useCallback(
+  const pickPlaylistAudios = useCallback(
     (
       musicalNumber: PracticeMusicalNumberAsset,
       mode: SongPlaybackMode
-    ): SharedSongAudioAsset | null => {
+    ): SharedSongAudioAsset[] => {
       const candidates =
         mode === 'all'
           ? musicalNumber.practiceAudios
           : musicalNumber.practiceAudios.filter((audio) => audio.kind === mode);
 
       if (!candidates.length) {
-        return null;
+        return [];
       }
 
-      if (mode === 'all') {
-        const karaokeRoleMatchedAudio = candidates.find(
-          (audio) =>
-            audio.kind === 'karaoke' &&
-            audio.guideRoles.some((role) => myRoles.includes(role))
-        );
-        const anyRoleMatchedAudio = candidates.find((audio) =>
-          audio.guideRoles.some((role) => myRoles.includes(role))
-        );
+      const pickMostTaggedAudios = (audioList: SharedSongAudioAsset[]) => {
+        if (!audioList.length) {
+          return [];
+        }
 
-        return (
-          karaokeRoleMatchedAudio ??
-          candidates.find((audio) => audio.kind === 'karaoke') ??
-          anyRoleMatchedAudio ??
-          candidates[0]
-        );
-      }
-
-      const karaokeAudios = candidates.filter((audio) => audio.kind === 'karaoke');
-      const vocalGuideAudios = candidates.filter((audio) => audio.kind === 'vocal_guide');
-      const participantRoles = Array.from(
-        new Set(candidates.flatMap((audio) => audio.guideRoles))
-      );
-      const allParticipantsCovered =
-        participantRoles.length > 0 && participantRoles.every((role) => myRoles.includes(role));
-      const getRoleStats = (audio: SharedSongAudioAsset) => ({
-        overlapCount: audio.guideRoles.filter((role) => myRoles.includes(role)).length,
-        outsideCount: audio.guideRoles.filter((role) => !myRoles.includes(role)).length,
-        taggedCount: audio.guideRoles.length,
-      });
-      const sortAudioList = (
-        audioList: SharedSongAudioAsset[],
-        sortMode: 'matching-vocal' | 'complement-vocal' | 'karaoke'
-      ) =>
-        [...audioList].sort((leftAudio, rightAudio) => {
-          const leftStats = getRoleStats(leftAudio);
-          const rightStats = getRoleStats(rightAudio);
-
-          if (sortMode === 'matching-vocal') {
-            if (rightStats.overlapCount !== leftStats.overlapCount) {
-              return rightStats.overlapCount - leftStats.overlapCount;
-            }
-          }
-
-          if (sortMode === 'complement-vocal') {
-            if (rightStats.outsideCount !== leftStats.outsideCount) {
-              return rightStats.outsideCount - leftStats.outsideCount;
-            }
-          }
-
-          if (sortMode === 'karaoke') {
-            if (rightStats.overlapCount !== leftStats.overlapCount) {
-              return rightStats.overlapCount - leftStats.overlapCount;
-            }
-          }
-
-          if (rightStats.taggedCount !== leftStats.taggedCount) {
-            return rightStats.taggedCount - leftStats.taggedCount;
+        const sortedAudios = [...audioList].sort((leftAudio, rightAudio) => {
+          if (rightAudio.guideRoles.length !== leftAudio.guideRoles.length) {
+            return rightAudio.guideRoles.length - leftAudio.guideRoles.length;
           }
 
           return leftAudio.label.localeCompare(rightAudio.label);
         });
 
-      const matchingVocalGuides = sortAudioList(
-        vocalGuideAudios.filter((audio) => getRoleStats(audio).overlapCount > 0),
-        'matching-vocal'
-      );
-      const complementaryVocalGuides = sortAudioList(
-        vocalGuideAudios.filter((audio) => {
-          const stats = getRoleStats(audio);
-          return stats.overlapCount === 0 && stats.outsideCount > 0;
-        }),
-        'complement-vocal'
-      );
-      const sortedKaraokes = sortAudioList(karaokeAudios, 'karaoke');
+        const topTaggedCount = sortedAudios[0]?.guideRoles.length ?? 0;
+        return sortedAudios.filter((audio) => audio.guideRoles.length === topTaggedCount);
+      };
 
-      if (mode === 'karaoke') {
-        if (allParticipantsCovered && sortedKaraokes.length > 0) {
-          return sortedKaraokes[0];
-        }
-
-        if (complementaryVocalGuides.length > 0) {
-          return complementaryVocalGuides[0];
-        }
-
-        return sortedKaraokes[0] ?? matchingVocalGuides[0] ?? vocalGuideAudios[0] ?? candidates[0];
+      if (mode === 'karaoke' || mode === 'vocal_guide') {
+        return pickMostTaggedAudios(candidates);
       }
 
-      if (mode === 'vocal_guide') {
-        return matchingVocalGuides[0] ?? sortedKaraokes[0] ?? vocalGuideAudios[0] ?? candidates[0];
+      const karaokeChoices = pickMostTaggedAudios(
+        candidates.filter((audio) => audio.kind === 'karaoke')
+      );
+      const vocalGuideChoices = pickMostTaggedAudios(
+        candidates.filter((audio) => audio.kind === 'vocal_guide')
+      );
+
+      if (karaokeChoices.length && vocalGuideChoices.length) {
+        return [...karaokeChoices, ...vocalGuideChoices];
       }
 
-      return candidates[0];
+      return karaokeChoices.length ? karaokeChoices : vocalGuideChoices;
     },
-    [myRoles]
+    []
   );
 
   const cancelQueuedReplay = useCallback((resetSession = true) => {
@@ -1171,11 +1111,12 @@ export const SongManagerPanel: React.FC<Props> = ({
       }
 
       const entries = musicalNumbersForCurrentView
-        .map((musicalNumber) => {
-          const audio = pickPlaylistAudio(musicalNumber, mode);
-          return audio ? { musicalNumber, audio } : null;
-        })
-        .filter((entry): entry is PlaylistEntry => Boolean(entry));
+        .flatMap((musicalNumber) =>
+          pickPlaylistAudios(musicalNumber, mode).map((audio) => ({
+            musicalNumber,
+            audio,
+          }))
+        );
 
       if (!entries.length) {
         setPreviewAudioError(
@@ -1207,7 +1148,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     [
       activePlaylistMode,
       cancelQueuedReplay,
-      pickPlaylistAudio,
+      pickPlaylistAudios,
       previewAudioElement,
       selectedPracticeMusicalNumber,
       musicalNumbersForCurrentView,

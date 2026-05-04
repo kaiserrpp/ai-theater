@@ -264,6 +264,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [hasPreparedRehearsalMedia, setHasPreparedRehearsalMedia] = useState(false);
   const [hasCompletedRehearsalPreflight, setHasCompletedRehearsalPreflight] = useState(false);
   const [rehearsalPreflightPhase, setRehearsalPreflightPhase] = useState<RehearsalPreflightPhase>(null);
+  const [hasConfirmedRehearsalSetup, setHasConfirmedRehearsalSetup] = useState(false);
   const [isSongPlaybackUnlocked, setIsSongPlaybackUnlocked] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
@@ -497,7 +498,7 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
-    if (listenModeSelection === 'pending') {
+    if (!hasConfirmedRehearsalSetup || listenModeSelection === 'pending') {
       setIsRehearsalMediaReady(false);
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(false);
@@ -534,6 +535,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, [
     autoListenEnabled,
     hasCompletedRehearsalPreflight,
+    hasConfirmedRehearsalSetup,
     isListeningSupported,
     listenModeSelection,
     rehearsalPreflightPhase,
@@ -1420,12 +1422,16 @@ export const RehearsalView: React.FC<Props> = ({
   );
 
   const shouldShowInitialSetup =
-    listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending';
+    !hasConfirmedRehearsalSetup ||
+    listenModeSelection === 'pending' ||
+    rehearsalAudioModeSelection === 'pending';
 
   const handleStartConfiguredRehearsal = useCallback(() => {
-    if (rehearsalAudioModeSelection === 'pending') {
+    if (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') {
       return;
     }
+
+    setHasConfirmedRehearsalSetup(true);
 
     if (listenModeSelection === 'auto') {
       void enableAutoListenForDevice();
