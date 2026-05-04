@@ -976,6 +976,7 @@ export const RehearsalView: React.FC<Props> = ({
 
   const prepareRehearsalMedia = useCallback(async (phase = rehearsalPreflightPhase ?? 'auto-initial') => {
     const shouldUseAutoListen = phase !== 'manual-check';
+    const isManualRehearsalAudioCheck = phase === 'manual-check' && listenModeSelection === 'manual';
     const primeSongPlaybackPromise = primeSongPlayback();
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
@@ -985,25 +986,28 @@ export const RehearsalView: React.FC<Props> = ({
     setAutoListenEnabled(shouldUseAutoListen);
     setTemporarilySuspendingAutoListen(false);
 
-    if (phase === 'manual-check') {
-      setRehearsalMediaStatus('Probando la voz con el micro desactivado...');
+    if (isManualRehearsalAudioCheck) {
+      setRehearsalMediaStatus('Paso 1: probamos el altavoz. No se activara el micro.');
+    } else if (phase === 'manual-check') {
+      setRehearsalMediaStatus('Paso 1: probamos el altavoz sin micro.');
     } else if (phase === 'auto-final') {
-      setRehearsalMediaStatus('Reactivando el micro para una comprobacion final...');
+      setRehearsalMediaStatus('Paso 1: comprobamos otra vez el altavoz.');
     } else {
-      setRehearsalMediaStatus('Abriendo el micro de prueba...');
+      setRehearsalMediaStatus('Paso 1: preparamos el altavoz.');
     }
 
     try {
       if (shouldUseAutoListen) {
         await startListening();
         await wait(450);
+        setRehearsalMediaStatus('Pausamos el micro para escuchar la prueba.');
+        await stopListening();
+        await wait(220);
+      } else {
+        await wait(120);
       }
 
-      setRehearsalMediaStatus('Liberando el micro para probar la voz...');
-      await stopListening();
-      await wait(220);
-
-      setRehearsalMediaStatus('Escucha la frase de prueba de Siri.');
+      setRehearsalMediaStatus('Escucha una frase corta.');
 
       await new Promise<void>((resolve) => {
         let isResolved = false;
@@ -1042,18 +1046,21 @@ export const RehearsalView: React.FC<Props> = ({
       setHasPreparedRehearsalMedia(true);
       setSongPlaybackProbeStatus(songProbeResult);
       setRehearsalMediaStatus(
-        phase === 'manual-check'
+        isManualRehearsalAudioCheck
+          ? 'Si la has oido, pulsa Empezar sin micro.'
+          : phase === 'manual-check'
           ? 'Si ahora has oido la frase, volveremos a activar el micro y haremos una comprobacion final.'
           : phase === 'auto-final'
             ? 'Si has oido esta ultima frase, empezaremos el ensayo con micro automatico.'
-            : 'Si has oido la frase, ya podemos empezar el ensayo.'
+            : 'Si la has oido, seguimos con la prueba de micro.'
       );
     } catch {
-      setRehearsalMediaStatus('No se pudo preparar el micro. Puedes volver a intentarlo.');
+      setRehearsalMediaStatus('No se pudo reproducir la prueba. Puedes volver a intentarlo.');
     } finally {
       setIsPreparingRehearsalMedia(false);
     }
   }, [
+    listenModeSelection,
     primeSongPlayback,
     probeSongPlayback,
     rehearsalPreflightPhase,
@@ -1153,6 +1160,19 @@ export const RehearsalView: React.FC<Props> = ({
 
   const handlePreflightHeardVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'manual-check') {
+      if (listenModeSelection === 'manual') {
+        void primeSongPlayback();
+        setAutoListenEnabled(false);
+        setTemporarilySuspendingAutoListen(false);
+        setIsRehearsalMediaReady(true);
+        setHasPreparedRehearsalMedia(false);
+        setHasCompletedRehearsalPreflight(true);
+        setRehearsalPreflightPhase(null);
+        setRehearsalMediaStatus(null);
+        void releaseListening();
+        return;
+      }
+
       void prepareRehearsalMedia('auto-final');
       return;
     }
@@ -1171,25 +1191,12 @@ export const RehearsalView: React.FC<Props> = ({
   }, [
     autoListenEnabled,
     calibrateRehearsalMicrophone,
+    listenModeSelection,
     prepareRehearsalMedia,
     primeSongPlayback,
     rehearsalPreflightPhase,
+    releaseListening,
   ]);
-
-  const handleChooseManualListen = useCallback(async () => {
-    setListenModeSelection('manual');
-    setAutoListenEnabled(false);
-    setTemporarilySuspendingAutoListen(false);
-    setIsRehearsalMediaReady(true);
-    setIsPreparingRehearsalMedia(false);
-    setHasPreparedRehearsalMedia(false);
-    setHasCompletedRehearsalPreflight(true);
-    setRehearsalPreflightPhase(null);
-    setRehearsalMediaStatus(null);
-    setCompatibilityMessage(null);
-    setShowCompatibilityInfo(false);
-    await releaseListening();
-  }, [releaseListening]);
 
   const handlePreflightMissedVoice = useCallback(() => {
     if (rehearsalPreflightPhase === 'auto-initial') {
@@ -1198,6 +1205,13 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     if (rehearsalPreflightPhase === 'manual-check') {
+      if (listenModeSelection === 'manual') {
+        setHasPreparedRehearsalMedia(false);
+        setSongPlaybackProbeStatus(null);
+        setRehearsalMediaStatus('Repetimos la prueba de altavoz.');
+        return;
+      }
+
       void disableAutoListenForDevice(
         'La voz de prueba no se escuchaba bien con la escucha automatica. Empezamos el ensayo en modo manual.'
       ).then(() => {
@@ -1215,7 +1229,7 @@ export const RehearsalView: React.FC<Props> = ({
       setHasCompletedRehearsalPreflight(true);
       setRehearsalPreflightPhase(null);
     });
-  }, [disableAutoListenForDevice, prepareRehearsalMedia, rehearsalPreflightPhase]);
+  }, [disableAutoListenForDevice, listenModeSelection, prepareRehearsalMedia, rehearsalPreflightPhase]);
 
   const handlePlaySongAudio = useCallback((
     audioUrl: string,
@@ -1509,11 +1523,22 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
-    void handleChooseManualListen();
+    setListenModeSelection('manual');
+    setAutoListenEnabled(false);
+    setTemporarilySuspendingAutoListen(false);
+    setIsRehearsalMediaReady(false);
+    setIsPreparingRehearsalMedia(false);
+    setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(false);
+    setRehearsalPreflightPhase('manual-check');
+    setRehearsalMediaStatus('Primero hacemos una prueba de altavoz.');
+    setCompatibilityMessage(null);
+    setShowCompatibilityInfo(false);
+    void releaseListening();
   }, [
     enableAutoListenForDevice,
-    handleChooseManualListen,
     listenModeSelection,
+    releaseListening,
     rehearsalAudioModeSelection,
   ]);
 
@@ -1700,21 +1725,98 @@ export const RehearsalView: React.FC<Props> = ({
       </View>
     );
   };
+
+  const renderPreflightSteps = () => {
+    const isManualMode = listenModeSelection === 'manual';
+    const isAudioStepDone =
+      hasPreparedRehearsalMedia ||
+      rehearsalPreflightPhase === 'micro-calibration' ||
+      isRehearsalMediaReady;
+    const isMicroStepDone =
+      isManualMode || (isRehearsalMediaReady && listenModeSelection === 'auto');
+    const steps: {
+      title: string;
+      detail: string;
+      state: 'done' | 'active' | 'pending' | 'skipped';
+    }[] = [
+      {
+        title: 'Altavoz',
+        detail: 'Escucha una frase corta.',
+        state: isAudioStepDone ? 'done' : 'active',
+      },
+      {
+        title: 'Micro',
+        detail: isManualMode ? 'No se activara.' : 'Habla tras el pitido.',
+        state: isManualMode
+          ? 'skipped'
+          : rehearsalPreflightPhase === 'micro-calibration'
+            ? 'active'
+            : isMicroStepDone
+              ? 'done'
+              : 'pending',
+      },
+      {
+        title: 'Ensayo',
+        detail: 'Entramos en la obra.',
+        state: isRehearsalMediaReady ? 'done' : isAudioStepDone && isManualMode ? 'active' : 'pending',
+      },
+    ];
+
+    return (
+      <View style={styles.preflightSteps}>
+        {steps.map((step) => (
+          <View key={step.title} style={styles.preflightStep}>
+            <View
+              style={[
+                styles.preflightStepBadge,
+                step.state === 'done' && styles.preflightStepBadgeDone,
+                step.state === 'active' && styles.preflightStepBadgeActive,
+                step.state === 'skipped' && styles.preflightStepBadgeSkipped,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.preflightStepBadgeText,
+                  step.state !== 'pending' && styles.preflightStepBadgeTextActive,
+                ]}
+              >
+                {step.state === 'done'
+                  ? 'OK'
+                  : step.state === 'active'
+                    ? 'Ahora'
+                    : step.state === 'skipped'
+                      ? 'Sin'
+                      : 'Luego'}
+              </Text>
+            </View>
+            <Text style={styles.preflightStepTitle}>{step.title}</Text>
+            <Text style={styles.preflightStepDetail}>{step.detail}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   if (!isRehearsalMediaReady) {
     return (
       <View style={styles.container}>
-        {renderHeader('Preparando audio y micro')}
+        {renderHeader(listenModeSelection === 'manual' ? 'Preparando audio' : 'Preparando audio y micro')}
         <View style={styles.intro}>
           <View style={styles.preflightCard}>
+            {renderPreflightSteps()}
             <Text style={styles.preflightTitle}>
               {rehearsalPreflightPhase === 'micro-calibration'
                 ? 'Calibrar micro'
-                : 'Preparar ensayo'}
+                : listenModeSelection === 'manual'
+                  ? 'Probar altavoz'
+                  : 'Preparar ensayo'}
             </Text>
             <Text style={styles.preflightText}>
               {rehearsalPreflightPhase === 'micro-calibration'
                 ? 'Ya tenemos el audio preparado. Ahora medimos el ruido de fondo y tu voz para fijar un umbral estable antes de empezar.'
-                : 'Vamos a reproducir una frase corta antes de empezar. Si no se oye a la primera, probaremos automaticamente la combinacion auto, manual y auto otra vez.'}
+                : listenModeSelection === 'manual'
+                  ? 'Solo comprobamos que oyes la app. El micro permanecera apagado.'
+                  : 'Primero comprobamos que se oye la app. Despues calibraremos el micro.'}
             </Text>
             {rehearsalMediaStatus ? (
               <Text style={styles.preflightStatus}>{rehearsalMediaStatus}</Text>
@@ -1780,7 +1882,9 @@ export const RehearsalView: React.FC<Props> = ({
                   onPress={handlePreflightHeardVoice}
                 >
                   <Text style={styles.preflightConfirmText}>
-                    {rehearsalPreflightPhase === 'manual-check'
+                    {rehearsalPreflightPhase === 'manual-check' && listenModeSelection === 'manual'
+                      ? 'Empezar sin micro'
+                      : rehearsalPreflightPhase === 'manual-check'
                       ? 'Ahora si la oigo'
                       : rehearsalPreflightPhase === 'auto-final'
                         ? 'Perfecto, se oye'
@@ -1792,7 +1896,9 @@ export const RehearsalView: React.FC<Props> = ({
                   onPress={handlePreflightMissedVoice}
                 >
                   <Text style={styles.preflightFallbackText}>
-                    {rehearsalPreflightPhase === 'manual-check'
+                    {rehearsalPreflightPhase === 'manual-check' && listenModeSelection === 'manual'
+                      ? 'Repetir prueba'
+                      : rehearsalPreflightPhase === 'manual-check'
                       ? 'Sigue sin oirse'
                       : rehearsalPreflightPhase === 'auto-final'
                         ? 'No se oye con micro'
@@ -2156,6 +2262,58 @@ const styles = StyleSheet.create({
   },
   preflightUnselectedButtonText: {
     color: '#17324c',
+  },
+  preflightSteps: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  preflightStep: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderWidth: 1,
+    borderColor: '#d7e6f5',
+  },
+  preflightStepBadge: {
+    minWidth: 42,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#eef4fb',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  preflightStepBadgeDone: {
+    backgroundColor: '#2b9348',
+  },
+  preflightStepBadgeActive: {
+    backgroundColor: '#1e6091',
+  },
+  preflightStepBadgeSkipped: {
+    backgroundColor: '#8a6d3b',
+  },
+  preflightStepBadgeText: {
+    color: '#17324c',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  preflightStepBadgeTextActive: {
+    color: '#fff',
+  },
+  preflightStepTitle: {
+    color: '#17324c',
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  preflightStepDetail: {
+    color: '#5a6f82',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4,
+    textAlign: 'center',
   },
   microCalibrationBox: {
     padding: 14,
