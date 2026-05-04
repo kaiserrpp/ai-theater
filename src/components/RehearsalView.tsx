@@ -817,6 +817,10 @@ export const RehearsalView: React.FC<Props> = ({
   }, [currentLine, isFinished, isMyTurn]);
 
   useEffect(() => {
+    if (rehearsalPreflightPhase === 'micro-calibration') {
+      return;
+    }
+
     if (!effectiveAutoListenEnabled) {
       if (isListeningActive) {
         void stopListening();
@@ -842,6 +846,7 @@ export const RehearsalView: React.FC<Props> = ({
     effectiveAutoListenEnabled,
     isListeningActive,
     listeningStatus,
+    rehearsalPreflightPhase,
     shouldKeepListeningWarmDuringSong,
     shouldArmListeningForCurrentLine,
     startListening,
