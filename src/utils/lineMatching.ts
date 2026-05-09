@@ -178,6 +178,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   specks: 'specs',
   specs: 'specs',
   tanta: 'santa',
+  todavia: 'aun',
   vuelvete: 'volver',
 };
 
@@ -191,6 +192,8 @@ const PHRASE_ALIASES: [RegExp, string][] = [
   [/\bsanta fe\b/g, ' santafe '],
   [/\bsetenta\s+treinta\b/g, ' 70 30 '],
   [/\bsesenta\s+cuarenta\b/g, ' 60 40 '],
+  [/\bun\s+vete\s+a\s+dormir\b/g, ' vuelve dormir '],
+  [/\bvete\s+a\s+dormir\b/g, ' vuelve dormir '],
 ];
 
 export const INTELLIGENT_AUTO_ADVANCE_THRESHOLD = 0.86;
