@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { submitIntelligentLineFeedback } from '../api/sharedScripts';
 import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
@@ -17,6 +17,7 @@ import {
   SharedSongAudioAsset,
   SharedSongAudioKind,
   IntelligentLineFeedbackEntry,
+  IntelligentLineFeedbackIssueType,
   IntelligentLineFeedbackResult,
 } from '../types/sharedScript';
 import {
@@ -60,6 +61,28 @@ type LastIntelligentAutoAdvance = {
   toIndex: number;
   entry: IntelligentLineFeedbackEntry;
 };
+
+const INTELLIGENT_FALSE_POSITIVE_ISSUES: {
+  type: IntelligentLineFeedbackIssueType;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    type: 'corto_antes_de_tiempo',
+    label: 'Corto antes',
+    hint: 'La app avanzo cuando todavia estabas hablando.',
+  },
+  {
+    type: 'dije_mal_mi_frase',
+    label: 'La dije mal',
+    hint: 'La frase reconocida no deberia entrenar la regla.',
+  },
+  {
+    type: 'otro',
+    label: 'Otro',
+    hint: 'Anota cualquier pista util para revisar el caso.',
+  },
+];
 
 const wait = (durationMs: number) =>
   new Promise<void>((resolve) => {
@@ -338,6 +361,9 @@ export const RehearsalView: React.FC<Props> = ({
   >([]);
   const [pendingInvalidAutoAdvance, setPendingInvalidAutoAdvance] =
     useState<IntelligentLineFeedbackEntry | null>(null);
+  const [falsePositiveIssueType, setFalsePositiveIssueType] =
+    useState<IntelligentLineFeedbackIssueType>('corto_antes_de_tiempo');
+  const [falsePositiveIssueNote, setFalsePositiveIssueNote] = useState('');
   const [feedbackStatusMessage, setFeedbackStatusMessage] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
@@ -672,14 +698,23 @@ export const RehearsalView: React.FC<Props> = ({
     const falsePositiveEntry: IntelligentLineFeedbackEntry = {
       ...pendingInvalidAutoAdvance,
       result: 'falso_positivo',
+      issueType: falsePositiveIssueType,
+      issueNote: falsePositiveIssueNote.trim() || null,
       createdAt: new Date().toISOString(),
     };
 
     setIntelligentFeedbackEntries((previousEntries) => [...previousEntries, falsePositiveEntry]);
     setFeedbackStatusMessage('Autoavance marcado como incorrecto. Lo incluiremos en el informe.');
     setPendingInvalidAutoAdvance(null);
+    setFalsePositiveIssueType('corto_antes_de_tiempo');
+    setFalsePositiveIssueNote('');
     restartRecognition();
-  }, [pendingInvalidAutoAdvance, restartRecognition]);
+  }, [
+    falsePositiveIssueNote,
+    falsePositiveIssueType,
+    pendingInvalidAutoAdvance,
+    restartRecognition,
+  ]);
 
   const handleSendIntelligentFeedback = useCallback(async () => {
     if (!intelligentFeedbackEntries.length || isSendingFeedback) {
@@ -815,6 +850,8 @@ export const RehearsalView: React.FC<Props> = ({
       pendingInvalidAutoAdvance.lineIndex !== currentLineIndexInScript
     ) {
       setPendingInvalidAutoAdvance(null);
+      setFalsePositiveIssueType('corto_antes_de_tiempo');
+      setFalsePositiveIssueNote('');
     }
   }, [currentLineIndexInScript, pendingInvalidAutoAdvance]);
 
@@ -2217,13 +2254,55 @@ export const RehearsalView: React.FC<Props> = ({
         {canRejectAutoAdvance ? (
           <View style={styles.intelligentFalsePositiveBlock}>
             <Text style={styles.intelligentFalsePositiveText}>
-              Has vuelto tras un autoavance. Si se adelanto, marcalo para que ajustemos las reglas.
+              Has vuelto tras un autoavance. Dinos que paso para ajustar las reglas.
             </Text>
+            <View style={styles.intelligentIssueOptions}>
+              {INTELLIGENT_FALSE_POSITIVE_ISSUES.map((issue) => {
+                const isSelected = falsePositiveIssueType === issue.type;
+
+                return (
+                  <TouchableOpacity
+                    key={issue.type}
+                    style={[
+                      styles.intelligentIssueButton,
+                      isSelected && styles.intelligentIssueButtonSelected,
+                    ]}
+                    onPress={() => setFalsePositiveIssueType(issue.type)}
+                  >
+                    <Text
+                      style={[
+                        styles.intelligentIssueButtonText,
+                        isSelected && styles.intelligentIssueButtonTextSelected,
+                      ]}
+                    >
+                      {issue.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.intelligentIssueHint}>
+              {
+                INTELLIGENT_FALSE_POSITIVE_ISSUES.find(
+                  (issue) => issue.type === falsePositiveIssueType
+                )?.hint
+              }
+            </Text>
+            {falsePositiveIssueType === 'otro' ? (
+              <TextInput
+                style={styles.intelligentIssueInput}
+                value={falsePositiveIssueNote}
+                onChangeText={setFalsePositiveIssueNote}
+                placeholder="Que crees que ha pasado?"
+                placeholderTextColor="#9a6a33"
+                multiline
+              />
+            ) : null}
             <TouchableOpacity
               style={[styles.intelligentButton, styles.intelligentFalsePositiveButton]}
               onPress={handleRejectLastAutoAdvance}
             >
-              <Text style={styles.intelligentButtonText}>No era valida</Text>
+              <Text style={styles.intelligentButtonText}>Guardar incidencia</Text>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -3213,6 +3292,50 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 18,
     textAlign: 'center',
+  },
+  intelligentIssueOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  intelligentIssueButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderWidth: 1,
+    borderColor: '#d6a763',
+  },
+  intelligentIssueButtonSelected: {
+    backgroundColor: '#8a5a00',
+    borderColor: '#6d4500',
+  },
+  intelligentIssueButtonText: {
+    color: '#7a4a00',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  intelligentIssueButtonTextSelected: {
+    color: '#fff',
+  },
+  intelligentIssueHint: {
+    color: '#6b3f00',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    textAlign: 'center',
+  },
+  intelligentIssueInput: {
+    minHeight: 70,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#d6a763',
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    color: '#4a2e00',
+    textAlignVertical: 'top',
   },
   intelligentActions: {
     gap: 8,

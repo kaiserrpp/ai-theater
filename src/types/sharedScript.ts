@@ -184,6 +184,11 @@ export type IntelligentLineFeedbackResult =
   | 'auto_avance'
   | 'falso_positivo';
 
+export type IntelligentLineFeedbackIssueType =
+  | 'corto_antes_de_tiempo'
+  | 'dije_mal_mi_frase'
+  | 'otro';
+
 export interface IntelligentLineFeedbackEntry {
   lineIndex: number;
   character: string;
@@ -195,6 +200,8 @@ export interface IntelligentLineFeedbackEntry {
   matchedReferenceText: string;
   matchedReferenceIndex: number;
   language: string;
+  issueType?: IntelligentLineFeedbackIssueType | null;
+  issueNote?: string | null;
   createdAt: string;
 }
 

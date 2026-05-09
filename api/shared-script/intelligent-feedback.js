@@ -26,6 +26,14 @@ const normalizeStringArray = (value) =>
     ? Array.from(new Set(value.filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean)))
     : [];
 
+const normalizeIssueType = (value) => {
+  const issueType = clampText(value).slice(0, 60);
+
+  return ['corto_antes_de_tiempo', 'dije_mal_mi_frase', 'otro'].includes(issueType)
+    ? issueType
+    : null;
+};
+
 const normalizeEntry = (entry) => {
   if (!entry || typeof entry !== 'object') {
     return null;
@@ -50,6 +58,8 @@ const normalizeEntry = (entry) => {
     matchedReferenceIndex:
       typeof entry.matchedReferenceIndex === 'number' ? entry.matchedReferenceIndex : 0,
     language: clampText(entry.language).slice(0, 24),
+    issueType: normalizeIssueType(entry.issueType),
+    issueNote: typeof entry.issueNote === 'string' ? clampText(entry.issueNote).slice(0, 500) || null : null,
     createdAt:
       typeof entry.createdAt === 'string' && entry.createdAt.trim()
         ? entry.createdAt.trim()
