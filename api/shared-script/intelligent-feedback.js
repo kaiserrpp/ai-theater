@@ -1,5 +1,11 @@
-const { put } = require('@vercel/blob');
-const { getStorageNamespace, parseJsonBody } = require('./_shared');
+const { head, list, put } = require('@vercel/blob');
+const {
+  getSongAdminPasswordFromRequest,
+  getStorageNamespace,
+  hasSongAdminPasswordConfigured,
+  isValidSongAdminPassword,
+  parseJsonBody,
+} = require('./_shared');
 
 const MAX_ENTRIES = 500;
 const MAX_TEXT_LENGTH = 1200;
@@ -51,9 +57,99 @@ const normalizeEntry = (entry) => {
   };
 };
 
+const getPasswordFromRequest = (request) => {
+  if (typeof request.query?.password === 'string') {
+    return request.query.password;
+  }
+
+  return getSongAdminPasswordFromRequest(request);
+};
+
+const ensureCanReadFeedback = (request, response) => {
+  if (!hasSongAdminPasswordConfigured()) {
+    response.status(500).json({ error: 'Falta configurar SONG_ADMIN_PASSWORD en Vercel.' });
+    return false;
+  }
+
+  if (!isValidSongAdminPassword(getPasswordFromRequest(request))) {
+    response.status(401).json({ error: 'Password incorrecta.' });
+    return false;
+  }
+
+  return true;
+};
+
+const buildFeedbackPrefix = () => `intelligent-feedback/${getStorageNamespace()}`;
+
+const readFeedbackBlob = async (pathname) => {
+  const blob = await head(pathname);
+  const feedbackResponse = await fetch(`${blob.url}${blob.url.includes('?') ? '&' : '?'}_ts=${Date.now()}`, {
+    cache: 'no-store',
+  });
+
+  if (!feedbackResponse.ok) {
+    throw new Error('No se pudo descargar el informe.');
+  }
+
+  return feedbackResponse.json();
+};
+
+const handleGetFeedback = async (request, response) => {
+  if (!ensureCanReadFeedback(request, response)) {
+    return;
+  }
+
+  const prefix = buildFeedbackPrefix();
+  const requestedPathname =
+    typeof request.query?.pathname === 'string' && request.query.pathname.trim()
+      ? request.query.pathname.trim()
+      : '';
+
+  if (requestedPathname) {
+    if (!requestedPathname.startsWith(`${prefix}/`) || !requestedPathname.endsWith('.json')) {
+      response.status(400).json({ error: 'Ruta de informe no valida.' });
+      return;
+    }
+
+    const report = await readFeedbackBlob(requestedPathname);
+    response.status(200).json({ report });
+    return;
+  }
+
+  const scriptId =
+    typeof request.query?.scriptId === 'string' && request.query.scriptId.trim()
+      ? sanitizePathPart(request.query.scriptId, 'script')
+      : null;
+  const result = await list({
+    prefix: scriptId ? `${prefix}/${scriptId}/` : `${prefix}/`,
+    limit: 100,
+  });
+  const reports = result.blobs
+    .filter((blob) => blob.pathname.endsWith('.json'))
+    .sort((leftBlob, rightBlob) =>
+      String(rightBlob.uploadedAt ?? '').localeCompare(String(leftBlob.uploadedAt ?? ''))
+    )
+    .slice(0, 25)
+    .map((blob) => ({
+      pathname: blob.pathname,
+      uploadedAt: blob.uploadedAt,
+      size: blob.size,
+      url: blob.url,
+    }));
+
+  const latestReport = reports[0] ? await readFeedbackBlob(reports[0].pathname) : null;
+
+  response.status(200).json({
+    namespace: getStorageNamespace(),
+    count: reports.length,
+    reports,
+    latestReport,
+  });
+};
+
 module.exports = async (request, response) => {
-  if (request.method !== 'POST') {
-    response.setHeader('Allow', 'POST');
+  if (!['GET', 'POST'].includes(request.method)) {
+    response.setHeader('Allow', 'GET, POST');
     response.status(405).json({ error: 'Metodo no permitido.' });
     return;
   }
@@ -64,6 +160,11 @@ module.exports = async (request, response) => {
   }
 
   try {
+    if (request.method === 'GET') {
+      await handleGetFeedback(request, response);
+      return;
+    }
+
     const payload = parseJsonBody(request);
     const sessionId = sanitizePathPart(payload.sessionId, crypto.randomUUID());
     const scriptId = sanitizePathPart(payload.scriptId, 'script');

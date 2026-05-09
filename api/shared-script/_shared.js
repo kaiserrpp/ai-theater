@@ -17,6 +17,13 @@ const getStorageNamespace = () => {
     return sanitizeNamespace(process.env.SHARED_STORAGE_NAMESPACE);
   }
 
+  if (
+    process.env.VERCEL_ENV === 'preview' &&
+    process.env.VERCEL_GIT_COMMIT_REF === 'codex/intelligent-line-advance'
+  ) {
+    return 'production';
+  }
+
   if (process.env.VERCEL_ENV === 'production') {
     return 'production';
   }
