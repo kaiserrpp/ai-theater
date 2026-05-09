@@ -771,6 +771,20 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, []);
 
+  const enableIntelligentListenForDevice = useCallback(async () => {
+    setListenModeSelection('intelligent');
+    setAutoListenEnabled(true);
+    setTemporarilySuspendingAutoListen(false);
+    setIsRehearsalMediaReady(false);
+    setIsPreparingRehearsalMedia(false);
+    setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(false);
+    setRehearsalPreflightPhase('auto-initial');
+    setRehearsalMediaStatus('Antes de empezar, vamos a preparar audio y micro.');
+    setCompatibilityMessage(null);
+    setShowCompatibilityInfo(false);
+  }, []);
+
   useEffect(() => {
     if (!isListeningSupported && listenModeSelection !== 'intelligent') {
       setListenModeSelection('manual');
@@ -1367,6 +1381,10 @@ export const RehearsalView: React.FC<Props> = ({
       await wait(650);
 
       void primeSongPlayback();
+      if (listenModeSelection === 'intelligent') {
+        await releaseListening();
+        setAutoListenEnabled(false);
+      }
       setIsRehearsalMediaReady(true);
       setHasCompletedRehearsalPreflight(true);
       setRehearsalPreflightPhase(null);
@@ -1391,6 +1409,7 @@ export const RehearsalView: React.FC<Props> = ({
     releaseListening,
     resetMicrophoneCalibration,
     startListening,
+    listenModeSelection,
   ]);
 
   const handlePreflightHeardVoice = useCallback(() => {
@@ -1764,6 +1783,11 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
+    if (listenModeSelection === 'intelligent') {
+      void enableIntelligentListenForDevice();
+      return;
+    }
+
     void primeSongPlayback();
     setListenModeSelection(listenModeSelection);
     setAutoListenEnabled(false);
@@ -1780,6 +1804,7 @@ export const RehearsalView: React.FC<Props> = ({
     void stopRecognition();
   }, [
     enableAutoListenForDevice,
+    enableIntelligentListenForDevice,
     listenModeSelection,
     primeSongPlayback,
     releaseListening,

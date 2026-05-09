@@ -223,5 +223,5 @@ export const inferSpeechRecognitionLanguage = (lineText: string) => {
   const englishScore = englishHints.filter((hint) => tokens.has(hint)).length;
   const spanishScore = spanishHints.filter((hint) => tokens.has(hint)).length;
 
-  return englishScore >= spanishScore ? 'en-US' : 'es-ES';
+  return englishScore > spanishScore ? 'en-US' : 'es-ES';
 };
