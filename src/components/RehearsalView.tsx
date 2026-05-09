@@ -1766,6 +1766,41 @@ export const RehearsalView: React.FC<Props> = ({
     </View>
   );
 
+  const renderIntelligentFeedbackBar = () => {
+    if (
+      listenModeSelection !== 'intelligent' ||
+      (!intelligentFeedbackEntries.length && !feedbackStatusMessage)
+    ) {
+      return null;
+    }
+
+    return (
+      <View style={styles.intelligentFeedbackBar}>
+        <View style={styles.intelligentFeedbackBarTextBlock}>
+          <Text style={styles.intelligentFeedbackBarTitle}>
+            Informe de prueba
+          </Text>
+          <Text style={styles.intelligentFeedbackBarText}>
+            {intelligentFeedbackEntries.length > 0
+              ? `${intelligentFeedbackEntries.length} linea${intelligentFeedbackEntries.length === 1 ? '' : 's'} guardada${intelligentFeedbackEntries.length === 1 ? '' : 's'}`
+              : feedbackStatusMessage}
+          </Text>
+        </View>
+        {intelligentFeedbackEntries.length > 0 ? (
+          <TouchableOpacity
+            style={[styles.intelligentFeedbackBarButton, isSendingFeedback && styles.buttonDisabled]}
+            onPress={() => void handleSendIntelligentFeedback()}
+            disabled={isSendingFeedback}
+          >
+            <Text style={styles.intelligentFeedbackBarButtonText}>
+              {isSendingFeedback ? 'Enviando...' : 'Enviar'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  };
+
   const shouldShowInitialSetup =
     !hasConfirmedRehearsalSetup ||
     listenModeSelection === 'pending' ||
@@ -2303,6 +2338,7 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.container}>
         {renderHeader('Cambio de escena')}
+        {renderIntelligentFeedbackBar()}
         <View style={styles.intro}>
           <Text style={styles.introTitle}>Escena: {currentLine.t}</Text>
           <TouchableOpacity style={styles.btnNext} onPress={advanceLine}>
@@ -2317,6 +2353,7 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.container}>
         {renderHeader('Cancion dentro de la escena')}
+        {renderIntelligentFeedbackBar()}
 
         <ScrollView contentContainerStyle={styles.center}>
           <View style={styles.songBox}>
@@ -2404,6 +2441,7 @@ export const RehearsalView: React.FC<Props> = ({
   return (
     <View style={styles.container}>
       {renderHeader(`Ensayando ${filterScenes.length} escenas`)}
+      {renderIntelligentFeedbackBar()}
 
       <ScrollView contentContainerStyle={styles.center}>
         {isFinished ? (
@@ -2575,6 +2613,44 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: '#7a1f1f',
     textAlign: 'right',
+  },
+  intelligentFeedbackBar: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: '#eefcff',
+    borderWidth: 1,
+    borderColor: '#bde4ec',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  intelligentFeedbackBarTextBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  intelligentFeedbackBarTitle: {
+    color: '#15515b',
+    fontWeight: '900',
+    fontSize: 13,
+  },
+  intelligentFeedbackBarText: {
+    color: '#47604f',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  intelligentFeedbackBarButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#15515b',
+  },
+  intelligentFeedbackBarButtonText: {
+    color: '#fff',
+    fontWeight: '800',
   },
   center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
