@@ -180,7 +180,9 @@ export type IntelligentLineFeedbackResult =
   | 'linea_buena'
   | 'reintentar'
   | 'siguiente_linea'
-  | 'comando_siguiente';
+  | 'comando_siguiente'
+  | 'auto_avance'
+  | 'falso_positivo';
 
 export interface IntelligentLineFeedbackEntry {
   lineIndex: number;

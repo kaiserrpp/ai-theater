@@ -20,8 +20,10 @@ import {
   IntelligentLineFeedbackResult,
 } from '../types/sharedScript';
 import {
+  INTELLIGENT_AUTO_ADVANCE_THRESHOLD,
   hashLineText,
   inferSpeechRecognitionLanguage,
+  isSafeAutomaticLineMatch,
   isNextLineCommand,
   scoreLineMatch,
 } from '../utils/lineMatching';
@@ -53,6 +55,11 @@ type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual' | 'intelligent
 type RehearsalAudioModeSelection = 'pending' | SharedSongAudioKind;
 
 type LineVariantMap = Record<string, string[]>;
+type LastIntelligentAutoAdvance = {
+  fromIndex: number;
+  toIndex: number;
+  entry: IntelligentLineFeedbackEntry;
+};
 
 const wait = (durationMs: number) =>
   new Promise<void>((resolve) => {
@@ -329,6 +336,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [intelligentFeedbackEntries, setIntelligentFeedbackEntries] = useState<
     IntelligentLineFeedbackEntry[]
   >([]);
+  const [pendingInvalidAutoAdvance, setPendingInvalidAutoAdvance] =
+    useState<IntelligentLineFeedbackEntry | null>(null);
   const [feedbackStatusMessage, setFeedbackStatusMessage] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
@@ -348,6 +357,8 @@ export const RehearsalView: React.FC<Props> = ({
   const selectedMusicalNumberAudioIdsRef = useRef<Record<string, string>>({});
   const intelligentSessionIdRef = useRef(createSessionId());
   const processedCommandLineKeyRef = useRef<string | null>(null);
+  const processedAutoAdvanceLineKeyRef = useRef<string | null>(null);
+  const lastIntelligentAutoAdvanceRef = useRef<LastIntelligentAutoAdvance | null>(null);
 
   const currentLine = filteredGuion[currentIndex];
   const currentLineIndexInScript = useMemo(
@@ -576,7 +587,7 @@ export const RehearsalView: React.FC<Props> = ({
   const recordIntelligentFeedback = useCallback(
     (result: IntelligentLineFeedbackResult) => {
       if (!currentLine || currentLineIndexInScript < 0) {
-        return;
+        return null;
       }
 
       const heardText = speechRecognitionTranscript.trim();
@@ -597,6 +608,7 @@ export const RehearsalView: React.FC<Props> = ({
 
       setIntelligentFeedbackEntries((previousEntries) => [...previousEntries, entry]);
       setFeedbackStatusMessage(`Resultado guardado: ${result.replace(/_/g, ' ')}.`);
+      return entry;
     },
     [
       currentLine,
@@ -651,6 +663,23 @@ export const RehearsalView: React.FC<Props> = ({
     resetSpeechRecognitionTranscript();
     advanceLine();
   }, [advanceLine, recordIntelligentFeedback, resetSpeechRecognitionTranscript]);
+
+  const handleRejectLastAutoAdvance = useCallback(() => {
+    if (!pendingInvalidAutoAdvance) {
+      return;
+    }
+
+    const falsePositiveEntry: IntelligentLineFeedbackEntry = {
+      ...pendingInvalidAutoAdvance,
+      result: 'falso_positivo',
+      createdAt: new Date().toISOString(),
+    };
+
+    setIntelligentFeedbackEntries((previousEntries) => [...previousEntries, falsePositiveEntry]);
+    setFeedbackStatusMessage('Autoavance marcado como incorrecto. Lo incluiremos en el informe.');
+    setPendingInvalidAutoAdvance(null);
+    restartRecognition();
+  }, [pendingInvalidAutoAdvance, restartRecognition]);
 
   const handleSendIntelligentFeedback = useCallback(async () => {
     if (!intelligentFeedbackEntries.length || isSendingFeedback) {
@@ -719,10 +748,75 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    if (
+      !shouldUseIntelligentRecognition ||
+      !currentLineVariantKey ||
+      !currentLine ||
+      currentLineIndexInScript < 0 ||
+      speechRecognitionInterimTranscript.trim() ||
+      !speechRecognitionTranscript.trim() ||
+      !isSafeAutomaticLineMatch(speakableLineText, speechRecognitionTranscript, intelligentLineMatch)
+    ) {
+      return;
+    }
+
+    const autoAdvanceKey = `${currentLineVariantKey}:${speechRecognitionTranscript}:${intelligentLineMatch.referenceIndex}`;
+    if (processedAutoAdvanceLineKeyRef.current === autoAdvanceKey) {
+      return;
+    }
+
+    const autoAdvanceTimeout = setTimeout(() => {
+      if (processedAutoAdvanceLineKeyRef.current === autoAdvanceKey) {
+        return;
+      }
+
+      processedAutoAdvanceLineKeyRef.current = autoAdvanceKey;
+      const entry = recordIntelligentFeedback('auto_avance');
+      if (entry) {
+        lastIntelligentAutoAdvanceRef.current = {
+          fromIndex: currentIndex,
+          toIndex: Math.min(currentIndex + 1, filteredGuion.length),
+          entry,
+        };
+      }
+      resetSpeechRecognitionTranscript();
+      advanceLine();
+    }, 260);
+
+    return () => {
+      clearTimeout(autoAdvanceTimeout);
+    };
+  }, [
+    advanceLine,
+    currentIndex,
+    currentLine,
+    currentLineIndexInScript,
+    currentLineVariantKey,
+    filteredGuion.length,
+    intelligentLineMatch,
+    recordIntelligentFeedback,
+    resetSpeechRecognitionTranscript,
+    shouldUseIntelligentRecognition,
+    speakableLineText,
+    speechRecognitionInterimTranscript,
+    speechRecognitionTranscript,
+  ]);
+
+  useEffect(() => {
     if (currentLineVariantKey) {
       processedCommandLineKeyRef.current = null;
+      processedAutoAdvanceLineKeyRef.current = null;
     }
   }, [currentLineVariantKey]);
+
+  useEffect(() => {
+    if (
+      pendingInvalidAutoAdvance &&
+      pendingInvalidAutoAdvance.lineIndex !== currentLineIndexInScript
+    ) {
+      setPendingInvalidAutoAdvance(null);
+    }
+  }, [currentLineIndexInScript, pendingInvalidAutoAdvance]);
 
   const disableAutoListenForDevice = useCallback(
     async (reasonMessage: string, storedValue = 'manual-disabled') => {
@@ -971,8 +1065,14 @@ export const RehearsalView: React.FC<Props> = ({
   const goBackLine = useCallback(() => {
     stopRehearsalSpeech();
     stopStandaloneSongAudio();
+    const lastAutoAdvance = lastIntelligentAutoAdvanceRef.current;
+
+    if (lastAutoAdvance?.toIndex === currentIndex) {
+      setPendingInvalidAutoAdvance(lastAutoAdvance.entry);
+    }
+
     setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
-  }, [stopStandaloneSongAudio]);
+  }, [currentIndex, stopStandaloneSongAudio]);
 
   useEffect(() => {
     const safeInitialIndex = Math.max(0, Math.min(initialIndex, filteredGuion.length));
@@ -2066,6 +2166,8 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     const hasTranscript = speechRecognitionTranscript.trim().length > 0;
+    const canRejectAutoAdvance =
+      pendingInvalidAutoAdvance?.lineIndex === currentLineIndexInScript;
     const scorePercent = Math.round(intelligentLineMatch.score * 100);
     const scoreToneStyle =
       intelligentLineMatch.score >= 0.88
@@ -2078,7 +2180,8 @@ export const RehearsalView: React.FC<Props> = ({
       <View style={styles.intelligentPanel}>
         <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>
         <Text style={styles.intelligentHint}>
-          En este modo no avanzamos por silencio. Si no entiende bien, se queda aqui para revisar.
+          Avanzamos solos desde {Math.round(INTELLIGENT_AUTO_ADVANCE_THRESHOLD * 100)}% si la coincidencia es segura.
+          Si no, se queda aqui para revisar.
         </Text>
         <View style={styles.intelligentTranscriptBlock}>
           <Text style={styles.intelligentLabel}>Debias decir</Text>
@@ -2110,6 +2213,19 @@ export const RehearsalView: React.FC<Props> = ({
         ) : null}
         {feedbackStatusMessage ? (
           <Text style={styles.intelligentFeedbackStatus}>{feedbackStatusMessage}</Text>
+        ) : null}
+        {canRejectAutoAdvance ? (
+          <View style={styles.intelligentFalsePositiveBlock}>
+            <Text style={styles.intelligentFalsePositiveText}>
+              Has vuelto tras un autoavance. Si se adelanto, marcalo para que ajustemos las reglas.
+            </Text>
+            <TouchableOpacity
+              style={[styles.intelligentButton, styles.intelligentFalsePositiveButton]}
+              onPress={handleRejectLastAutoAdvance}
+            >
+              <Text style={styles.intelligentButtonText}>No era valida</Text>
+            </TouchableOpacity>
+          </View>
         ) : null}
         <View style={styles.intelligentActions}>
           <TouchableOpacity
@@ -3083,6 +3199,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
+  intelligentFalsePositiveBlock: {
+    gap: 8,
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 245, 232, 0.95)',
+    borderWidth: 1,
+    borderColor: '#e8b66f',
+  },
+  intelligentFalsePositiveText: {
+    color: '#6b3f00',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    textAlign: 'center',
+  },
   intelligentActions: {
     gap: 8,
   },
@@ -3104,6 +3235,10 @@ const styles = StyleSheet.create({
   intelligentSkipButton: {
     backgroundColor: '#1e6091',
     borderColor: '#174b73',
+  },
+  intelligentFalsePositiveButton: {
+    backgroundColor: '#b3261e',
+    borderColor: '#8e1f19',
   },
   intelligentButtonText: {
     color: '#fff',
