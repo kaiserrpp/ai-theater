@@ -175,3 +175,34 @@ export interface SharedMusicalNumberAudioDeleteInput {
   audioId: string;
   password: string;
 }
+
+export type IntelligentLineFeedbackResult =
+  | 'linea_buena'
+  | 'reintentar'
+  | 'siguiente_linea'
+  | 'comando_siguiente';
+
+export interface IntelligentLineFeedbackEntry {
+  lineIndex: number;
+  character: string;
+  sceneTitle: string | null;
+  expectedText: string;
+  heardText: string;
+  score: number;
+  result: IntelligentLineFeedbackResult;
+  matchedReferenceText: string;
+  matchedReferenceIndex: number;
+  language: string;
+  createdAt: string;
+}
+
+export interface IntelligentLineFeedbackSessionInput {
+  sessionId: string;
+  scriptId: string;
+  shareId?: string | null;
+  scriptTitle: string;
+  appVersion: string;
+  userRoles: string[];
+  userAgent?: string | null;
+  entries: IntelligentLineFeedbackEntry[];
+}

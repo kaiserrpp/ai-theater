@@ -1,8 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { submitIntelligentLineFeedback } from '../api/sharedScripts';
 import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import {
+  INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX,
   LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
   REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
 } from '../store/storageKeys';
@@ -12,7 +16,15 @@ import {
   SharedSongAsset,
   SharedSongAudioAsset,
   SharedSongAudioKind,
+  IntelligentLineFeedbackEntry,
+  IntelligentLineFeedbackResult,
 } from '../types/sharedScript';
+import {
+  hashLineText,
+  inferSpeechRecognitionLanguage,
+  isNextLineCommand,
+  scoreLineMatch,
+} from '../utils/lineMatching';
 import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
@@ -23,6 +35,9 @@ interface Props {
   filterScenes: string[];
   sharedSongs?: SharedSongAsset[];
   musicalNumbers?: SharedMusicalNumberAsset[];
+  scriptId?: string;
+  scriptTitle?: string;
+  shareId?: string | null;
   initialIndex?: number;
   onProgressChange?: (lineIndex: number, totalLines: number) => void;
   onExit: () => void;
@@ -34,13 +49,42 @@ type RehearsalPreflightPhase =
   | 'auto-final'
   | 'micro-calibration'
   | null;
-type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual';
+type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual' | 'intelligent';
 type RehearsalAudioModeSelection = 'pending' | SharedSongAudioKind;
+
+type LineVariantMap = Record<string, string[]>;
 
 const wait = (durationMs: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, durationMs);
   });
+
+const createSessionId = () => {
+  const randomPart =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+      : Math.random().toString(36).slice(2, 14);
+
+  return `intelligent-${Date.now().toString(36)}-${randomPart}`;
+};
+
+const getUserAgent = () =>
+  typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string'
+    ? navigator.userAgent
+    : null;
+
+const getSceneTitleForLine = (guion: Dialogue[], lineIndex: number) => {
+  for (let index = Math.min(lineIndex, guion.length - 1); index >= 0; index -= 1) {
+    if (isSceneMarker(guion[index])) {
+      return guion[index].t;
+    }
+  }
+
+  return null;
+};
+
+const buildLineVariantKey = (lineIndex: number, lineText: string) =>
+  `${lineIndex}:${hashLineText(lineText)}`;
 
 const formatMicroLevel = (value: number) => `${(value * 100).toFixed(1)}%`;
 
@@ -241,11 +285,26 @@ export const RehearsalView: React.FC<Props> = ({
   filterScenes,
   sharedSongs = [],
   musicalNumbers = [],
+  scriptId: providedScriptId,
+  scriptTitle = 'Obra',
+  shareId = null,
   initialIndex = 0,
   onProgressChange,
   onExit,
 }) => {
   const filteredGuion = useMemo(() => filterScriptByScenes(guion, filterScenes), [filterScenes, guion]);
+  const resolvedScriptId = useMemo(
+    () =>
+      providedScriptId ??
+      hashLineText(
+        JSON.stringify({
+          lines: guion.length,
+          firstLine: guion[0]?.t ?? '',
+          lastLine: guion[guion.length - 1]?.t ?? '',
+        })
+      ),
+    [guion, providedScriptId]
+  );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
@@ -266,6 +325,12 @@ export const RehearsalView: React.FC<Props> = ({
   const [rehearsalPreflightPhase, setRehearsalPreflightPhase] = useState<RehearsalPreflightPhase>(null);
   const [hasConfirmedRehearsalSetup, setHasConfirmedRehearsalSetup] = useState(false);
   const [isSongPlaybackUnlocked, setIsSongPlaybackUnlocked] = useState(false);
+  const [lineVariants, setLineVariants] = useState<LineVariantMap>({});
+  const [intelligentFeedbackEntries, setIntelligentFeedbackEntries] = useState<
+    IntelligentLineFeedbackEntry[]
+  >([]);
+  const [feedbackStatusMessage, setFeedbackStatusMessage] = useState<string | null>(null);
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -281,11 +346,20 @@ export const RehearsalView: React.FC<Props> = ({
     ownerId: string | null;
   } | null>(null);
   const selectedMusicalNumberAudioIdsRef = useRef<Record<string, string>>({});
+  const intelligentSessionIdRef = useRef(createSessionId());
+  const processedCommandLineKeyRef = useRef<string | null>(null);
 
   const currentLine = filteredGuion[currentIndex];
   const currentLineIndexInScript = useMemo(
     () => (currentLine ? guion.indexOf(currentLine) : -1),
     [currentLine, guion]
+  );
+  const currentSceneTitle = useMemo(
+    () =>
+      currentLineIndexInScript >= 0
+        ? getSceneTitleForLine(guion, currentLineIndexInScript)
+        : null,
+    [currentLineIndexInScript, guion]
   );
   const speakableLineText = useMemo(
     () =>
@@ -374,10 +448,31 @@ export const RehearsalView: React.FC<Props> = ({
     : null;
   const currentDialogueKey =
     !isFinished && currentLine ? `${currentIndex}:${currentLine.p}:${currentLine.t}` : null;
+  const currentLineVariantKey =
+    !isFinished && currentLine && currentLineIndexInScript >= 0
+      ? buildLineVariantKey(currentLineIndexInScript, currentLine.t)
+      : null;
+  const currentAcceptedLineVariants = useMemo(
+    () => (currentLineVariantKey ? lineVariants[currentLineVariantKey] ?? [] : []),
+    [currentLineVariantKey, lineVariants]
+  );
+  const intelligentRecognitionLanguage = inferSpeechRecognitionLanguage(speakableLineText);
+  const isIntelligentListenMode = listenModeSelection === 'intelligent';
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
   const shouldArmListeningForCurrentLine =
     effectiveAutoListenEnabled &&
+    !isIntelligentListenMode &&
     isRehearsalMediaReady &&
+    !isFinished &&
+    Boolean(currentLine) &&
+    !isSceneMarker(currentLine) &&
+    !isSongCue(currentLine) &&
+    isMyTurn &&
+    speakableLineText.length > 0;
+  const shouldUseIntelligentRecognition =
+    isIntelligentListenMode &&
+    isRehearsalMediaReady &&
+    hasCompletedRehearsalPreflight &&
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
@@ -439,6 +534,196 @@ export const RehearsalView: React.FC<Props> = ({
     onSilenceDetected: advanceLine,
   });
 
+  const {
+    isSupported: isSpeechRecognitionSupported,
+    status: speechRecognitionStatus,
+    transcript: speechRecognitionTranscript,
+    interimTranscript: speechRecognitionInterimTranscript,
+    error: speechRecognitionError,
+    resetTranscript: resetSpeechRecognitionTranscript,
+    restartRecognition,
+    stopRecognition,
+  } = useSpeechRecognition({
+    enabled: shouldUseIntelligentRecognition,
+    lang: intelligentRecognitionLanguage,
+    lineKey: currentLineVariantKey,
+  });
+
+  const intelligentLineMatch = useMemo(
+    () =>
+      scoreLineMatch(
+        speakableLineText,
+        speechRecognitionTranscript,
+        currentAcceptedLineVariants
+      ),
+    [currentAcceptedLineVariants, speakableLineText, speechRecognitionTranscript]
+  );
+
+  const persistLineVariants = useCallback(
+    async (nextVariants: LineVariantMap) => {
+      try {
+        await AsyncStorage.setItem(
+          `${INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX}${resolvedScriptId}`,
+          JSON.stringify(nextVariants)
+        );
+      } catch (error) {
+        console.error('Error guardando variantes de lineas', error);
+      }
+    },
+    [resolvedScriptId]
+  );
+
+  const recordIntelligentFeedback = useCallback(
+    (result: IntelligentLineFeedbackResult) => {
+      if (!currentLine || currentLineIndexInScript < 0) {
+        return;
+      }
+
+      const heardText = speechRecognitionTranscript.trim();
+      const score = Number(intelligentLineMatch.score.toFixed(3));
+      const entry: IntelligentLineFeedbackEntry = {
+        lineIndex: currentLineIndexInScript,
+        character: currentLine.p,
+        sceneTitle: currentSceneTitle,
+        expectedText: currentLine.t,
+        heardText,
+        score,
+        result,
+        matchedReferenceText: intelligentLineMatch.referenceText,
+        matchedReferenceIndex: intelligentLineMatch.referenceIndex,
+        language: intelligentRecognitionLanguage,
+        createdAt: new Date().toISOString(),
+      };
+
+      setIntelligentFeedbackEntries((previousEntries) => [...previousEntries, entry]);
+      setFeedbackStatusMessage(`Resultado guardado: ${result.replace(/_/g, ' ')}.`);
+    },
+    [
+      currentLine,
+      currentLineIndexInScript,
+      currentSceneTitle,
+      intelligentLineMatch.referenceIndex,
+      intelligentLineMatch.referenceText,
+      intelligentLineMatch.score,
+      intelligentRecognitionLanguage,
+      speechRecognitionTranscript,
+    ]
+  );
+
+  const saveCurrentTranscriptAsVariant = useCallback(async () => {
+    const heardText = speechRecognitionTranscript.trim();
+
+    if (!currentLineVariantKey || !heardText) {
+      return;
+    }
+
+    const nextVariants = {
+      ...lineVariants,
+      [currentLineVariantKey]: Array.from(
+        new Set([...(lineVariants[currentLineVariantKey] ?? []), heardText])
+      ).slice(-8),
+    };
+
+    setLineVariants(nextVariants);
+    await persistLineVariants(nextVariants);
+  }, [currentLineVariantKey, lineVariants, persistLineVariants, speechRecognitionTranscript]);
+
+  const handleAcceptIntelligentLine = useCallback(async () => {
+    recordIntelligentFeedback('linea_buena');
+    await saveCurrentTranscriptAsVariant();
+    resetSpeechRecognitionTranscript();
+    advanceLine();
+  }, [
+    advanceLine,
+    recordIntelligentFeedback,
+    resetSpeechRecognitionTranscript,
+    saveCurrentTranscriptAsVariant,
+  ]);
+
+  const handleRetryIntelligentLine = useCallback(() => {
+    recordIntelligentFeedback('reintentar');
+    setFeedbackStatusMessage('Resultado guardado. Reintentamos esta linea.');
+    restartRecognition();
+  }, [recordIntelligentFeedback, restartRecognition]);
+
+  const handleSkipIntelligentLine = useCallback(() => {
+    recordIntelligentFeedback('siguiente_linea');
+    resetSpeechRecognitionTranscript();
+    advanceLine();
+  }, [advanceLine, recordIntelligentFeedback, resetSpeechRecognitionTranscript]);
+
+  const handleSendIntelligentFeedback = useCallback(async () => {
+    if (!intelligentFeedbackEntries.length || isSendingFeedback) {
+      return;
+    }
+
+    setIsSendingFeedback(true);
+    setFeedbackStatusMessage('Enviando informe de prueba...');
+
+    try {
+      const result = await submitIntelligentLineFeedback({
+        sessionId: intelligentSessionIdRef.current,
+        scriptId: resolvedScriptId,
+        shareId,
+        scriptTitle,
+        appVersion: Constants.expoConfig?.version ?? 'dev',
+        userRoles: myRoles,
+        userAgent: getUserAgent(),
+        entries: intelligentFeedbackEntries,
+      });
+
+      setIntelligentFeedbackEntries([]);
+      setFeedbackStatusMessage(`Informe enviado (${result.entryCount} lineas).`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'No se pudo enviar el informe de prueba.';
+      setFeedbackStatusMessage(message);
+    } finally {
+      setIsSendingFeedback(false);
+    }
+  }, [
+    intelligentFeedbackEntries,
+    isSendingFeedback,
+    myRoles,
+    resolvedScriptId,
+    scriptTitle,
+    shareId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !shouldUseIntelligentRecognition ||
+      !currentLineVariantKey ||
+      !speechRecognitionTranscript.trim() ||
+      !isNextLineCommand(speechRecognitionTranscript)
+    ) {
+      return;
+    }
+
+    const commandKey = `${currentLineVariantKey}:${speechRecognitionTranscript}`;
+    if (processedCommandLineKeyRef.current === commandKey) {
+      return;
+    }
+
+    processedCommandLineKeyRef.current = commandKey;
+    recordIntelligentFeedback('comando_siguiente');
+    resetSpeechRecognitionTranscript();
+    advanceLine();
+  }, [
+    advanceLine,
+    currentLineVariantKey,
+    recordIntelligentFeedback,
+    resetSpeechRecognitionTranscript,
+    shouldUseIntelligentRecognition,
+    speechRecognitionTranscript,
+  ]);
+
+  useEffect(() => {
+    if (currentLineVariantKey) {
+      processedCommandLineKeyRef.current = null;
+    }
+  }, [currentLineVariantKey]);
+
   const disableAutoListenForDevice = useCallback(
     async (reasonMessage: string, storedValue = 'manual-disabled') => {
       setAutoListenEnabled(false);
@@ -487,7 +772,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, []);
 
   useEffect(() => {
-    if (!isListeningSupported) {
+    if (!isListeningSupported && listenModeSelection !== 'intelligent') {
       setListenModeSelection('manual');
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
@@ -683,6 +968,43 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     onProgressChange?.(Math.min(currentIndex, filteredGuion.length), filteredGuion.length);
   }, [currentIndex, filteredGuion.length, onProgressChange]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadLineVariants = async () => {
+      try {
+        const storedVariants = await AsyncStorage.getItem(
+          `${INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX}${resolvedScriptId}`
+        );
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!storedVariants) {
+          setLineVariants({});
+          return;
+        }
+
+        const parsedVariants = JSON.parse(storedVariants) as LineVariantMap;
+        setLineVariants(
+          parsedVariants && typeof parsedVariants === 'object' && !Array.isArray(parsedVariants)
+            ? parsedVariants
+            : {}
+        );
+      } catch (error) {
+        console.error('Error cargando variantes de lineas', error);
+        setLineVariants({});
+      }
+    };
+
+    void loadLineVariants();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [resolvedScriptId]);
 
   useEffect(() => {
     setAudioError(null);
@@ -890,6 +1212,7 @@ export const RehearsalView: React.FC<Props> = ({
   const handleExit = () => {
     stopRehearsalSpeech();
     disposeSongAudio();
+    stopRecognition();
     void releaseListening();
     onExit();
   };
@@ -1368,7 +1691,7 @@ export const RehearsalView: React.FC<Props> = ({
         <TouchableOpacity onPress={goBackLine} disabled={!canGoBack}>
           <Text style={[styles.backLink, !canGoBack && styles.backLinkDisabled]}>{'<'} Linea anterior</Text>
         </TouchableOpacity>
-        {isListeningSupported && listenModeSelection !== 'pending' ? (
+        {isListeningSupported && listenModeSelection === 'auto' ? (
           <TouchableOpacity
             onPress={() => {
               if (!autoListenEnabled) {
@@ -1412,6 +1735,9 @@ export const RehearsalView: React.FC<Props> = ({
             {isListeningActive ? 'Micro escuchando tu replica' : 'Escucha lista para tu proxima replica'}
           </Text>
         ) : null}
+        {listenModeSelection === 'intelligent' ? (
+          <Text style={styles.listenStatus}>Autoavance inteligente beta</Text>
+        ) : null}
         {compatibilityMessage && showCompatibilityInfo ? (
           <View style={styles.compatibilityPopover}>
             <Text style={styles.compatibilityPopoverText}>{compatibilityMessage}</Text>
@@ -1439,7 +1765,7 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     void primeSongPlayback();
-    setListenModeSelection('manual');
+    setListenModeSelection(listenModeSelection);
     setAutoListenEnabled(false);
     setTemporarilySuspendingAutoListen(false);
     setIsRehearsalMediaReady(true);
@@ -1451,12 +1777,14 @@ export const RehearsalView: React.FC<Props> = ({
     setCompatibilityMessage(null);
     setShowCompatibilityInfo(false);
     void releaseListening();
+    void stopRecognition();
   }, [
     enableAutoListenForDevice,
     listenModeSelection,
     primeSongPlayback,
     releaseListening,
     rehearsalAudioModeSelection,
+    stopRecognition,
   ]);
 
   if (shouldShowInitialSetup) {
@@ -1467,8 +1795,8 @@ export const RehearsalView: React.FC<Props> = ({
           <View style={styles.preflightCard}>
             <Text style={styles.preflightTitle}>Como quieres ensayar?</Text>
             <Text style={styles.preflightText}>
-              Puedes activar el micro para que detectemos cuando terminas tus replicas o empezar sin
-              micro y avanzar manualmente.
+              Puedes ensayar manualmente, con silencio automatico o probar el modo inteligente
+              experimental.
             </Text>
             <Text style={styles.preflightStatus}>
               Selecciona Ensayar sin micro si todavia no estas confiado con tus frases y necesitas
@@ -1491,7 +1819,31 @@ export const RehearsalView: React.FC<Props> = ({
                     listenModeSelection !== 'auto' && styles.preflightUnselectedButtonText,
                   ]}
                 >
-                  Usar micro automatico
+                  Micro por silencio
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.preflightActionButton,
+                  listenModeSelection === 'intelligent'
+                    ? styles.preflightIntelligentButton
+                    : styles.preflightUnselectedButton,
+                  !isSpeechRecognitionSupported && styles.buttonDisabled,
+                ]}
+                onPress={() => {
+                  if (isSpeechRecognitionSupported) {
+                    setListenModeSelection('intelligent');
+                  }
+                }}
+                disabled={!isSpeechRecognitionSupported}
+              >
+                <Text
+                  style={[
+                    styles.preflightConfirmText,
+                    listenModeSelection !== 'intelligent' && styles.preflightUnselectedButtonText,
+                  ]}
+                >
+                  Autoavance inteligente beta
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1513,6 +1865,11 @@ export const RehearsalView: React.FC<Props> = ({
                 </Text>
               </TouchableOpacity>
             </View>
+            {!isSpeechRecognitionSupported ? (
+              <Text style={styles.preflightStatusSecondary}>
+                Este navegador no ofrece reconocimiento de voz web. Puedes usar silencio o modo manual.
+              </Text>
+            ) : null}
             <Text style={styles.preflightSectionTitle}>Modo musical</Text>
             <Text style={styles.preflightText}>
               Priorizaremos ese tipo de audio en canciones y numeros musicales. Si no existe,
@@ -1639,6 +1996,96 @@ export const RehearsalView: React.FC<Props> = ({
             </View>
           );
         })}
+      </View>
+    );
+  };
+
+  const renderIntelligentLinePanel = () => {
+    if (!isMyTurn || listenModeSelection !== 'intelligent') {
+      return null;
+    }
+
+    const hasTranscript = speechRecognitionTranscript.trim().length > 0;
+    const scorePercent = Math.round(intelligentLineMatch.score * 100);
+    const scoreToneStyle =
+      intelligentLineMatch.score >= 0.88
+        ? styles.intelligentScoreGood
+        : intelligentLineMatch.score >= 0.65
+          ? styles.intelligentScoreWarning
+          : styles.intelligentScoreLow;
+
+    return (
+      <View style={styles.intelligentPanel}>
+        <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>
+        <Text style={styles.intelligentHint}>
+          En este modo no avanzamos por silencio. Si no entiende bien, se queda aqui para revisar.
+        </Text>
+        <View style={styles.intelligentTranscriptBlock}>
+          <Text style={styles.intelligentLabel}>Debias decir</Text>
+          <Text style={styles.intelligentExpectedText}>{currentLine?.t}</Text>
+        </View>
+        <View style={styles.intelligentTranscriptBlock}>
+          <Text style={styles.intelligentLabel}>He oido</Text>
+          <Text style={styles.intelligentHeardText}>
+            {speechRecognitionTranscript || 'Aun no hay transcripcion...'}
+          </Text>
+          {speechRecognitionInterimTranscript ? (
+            <Text style={styles.intelligentInterimText}>
+              Parcial: {speechRecognitionInterimTranscript}
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.intelligentScoreRow}>
+          <Text style={styles.intelligentLabel}>Coincidencia</Text>
+          <Text style={[styles.intelligentScore, scoreToneStyle]}>{scorePercent}%</Text>
+        </View>
+        <Text style={styles.intelligentMetaText}>
+          Estado: {speechRecognitionStatus} - Idioma: {intelligentRecognitionLanguage}
+          {currentAcceptedLineVariants.length > 0
+            ? ` - ${currentAcceptedLineVariants.length} variante${currentAcceptedLineVariants.length === 1 ? '' : 's'}`
+            : ''}
+        </Text>
+        {speechRecognitionError ? (
+          <Text style={styles.listenError}>{speechRecognitionError}</Text>
+        ) : null}
+        {feedbackStatusMessage ? (
+          <Text style={styles.intelligentFeedbackStatus}>{feedbackStatusMessage}</Text>
+        ) : null}
+        <View style={styles.intelligentActions}>
+          <TouchableOpacity
+            style={[styles.intelligentButton, styles.intelligentGoodButton, !hasTranscript && styles.buttonDisabled]}
+            onPress={() => void handleAcceptIntelligentLine()}
+            disabled={!hasTranscript}
+          >
+            <Text style={styles.intelligentButtonText}>Linea buena</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.intelligentButton, styles.intelligentRetryButton, !hasTranscript && styles.buttonDisabled]}
+            onPress={handleRetryIntelligentLine}
+            disabled={!hasTranscript}
+          >
+            <Text style={styles.intelligentRetryText}>Reintentar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.intelligentButton, styles.intelligentSkipButton]}
+            onPress={handleSkipIntelligentLine}
+          >
+            <Text style={styles.intelligentButtonText}>Siguiente linea</Text>
+          </TouchableOpacity>
+        </View>
+        {intelligentFeedbackEntries.length > 0 ? (
+          <TouchableOpacity
+            style={[styles.intelligentSendButton, isSendingFeedback && styles.buttonDisabled]}
+            onPress={() => void handleSendIntelligentFeedback()}
+            disabled={isSendingFeedback}
+          >
+            <Text style={styles.intelligentSendButtonText}>
+              {isSendingFeedback
+                ? 'Enviando informe...'
+                : `Enviar informe (${intelligentFeedbackEntries.length})`}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   };
@@ -1937,6 +2384,22 @@ export const RehearsalView: React.FC<Props> = ({
         {isFinished ? (
           <View style={styles.finishedBox}>
             <Text style={styles.finishedTitle}>Fin del ensayo</Text>
+            {listenModeSelection === 'intelligent' && intelligentFeedbackEntries.length > 0 ? (
+              <TouchableOpacity
+                style={[styles.intelligentSendButton, isSendingFeedback && styles.buttonDisabled]}
+                onPress={() => void handleSendIntelligentFeedback()}
+                disabled={isSendingFeedback}
+              >
+                <Text style={styles.intelligentSendButtonText}>
+                  {isSendingFeedback
+                    ? 'Enviando informe...'
+                    : `Enviar informe de prueba (${intelligentFeedbackEntries.length})`}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {feedbackStatusMessage ? (
+              <Text style={styles.intelligentFeedbackStatus}>{feedbackStatusMessage}</Text>
+            ) : null}
             <TouchableOpacity onPress={handleExit} style={styles.btnBack}>
               <Text style={styles.btnText}>Volver al inicio</Text>
             </TouchableOpacity>
@@ -1948,7 +2411,9 @@ export const RehearsalView: React.FC<Props> = ({
             <Text style={[styles.text, isMyTurn && styles.myText]}>{currentLine?.t}</Text>
             {isMyTurn && (
               <Text style={styles.myTurnHint}>
-                Tu turno: lee y guardaremos silencio para pasar solos, o pulsa siguiente si lo prefieres.
+                {listenModeSelection === 'intelligent'
+                  ? 'Tu turno: habla con naturalidad. Si la app no entiende, se quedara parada.'
+                  : 'Tu turno: lee y guardaremos silencio para pasar solos, o pulsa siguiente si lo prefieres.'}
               </Text>
             )}
             {isMyTurn && listeningStatus === 'error' && listeningError ? (
@@ -1988,6 +2453,7 @@ export const RehearsalView: React.FC<Props> = ({
                 </Text>
               </View>
             ) : null}
+            {renderIntelligentLinePanel()}
             {!isMyTurn && speechStatusMessage ? (
               <View style={styles.speechMonitor}>
                 <Text style={styles.speechMonitorText}>{speechStatusMessage}</Text>
@@ -2149,6 +2615,10 @@ const styles = StyleSheet.create({
   preflightMusicGuideButton: {
     backgroundColor: 'rgba(91, 63, 140, 0.9)',
     borderColor: 'rgba(91, 63, 140, 0.96)',
+  },
+  preflightIntelligentButton: {
+    backgroundColor: 'rgba(34, 126, 140, 0.92)',
+    borderColor: 'rgba(34, 126, 140, 0.98)',
   },
   preflightManualButton: {
     backgroundColor: '#f5ede3',
@@ -2427,6 +2897,132 @@ const styles = StyleSheet.create({
     color: '#47604f',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  intelligentPanel: {
+    marginTop: 14,
+    width: '100%',
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(238, 252, 255, 0.94)',
+    borderWidth: 1,
+    borderColor: '#bde4ec',
+    gap: 10,
+  },
+  intelligentTitle: {
+    color: '#15515b',
+    fontWeight: '900',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  intelligentHint: {
+    color: '#47604f',
+    lineHeight: 19,
+    textAlign: 'center',
+    fontSize: 13,
+  },
+  intelligentTranscriptBlock: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderWidth: 1,
+    borderColor: '#d5edf2',
+    gap: 4,
+  },
+  intelligentLabel: {
+    color: '#15515b',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textAlign: 'center',
+  },
+  intelligentExpectedText: {
+    color: '#17324c',
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+  intelligentHeardText: {
+    color: '#2b2b2b',
+    lineHeight: 22,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  intelligentInterimText: {
+    color: '#6a7d88',
+    lineHeight: 18,
+    textAlign: 'center',
+    fontSize: 12,
+  },
+  intelligentScoreRow: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  intelligentScore: {
+    fontSize: 28,
+    fontWeight: '900',
+  },
+  intelligentScoreGood: {
+    color: '#2b9348',
+  },
+  intelligentScoreWarning: {
+    color: '#d98a00',
+  },
+  intelligentScoreLow: {
+    color: '#b3261e',
+  },
+  intelligentMetaText: {
+    color: '#4f6274',
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  intelligentFeedbackStatus: {
+    color: '#15515b',
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  intelligentActions: {
+    gap: 8,
+  },
+  intelligentButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  intelligentGoodButton: {
+    backgroundColor: '#2b9348',
+    borderColor: '#24783b',
+  },
+  intelligentRetryButton: {
+    backgroundColor: '#fff',
+    borderColor: '#d8b36a',
+  },
+  intelligentSkipButton: {
+    backgroundColor: '#1e6091',
+    borderColor: '#174b73',
+  },
+  intelligentButtonText: {
+    color: '#fff',
+    fontWeight: '800',
+  },
+  intelligentRetryText: {
+    color: '#8a5a00',
+    fontWeight: '800',
+  },
+  intelligentSendButton: {
+    marginTop: 2,
+    alignSelf: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#15515b',
+  },
+  intelligentSendButtonText: {
+    color: '#fff',
+    fontWeight: '800',
   },
   speechMonitor: {
     marginTop: 14,

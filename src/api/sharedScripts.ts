@@ -8,6 +8,7 @@ import type {
   SharedSongAudioDeleteInput,
   SharedSongAudioRegistrationInput,
   SharedSongAudioUpdateInput,
+  IntelligentLineFeedbackSessionInput,
   SharedScriptListItem,
   SharedScriptManifest,
   SharedScriptPublishInput,
@@ -316,4 +317,24 @@ export const deleteSharedMusicalNumberAudio = async (input: SharedMusicalNumberA
   }
 
   return (await response.json()) as SharedScriptManifest;
+};
+
+export const submitIntelligentLineFeedback = async (
+  input: IntelligentLineFeedbackSessionInput
+) => {
+  const response = await fetch(buildProtectedApiUrl('/intelligent-feedback'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as { ok: true; url: string; entryCount: number };
 };

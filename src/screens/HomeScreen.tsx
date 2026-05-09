@@ -804,6 +804,9 @@ export const HomeScreen = () => {
           filterScenes={activeRehearsalScenes}
           sharedSongs={sharedScript?.songs ?? []}
           musicalNumbers={sharedScript?.musicalNumbers ?? []}
+          scriptId={getScriptIdentity(displayScriptData)}
+          scriptTitle={displayScriptData.obra}
+          shareId={sharedScript?.shareId ?? null}
           initialIndex={rehearsalStartIndex}
           onProgressChange={handleRehearsalProgressChange}
           onExit={() => setIsRehearsing(false)}
