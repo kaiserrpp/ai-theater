@@ -65,6 +65,10 @@ const STOP_WORDS = new Set([
   'tus',
   'un',
   'una',
+  'usted',
+  'ustedes',
+  'vosotras',
+  'vosotros',
   'y',
   'yo',
 ]);
@@ -138,12 +142,15 @@ const NUMBER_TOKEN_ALIASES: Record<string, string> = {
 
 const TOKEN_ALIASES: Record<string, string> = {
   apuraos: 'apurense',
+  artista: 'estrella',
   atraparme: 'atrapar',
   atraparmeis: 'atrapar',
   atraparmeos: 'atrapar',
+  autentico: 'verdadero',
   averiguar: 'averiguarlo',
   cabalga: 'cabalgas',
   cabalgar: 'cabalgas',
+  chist: 'reaction',
   comprobar: 'averiguarlo',
   comprobarlo: 'averiguarlo',
   cratchi: 'crutchie',
@@ -156,16 +163,33 @@ const TOKEN_ALIASES: Record<string, string> = {
   dici: 'dices',
   fe: 'fe',
   gratis: 'crutchie',
+  haceos: 'hacer',
+  hagan: 'hacer',
+  haganse: 'hacer',
   hicieramos: 'hacer',
   hicieremos: 'hacer',
   hicieremoslo: 'hacer',
   hiciesemos: 'hacer',
   hiciesemoslo: 'hacer',
+  jackeline: 'jackkelly',
+  jacqueline: 'jackkelly',
+  mantened: 'mantener',
+  manteneros: 'mantener',
+  mantenganse: 'mantener',
+  meda: 'medda',
+  medalla: 'medda',
   hiciésemos: 'hacer',
   hiciéramos: 'hacer',
   newies: 'newsies',
   newsis: 'newsies',
   newsys: 'newsies',
+  ninos: 'chicos',
+  ninas: 'chicas',
+  niucis: 'newsies',
+  niusis: 'newsies',
+  oigan: 'oye',
+  pasad: 'pasar',
+  pasen: 'pasar',
   penthhouse: 'penthouse',
   pena: 'triste',
   quereis: 'quieres',
@@ -174,12 +198,20 @@ const TOKEN_ALIASES: Record<string, string> = {
   romeo: 'romeo',
   santafe: 'santafe',
   space: 'specs',
+  spacex: 'specs',
   spaces: 'specs',
   specks: 'specs',
   specs: 'specs',
+  snider: 'snyder',
+  sneider: 'snyder',
+  schneider: 'snyder',
+  sitio: 'lugar',
   tanta: 'santa',
+  teneis: 'tienen',
   todavia: 'aun',
+  vale: 'bien',
   vuelvete: 'volver',
+  wisel: 'weasel',
 };
 
 const PHRASE_ALIASES: [RegExp, string][] = [
@@ -188,8 +220,15 @@ const PHRASE_ALIASES: [RegExp, string][] = [
   [/\bcara de pena\b/g, ' cara triste '],
   [/\bdaos prisa\b/g, ' apurense '],
   [/\bdar pena\b/g, ' triste '],
+  [/\bde acuerdo\b/g, ' bien '],
+  [/\bjack\s+kelly\b/g, ' jackkelly '],
+  [/\ble\s+importa\s+si\b/g, ' podriamos '],
+  [/\bme\s+da\s+larkin\b/g, ' medda larkin '],
   [/\bnueva york\b/g, ' ny '],
+  [/\bque\s+os\s+parece\s+si\b/g, ' propuesta '],
+  [/\bque\s+tal\s+si\b/g, ' propuesta '],
   [/\bsanta fe\b/g, ' santafe '],
+  [/\bsenorita\s+me\s+da\b/g, ' senorita medda '],
   [/\bsetenta\s+treinta\b/g, ' 70 30 '],
   [/\bsesenta\s+cuarenta\b/g, ' 60 40 '],
   [/\bun\s+vete\s+a\s+dormir\b/g, ' vuelve dormir '],
@@ -246,7 +285,12 @@ const normalizeRawSpeechText = (value: string) => {
 const normalizeToken = (token: string) => {
   const compactedToken = token.replace(/([a-zñ])\1{2,}/g, '$1$1');
 
-  if (/^wo+w$/.test(compactedToken) || /^u+h+$/.test(compactedToken) || /^o+h+$/.test(compactedToken)) {
+  if (
+    /^wo+w$/.test(compactedToken) ||
+    /^u+h+$/.test(compactedToken) ||
+    /^o+h+$/.test(compactedToken) ||
+    /^s+h+$/.test(compactedToken)
+  ) {
     return 'reaction';
   }
 
@@ -459,11 +503,11 @@ export const isSafeAutomaticLineMatch = (
   heardText: string,
   result: LineMatchResult
 ) => {
-  if (result.score < INTELLIGENT_AUTO_ADVANCE_THRESHOLD || result.negationPenaltyApplied) {
+  if (result.negationPenaltyApplied) {
     return false;
   }
 
-  const expectedTokens = getContentTokens(expectedText);
+  const expectedTokens = getContentTokens(result.referenceText || expectedText);
   const heardTokens = getContentTokens(heardText);
 
   if (!heardTokens.length) {
@@ -478,7 +522,18 @@ export const isSafeAutomaticLineMatch = (
     return result.coverageScore >= 1 && result.precisionScore >= 0.5;
   }
 
-  return result.coverageScore >= 0.72 && result.finalScore >= 0.55;
+  const passesMainThreshold =
+    result.score >= INTELLIGENT_AUTO_ADVANCE_THRESHOLD &&
+    result.coverageScore >= 0.72 &&
+    result.finalScore >= 0.55;
+
+  const passesHighFinalConfidence =
+    result.score >= 0.82 &&
+    result.coverageScore >= 0.75 &&
+    result.finalScore >= 1 &&
+    result.precisionScore >= 0.65;
+
+  return passesMainThreshold || passesHighFinalConfidence;
 };
 
 export const isNextLineCommand = (heardText: string) => {

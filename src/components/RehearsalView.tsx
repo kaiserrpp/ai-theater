@@ -783,12 +783,15 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    const hasBlockingInterimTranscript =
+      speechRecognitionInterimTranscript.trim() && intelligentLineMatch.score < 0.95;
+
     if (
       !shouldUseIntelligentRecognition ||
       !currentLineVariantKey ||
       !currentLine ||
       currentLineIndexInScript < 0 ||
-      speechRecognitionInterimTranscript.trim() ||
+      hasBlockingInterimTranscript ||
       !speechRecognitionTranscript.trim() ||
       !isSafeAutomaticLineMatch(speakableLineText, speechRecognitionTranscript, intelligentLineMatch)
     ) {
