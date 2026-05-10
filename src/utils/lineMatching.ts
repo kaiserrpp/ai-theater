@@ -493,11 +493,52 @@ export const isNextLineCommand = (heardText: string) => {
 };
 
 export const inferSpeechRecognitionLanguage = (lineText: string) => {
-  const tokens = new Set(tokenize(lineText));
-  const englishHints = ['the', 'you', 'and', 'that', 'what', 'where', 'why', 'want', 'dont', 'cant'];
-  const spanishHints = ['que', 'como', 'donde', 'quiero', 'porque', 'pero', 'para', 'esta', 'este'];
-  const englishScore = englishHints.filter((hint) => tokens.has(hint)).length;
-  const spanishScore = spanishHints.filter((hint) => tokens.has(hint)).length;
+  const tokens = tokenize(lineText);
+  const uniqueTokens = new Set(tokens);
+  const englishHints = [
+    'and',
+    'back',
+    'cant',
+    'dont',
+    'go',
+    'home',
+    'know',
+    'never',
+    'see',
+    'that',
+    'the',
+    'there',
+    'want',
+    'what',
+    'where',
+    'why',
+    'will',
+    'world',
+    'you',
+  ];
+  const spanishHints = [
+    'chicos',
+    'claro',
+    'como',
+    'dices',
+    'donde',
+    'iremos',
+    'para',
+    'pero',
+    'porque',
+    'quiero',
+    'senorita',
+    'tienes',
+    'usted',
+  ];
+  const englishScore = englishHints.filter((hint) => uniqueTokens.has(hint)).length;
+  const spanishScore = spanishHints.filter((hint) => uniqueTokens.has(hint)).length;
+  const meaningfulTokenCount = tokens.filter(
+    (token) => !STOP_WORDS.has(token) && !FILLER_WORDS.has(token)
+  ).length;
+  const englishRatio = englishScore / Math.max(meaningfulTokenCount, 1);
 
-  return englishScore > spanishScore ? 'en-US' : 'es-ES';
+  return englishScore >= 2 && englishScore > spanishScore + 1 && englishRatio >= 0.35
+    ? 'en-US'
+    : 'es-ES';
 };

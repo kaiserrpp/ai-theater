@@ -841,6 +841,7 @@ export const RehearsalView: React.FC<Props> = ({
     if (currentLineVariantKey) {
       processedCommandLineKeyRef.current = null;
       processedAutoAdvanceLineKeyRef.current = null;
+      setFeedbackStatusMessage(null);
     }
   }, [currentLineVariantKey]);
 
