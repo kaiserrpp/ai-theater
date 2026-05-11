@@ -196,6 +196,14 @@ export interface IntelligentLineFeedbackEntry {
   expectedText: string;
   heardText: string;
   score: number;
+  coverageScore?: number;
+  orderScore?: number;
+  finalScore?: number;
+  finalPhraseScore?: number;
+  finalPhraseWordCount?: number;
+  precisionScore?: number;
+  negationPenaltyApplied?: boolean;
+  autoAdvanceReason?: string | null;
   result: IntelligentLineFeedbackResult;
   matchedReferenceText: string;
   matchedReferenceIndex: number;

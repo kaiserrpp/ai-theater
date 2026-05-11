@@ -434,3 +434,41 @@ Pruebas de seguridad:
 Siguiente paso:
 - subir preview y pedir un nuevo informe
 - si no aparecen falsos positivos, pasar a Fase 2 con parafraseo controlado
+
+## Fase 1.5 - Modo fluido por cierre de replica
+
+Motivacion:
+- en ensayo real prima mantener el ritmo
+- en lineas largas es normal cambiar palabras sin cambiar la intencion practica de la replica
+- lo mas importante para que entre el siguiente actor es llegar bien al cierre de la linea
+
+Cambios aplicados:
+- nueva razon de autoavance: `fluent_final`
+- se calcula `finalPhraseScore` con las ultimas 5 palabras normalizadas de la linea
+- se permite avanzar si:
+  - la replica tiene al menos 6 palabras relevantes
+  - las ultimas 5 palabras encajan al menos al 80%
+  - la cobertura general es al menos 60%
+  - la precision es al menos 50%
+  - el orden mantiene un minimo de 45%
+- las diferencias de negacion ya no bloquean esta via fluida
+- el informe guarda metricas separadas para revisar despues:
+  - `coverageScore`
+  - `orderScore`
+  - `finalScore`
+  - `finalPhraseScore`
+  - `precisionScore`
+  - `negationPenaltyApplied`
+  - `autoAdvanceReason`
+
+Simulacion con informe 2026-05-11:
+- informe: 63 entradas
+- autoavances originales: 30
+- lineas manuales recuperadas por `fluent_final`: 18
+- autoavance proyectado: 48/63, aproximadamente 76%
+- falsos positivos reportados en ese informe: 0
+
+Objetivo de la siguiente prueba:
+- comprobar si el ensayo se siente mas fluido
+- revisar si aparecen falsos positivos tras usar `fluent_final`
+- usar las nuevas metricas para separar ritmo de fidelidad al texto

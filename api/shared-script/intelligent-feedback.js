@@ -34,6 +34,11 @@ const normalizeIssueType = (value) => {
     : null;
 };
 
+const clampScore = (value) =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : null;
+
 const normalizeEntry = (entry) => {
   if (!entry || typeof entry !== 'object') {
     return null;
@@ -53,6 +58,18 @@ const normalizeEntry = (entry) => {
     expectedText,
     heardText,
     score: typeof entry.score === 'number' ? Math.max(0, Math.min(1, entry.score)) : 0,
+    coverageScore: clampScore(entry.coverageScore),
+    orderScore: clampScore(entry.orderScore),
+    finalScore: clampScore(entry.finalScore),
+    finalPhraseScore: clampScore(entry.finalPhraseScore),
+    finalPhraseWordCount:
+      typeof entry.finalPhraseWordCount === 'number' && Number.isFinite(entry.finalPhraseWordCount)
+        ? Math.max(0, Math.min(12, Math.round(entry.finalPhraseWordCount)))
+        : null,
+    precisionScore: clampScore(entry.precisionScore),
+    negationPenaltyApplied:
+      typeof entry.negationPenaltyApplied === 'boolean' ? entry.negationPenaltyApplied : null,
+    autoAdvanceReason: clampText(entry.autoAdvanceReason).slice(0, 60) || null,
     result: clampText(entry.result).slice(0, 60),
     matchedReferenceText: clampText(entry.matchedReferenceText),
     matchedReferenceIndex:

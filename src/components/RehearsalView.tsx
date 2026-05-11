@@ -22,6 +22,7 @@ import {
 } from '../types/sharedScript';
 import {
   INTELLIGENT_AUTO_ADVANCE_THRESHOLD,
+  getAutomaticLineMatchReason,
   hashLineText,
   inferSpeechRecognitionLanguage,
   isSafeAutomaticLineMatch,
@@ -618,6 +619,11 @@ export const RehearsalView: React.FC<Props> = ({
 
       const heardText = speechRecognitionTranscript.trim();
       const score = Number(intelligentLineMatch.score.toFixed(3));
+      const autoAdvanceReason = getAutomaticLineMatchReason(
+        speakableLineText,
+        heardText,
+        intelligentLineMatch
+      );
       const entry: IntelligentLineFeedbackEntry = {
         lineIndex: currentLineIndexInScript,
         character: currentLine.p,
@@ -625,6 +631,14 @@ export const RehearsalView: React.FC<Props> = ({
         expectedText: currentLine.t,
         heardText,
         score,
+        coverageScore: Number(intelligentLineMatch.coverageScore.toFixed(3)),
+        orderScore: Number(intelligentLineMatch.orderScore.toFixed(3)),
+        finalScore: Number(intelligentLineMatch.finalScore.toFixed(3)),
+        finalPhraseScore: Number(intelligentLineMatch.finalPhraseScore.toFixed(3)),
+        finalPhraseWordCount: intelligentLineMatch.finalPhraseWordCount,
+        precisionScore: Number(intelligentLineMatch.precisionScore.toFixed(3)),
+        negationPenaltyApplied: intelligentLineMatch.negationPenaltyApplied,
+        autoAdvanceReason,
         result,
         matchedReferenceText: intelligentLineMatch.referenceText,
         matchedReferenceIndex: intelligentLineMatch.referenceIndex,
@@ -640,10 +654,9 @@ export const RehearsalView: React.FC<Props> = ({
       currentLine,
       currentLineIndexInScript,
       currentSceneTitle,
-      intelligentLineMatch.referenceIndex,
-      intelligentLineMatch.referenceText,
-      intelligentLineMatch.score,
+      intelligentLineMatch,
       intelligentRecognitionLanguage,
+      speakableLineText,
       speechRecognitionTranscript,
     ]
   );
@@ -2210,8 +2223,14 @@ export const RehearsalView: React.FC<Props> = ({
     const canRejectAutoAdvance =
       pendingInvalidAutoAdvance?.lineIndex === currentLineIndexInScript;
     const scorePercent = Math.round(intelligentLineMatch.score * 100);
+    const finalPhrasePercent = Math.round(intelligentLineMatch.finalPhraseScore * 100);
+    const automaticReason = getAutomaticLineMatchReason(
+      speakableLineText,
+      speechRecognitionTranscript,
+      intelligentLineMatch
+    );
     const scoreToneStyle =
-      intelligentLineMatch.score >= 0.88
+      automaticReason || intelligentLineMatch.score >= 0.88
         ? styles.intelligentScoreGood
         : intelligentLineMatch.score >= 0.65
           ? styles.intelligentScoreWarning
@@ -2221,8 +2240,8 @@ export const RehearsalView: React.FC<Props> = ({
       <View style={styles.intelligentPanel}>
         <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>
         <Text style={styles.intelligentHint}>
-          Avanzamos solos desde {Math.round(INTELLIGENT_AUTO_ADVANCE_THRESHOLD * 100)}% si la coincidencia es segura.
-          Si no, se queda aqui para revisar.
+          Avanzamos si la coincidencia supera {Math.round(INTELLIGENT_AUTO_ADVANCE_THRESHOLD * 100)}% o si el cierre
+          de la replica encaja bien. El detalle queda guardado para repasar despues.
         </Text>
         <View style={styles.intelligentTranscriptBlock}>
           <Text style={styles.intelligentLabel}>Debias decir</Text>
@@ -2249,6 +2268,12 @@ export const RehearsalView: React.FC<Props> = ({
             ? ` - ${currentAcceptedLineVariants.length} variante${currentAcceptedLineVariants.length === 1 ? '' : 's'}`
             : ''}
         </Text>
+        {hasTranscript ? (
+          <Text style={styles.intelligentMetaText}>
+            Cierre de replica: {finalPhrasePercent}%
+            {automaticReason ? ` - Avance: ${automaticReason.replace(/_/g, ' ')}` : ''}
+          </Text>
+        ) : null}
         {speechRecognitionError ? (
           <Text style={styles.listenError}>{speechRecognitionError}</Text>
         ) : null}

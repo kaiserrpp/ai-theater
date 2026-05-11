@@ -236,6 +236,14 @@ const PHRASE_ALIASES: [RegExp, string][] = [
 ];
 
 export const INTELLIGENT_AUTO_ADVANCE_THRESHOLD = 0.86;
+const FLUENT_FINAL_WORD_COUNT = 5;
+const FLUENT_FINAL_HEARD_EXTRA_WORDS = 4;
+const FLUENT_FINAL_MIN_CONTENT_TOKENS = 6;
+
+export type AutomaticLineMatchReason =
+  | 'global_score'
+  | 'high_final_confidence'
+  | 'fluent_final';
 
 export type LineMatchResult = {
   score: number;
@@ -244,6 +252,8 @@ export type LineMatchResult = {
   coverageScore: number;
   orderScore: number;
   finalScore: number;
+  finalPhraseScore: number;
+  finalPhraseWordCount: number;
   precisionScore: number;
   negationPenaltyApplied: boolean;
 };
@@ -329,6 +339,9 @@ const getContentTokens = (value: string) => {
 
 const getNegationCount = (tokens: string[]) =>
   tokens.filter((token) => NEGATION_WORDS.has(token)).length;
+
+const getTailTokens = (tokens: string[], wordCount: number) =>
+  tokens.slice(-Math.min(wordCount, tokens.length));
 
 const getLevenshteinDistance = (left: string, right: string) => {
   const rows = left.length + 1;
@@ -418,6 +431,30 @@ const getLongestCommonSubsequenceLength = (leftTokens: string[], rightTokens: st
   return matrix[leftTokens.length][rightTokens.length];
 };
 
+const getFinalPhraseScore = (referenceText: string, heardText: string) => {
+  const referenceTokens = tokenize(referenceText);
+  const heardTokens = tokenize(heardText);
+  const finalReferenceTokens = getTailTokens(referenceTokens, FLUENT_FINAL_WORD_COUNT);
+  const heardTailTokens = getTailTokens(
+    heardTokens,
+    finalReferenceTokens.length + FLUENT_FINAL_HEARD_EXTRA_WORDS
+  );
+
+  if (!finalReferenceTokens.length || !heardTailTokens.length) {
+    return {
+      finalPhraseScore: 0,
+      finalPhraseWordCount: finalReferenceTokens.length,
+    };
+  }
+
+  return {
+    finalPhraseScore:
+      getLongestCommonSubsequenceLength(finalReferenceTokens, heardTailTokens) /
+      finalReferenceTokens.length,
+    finalPhraseWordCount: finalReferenceTokens.length,
+  };
+};
+
 const getEmptyResult = (referenceText: string, referenceIndex: number): LineMatchResult => ({
   score: 0,
   referenceText,
@@ -425,6 +462,8 @@ const getEmptyResult = (referenceText: string, referenceIndex: number): LineMatc
   coverageScore: 0,
   orderScore: 0,
   finalScore: 0,
+  finalPhraseScore: 0,
+  finalPhraseWordCount: 0,
   precisionScore: 0,
   negationPenaltyApplied: false,
 });
@@ -449,6 +488,7 @@ const scoreAgainstReference = (
   const finalReferenceTokens = referenceTokens.slice(-Math.min(3, referenceTokens.length));
   const finalCoveredTokens = countCoveredTokens(finalReferenceTokens, heardTokens);
   const finalScore = finalReferenceTokens.length > 0 ? finalCoveredTokens / finalReferenceTokens.length : 0;
+  const { finalPhraseScore, finalPhraseWordCount } = getFinalPhraseScore(referenceText, heardText);
   const isShortLine = referenceTokens.length <= 2;
   let score = isShortLine
     ? coverageScore * 0.62 + orderScore * 0.18 + finalScore * 0.12 + precisionScore * 0.08
@@ -479,6 +519,8 @@ const scoreAgainstReference = (
     coverageScore,
     orderScore,
     finalScore,
+    finalPhraseScore,
+    finalPhraseWordCount,
     precisionScore,
     negationPenaltyApplied,
   };
@@ -502,38 +544,58 @@ export const isSafeAutomaticLineMatch = (
   expectedText: string,
   heardText: string,
   result: LineMatchResult
-) => {
-  if (result.negationPenaltyApplied) {
-    return false;
-  }
+) => Boolean(getAutomaticLineMatchReason(expectedText, heardText, result));
 
+export const getAutomaticLineMatchReason = (
+  expectedText: string,
+  heardText: string,
+  result: LineMatchResult
+): AutomaticLineMatchReason | null => {
   const expectedTokens = getContentTokens(result.referenceText || expectedText);
   const heardTokens = getContentTokens(heardText);
 
   if (!heardTokens.length) {
-    return false;
+    return null;
   }
 
-  if (getNegationCount(expectedTokens) !== getNegationCount(heardTokens)) {
-    return false;
-  }
+  const hasNegationMismatch = getNegationCount(expectedTokens) !== getNegationCount(heardTokens);
 
   if (expectedTokens.length <= 2) {
-    return result.coverageScore >= 1 && result.precisionScore >= 0.5;
+    return !hasNegationMismatch && result.coverageScore >= 1 && result.precisionScore >= 0.5
+      ? 'global_score'
+      : null;
   }
 
   const passesMainThreshold =
+    !hasNegationMismatch &&
     result.score >= INTELLIGENT_AUTO_ADVANCE_THRESHOLD &&
     result.coverageScore >= 0.72 &&
     result.finalScore >= 0.55;
 
+  if (passesMainThreshold) {
+    return 'global_score';
+  }
+
   const passesHighFinalConfidence =
+    !hasNegationMismatch &&
     result.score >= 0.82 &&
     result.coverageScore >= 0.75 &&
     result.finalScore >= 1 &&
     result.precisionScore >= 0.65;
 
-  return passesMainThreshold || passesHighFinalConfidence;
+  if (passesHighFinalConfidence) {
+    return 'high_final_confidence';
+  }
+
+  const passesFluentFinal =
+    expectedTokens.length >= FLUENT_FINAL_MIN_CONTENT_TOKENS &&
+    result.finalPhraseWordCount >= 4 &&
+    result.finalPhraseScore >= 0.8 &&
+    result.coverageScore >= 0.6 &&
+    result.precisionScore >= 0.5 &&
+    result.orderScore >= 0.45;
+
+  return passesFluentFinal ? 'fluent_final' : null;
 };
 
 export const isNextLineCommand = (heardText: string) => {
