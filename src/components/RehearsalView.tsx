@@ -2382,7 +2382,10 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.container}>
         {renderHeader('Configurar ensayo')}
-        <View style={styles.intro}>
+        <ScrollView
+          contentContainerStyle={styles.preflightScrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.preflightCard}>
             <Text style={styles.preflightTitle}>Como quieres ensayar?</Text>
             <Text style={styles.preflightText}>
@@ -2538,7 +2541,7 @@ export const RehearsalView: React.FC<Props> = ({
               <Text style={styles.btnText}>{startConfiguredLabel}</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </View>
     );
   }
@@ -2846,7 +2849,10 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.container}>
         {renderHeader(listenModeSelection === 'manual' ? 'Preparando audio' : 'Preparando audio y micro')}
-        <View style={styles.intro}>
+        <ScrollView
+          contentContainerStyle={styles.preflightScrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.preflightCard}>
             {renderPreflightSteps()}
             <Text style={styles.preflightTitle}>
@@ -2950,7 +2956,7 @@ export const RehearsalView: React.FC<Props> = ({
               </View>
             ) : null}
           </View>
-        </View>
+        </ScrollView>
       </View>
     );
   }
@@ -3276,6 +3282,12 @@ const styles = StyleSheet.create({
   center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
+  preflightScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
   preflightCard: {
     width: '100%',
     maxWidth: 540,
