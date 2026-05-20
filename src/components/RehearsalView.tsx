@@ -3,12 +3,14 @@ import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { submitIntelligentLineFeedback } from '../api/sharedScripts';
-import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
+import { useSilenceAdvance, type MicrophoneCalibrationSnapshot } from '../hooks/useSilenceAdvance';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import {
   INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX,
   LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
   REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
+  REHEARSAL_AUDIO_MODE_STORAGE_KEY,
+  REHEARSAL_LISTEN_MODE_STORAGE_KEY,
 } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
 import {
@@ -55,13 +57,93 @@ type RehearsalPreflightPhase =
   | 'micro-calibration'
   | null;
 type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual' | 'intelligent';
+type ConfirmedRehearsalListenMode = Exclude<RehearsalListenModeSelection, 'pending'>;
 type RehearsalAudioModeSelection = 'pending' | SharedSongAudioKind;
+type RehearsalSessionPreparation = {
+  listenMode: ConfirmedRehearsalListenMode;
+  audioMode: SharedSongAudioKind;
+  preparedAt: string;
+  microphoneCalibration?: MicrophoneCalibrationSnapshot;
+};
 
 type LineVariantMap = Record<string, string[]>;
 type LastIntelligentAutoAdvance = {
   fromIndex: number;
   toIndex: number;
   entry: IntelligentLineFeedbackEntry;
+};
+
+const REHEARSAL_SESSION_PREPARATION_PREFIX = 'teatro_ia_rehearsal_session_preparation:';
+
+const isConfirmedListenMode = (value: unknown): value is ConfirmedRehearsalListenMode =>
+  value === 'auto' || value === 'manual' || value === 'intelligent';
+
+const isSharedSongAudioKind = (value: unknown): value is SharedSongAudioKind =>
+  value === 'karaoke' || value === 'vocal_guide';
+
+const getSafeSessionStorage = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
+const buildRehearsalSessionPreparationKey = (scriptId: string) =>
+  `${REHEARSAL_SESSION_PREPARATION_PREFIX}${scriptId}`;
+
+const isValidMicrophoneCalibration = (
+  value: unknown
+): value is MicrophoneCalibrationSnapshot => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<MicrophoneCalibrationSnapshot>;
+  return (
+    typeof candidate.noiseFloor === 'number' &&
+    typeof candidate.voiceLevel === 'number' &&
+    typeof candidate.voiceThreshold === 'number' &&
+    Number.isFinite(candidate.noiseFloor) &&
+    Number.isFinite(candidate.voiceLevel) &&
+    Number.isFinite(candidate.voiceThreshold)
+  );
+};
+
+const parseRehearsalSessionPreparation = (
+  rawValue: string | null
+): RehearsalSessionPreparation | null => {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue) as Partial<RehearsalSessionPreparation>;
+    if (
+      !isConfirmedListenMode(parsedValue.listenMode) ||
+      !isSharedSongAudioKind(parsedValue.audioMode)
+    ) {
+      return null;
+    }
+
+    return {
+      listenMode: parsedValue.listenMode,
+      audioMode: parsedValue.audioMode,
+      preparedAt:
+        typeof parsedValue.preparedAt === 'string'
+          ? parsedValue.preparedAt
+          : new Date().toISOString(),
+      microphoneCalibration: isValidMicrophoneCalibration(parsedValue.microphoneCalibration)
+        ? parsedValue.microphoneCalibration
+        : undefined,
+    };
+  } catch {
+    return null;
+  }
 };
 
 const INTELLIGENT_FALSE_POSITIVE_ISSUES: {
@@ -356,6 +438,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [hasCompletedRehearsalPreflight, setHasCompletedRehearsalPreflight] = useState(false);
   const [rehearsalPreflightPhase, setRehearsalPreflightPhase] = useState<RehearsalPreflightPhase>(null);
   const [hasConfirmedRehearsalSetup, setHasConfirmedRehearsalSetup] = useState(false);
+  const [hasSessionPreparedRehearsalMedia, setHasSessionPreparedRehearsalMedia] = useState(false);
   const [isSongPlaybackUnlocked, setIsSongPlaybackUnlocked] = useState(false);
   const [lineVariants, setLineVariants] = useState<LineVariantMap>({});
   const [intelligentFeedbackEntries, setIntelligentFeedbackEntries] = useState<
@@ -388,6 +471,10 @@ export const RehearsalView: React.FC<Props> = ({
   const processedGoodLineCommandKeyRef = useRef<string | null>(null);
   const processedAutoAdvanceLineKeyRef = useRef<string | null>(null);
   const lastIntelligentAutoAdvanceRef = useRef<LastIntelligentAutoAdvance | null>(null);
+  const rehearsalSessionPreparationKey = useMemo(
+    () => buildRehearsalSessionPreparationKey(resolvedScriptId),
+    [resolvedScriptId]
+  );
 
   const currentLine = filteredGuion[currentIndex];
   const currentLineIndexInScript = useMemo(
@@ -564,6 +651,7 @@ export const RehearsalView: React.FC<Props> = ({
     lineStateLabel,
     calibrateAmbientNoise,
     calibrateVoiceLevel,
+    applyMicrophoneCalibration,
     resetMicrophoneCalibration,
     startListening,
     stopListening,
@@ -612,6 +700,92 @@ export const RehearsalView: React.FC<Props> = ({
     },
     [resolvedScriptId]
   );
+
+  const readSessionPreparation = useCallback(() => {
+    const sessionStorage = getSafeSessionStorage();
+    return parseRehearsalSessionPreparation(
+      sessionStorage?.getItem(rehearsalSessionPreparationKey) ?? null
+    );
+  }, [rehearsalSessionPreparationKey]);
+
+  const clearSessionPreparation = useCallback(() => {
+    getSafeSessionStorage()?.removeItem(rehearsalSessionPreparationKey);
+    setHasSessionPreparedRehearsalMedia(false);
+  }, [rehearsalSessionPreparationKey]);
+
+  const markSessionPreparationReady = useCallback((
+    listenModeOverride?: RehearsalListenModeSelection,
+    audioModeOverride?: RehearsalAudioModeSelection,
+    microphoneCalibrationOverride?: MicrophoneCalibrationSnapshot
+  ) => {
+    const confirmedListenMode = listenModeOverride ?? listenModeSelection;
+    const confirmedAudioMode = audioModeOverride ?? rehearsalAudioModeSelection;
+
+    if (
+      !isConfirmedListenMode(confirmedListenMode) ||
+      !isSharedSongAudioKind(confirmedAudioMode)
+    ) {
+      return;
+    }
+
+    const sessionStorage = getSafeSessionStorage();
+    if (!sessionStorage) {
+      return;
+    }
+
+    const sessionPreparation: RehearsalSessionPreparation = {
+      listenMode: confirmedListenMode,
+      audioMode: confirmedAudioMode,
+      preparedAt: new Date().toISOString(),
+    };
+
+    const calibrationSnapshot =
+      microphoneCalibrationOverride ??
+      ((microphoneCalibrationStatus === 'ready' || microphoneCalibrationStatus === 'weak')
+        ? {
+            status: microphoneCalibrationStatus,
+            noiseFloor: microphoneNoiseFloor,
+            voiceLevel: microphoneVoiceLevel,
+            voiceThreshold,
+          }
+        : null);
+
+    if (confirmedListenMode !== 'manual' && calibrationSnapshot) {
+      sessionPreparation.microphoneCalibration = calibrationSnapshot;
+    }
+
+    sessionStorage.setItem(
+      rehearsalSessionPreparationKey,
+      JSON.stringify(sessionPreparation)
+    );
+    setHasSessionPreparedRehearsalMedia(true);
+  }, [
+    listenModeSelection,
+    microphoneCalibrationStatus,
+    microphoneNoiseFloor,
+    microphoneVoiceLevel,
+    rehearsalAudioModeSelection,
+    rehearsalSessionPreparationKey,
+    voiceThreshold,
+  ]);
+
+  const handleSelectListenMode = useCallback((nextMode: ConfirmedRehearsalListenMode) => {
+    if (nextMode === 'intelligent' && !isSpeechRecognitionSupported) {
+      return;
+    }
+
+    setListenModeSelection(nextMode);
+    void AsyncStorage.setItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY, nextMode).catch((error) => {
+      console.error('Error guardando modo de ensayo', error);
+    });
+  }, [isSpeechRecognitionSupported]);
+
+  const handleSelectRehearsalAudioMode = useCallback((nextMode: SharedSongAudioKind) => {
+    setRehearsalAudioModeSelection(nextMode);
+    void AsyncStorage.setItem(REHEARSAL_AUDIO_MODE_STORAGE_KEY, nextMode).catch((error) => {
+      console.error('Error guardando modo musical de ensayo', error);
+    });
+  }, []);
 
   const recordIntelligentFeedback = useCallback(
     (result: IntelligentLineFeedbackResult, heardTextOverride?: string) => {
@@ -1120,6 +1294,62 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, [getSongAudioPlayer]);
 
+  const restorePreparedRehearsalSession = useCallback(async () => {
+    if (
+      !isConfirmedListenMode(listenModeSelection) ||
+      !isSharedSongAudioKind(rehearsalAudioModeSelection)
+    ) {
+      return false;
+    }
+
+    const storedPreparation = readSessionPreparation();
+    if (!storedPreparation) {
+      setHasSessionPreparedRehearsalMedia(false);
+      return false;
+    }
+
+    if (listenModeSelection !== 'manual') {
+      if (!storedPreparation.microphoneCalibration) {
+        setHasSessionPreparedRehearsalMedia(false);
+        return false;
+      }
+
+      applyMicrophoneCalibration(storedPreparation.microphoneCalibration);
+    }
+
+    void primeSongPlayback();
+    setHasConfirmedRehearsalSetup(true);
+    setAutoListenEnabled(listenModeSelection === 'auto');
+    setTemporarilySuspendingAutoListen(false);
+    setIsRehearsalMediaReady(true);
+    setIsPreparingRehearsalMedia(false);
+    setHasPreparedRehearsalMedia(false);
+    setHasCompletedRehearsalPreflight(true);
+    setRehearsalPreflightPhase(null);
+    setRehearsalMediaStatus(null);
+    setCompatibilityMessage(null);
+    setShowCompatibilityInfo(false);
+    setHasSessionPreparedRehearsalMedia(true);
+
+    if (listenModeSelection !== 'auto') {
+      await releaseListening();
+    }
+
+    if (listenModeSelection !== 'intelligent') {
+      void stopRecognition();
+    }
+
+    return true;
+  }, [
+    applyMicrophoneCalibration,
+    listenModeSelection,
+    primeSongPlayback,
+    readSessionPreparation,
+    rehearsalAudioModeSelection,
+    releaseListening,
+    stopRecognition,
+  ]);
+
   const playMicroCalibrationBeep = useCallback(async () => {
     const player = getSongAudioPlayer();
     const toneObjectUrl = createMicroCalibrationToneObjectUrl();
@@ -1173,6 +1403,46 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     onProgressChange?.(Math.min(currentIndex, filteredGuion.length), filteredGuion.length);
   }, [currentIndex, filteredGuion.length, onProgressChange]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadRehearsalPreferences = async () => {
+      try {
+        const [storedListenMode, storedAudioMode] = await Promise.all([
+          AsyncStorage.getItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY),
+          AsyncStorage.getItem(REHEARSAL_AUDIO_MODE_STORAGE_KEY),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (
+          isConfirmedListenMode(storedListenMode) &&
+          (storedListenMode !== 'intelligent' || isSpeechRecognitionSupported)
+        ) {
+          setListenModeSelection(storedListenMode);
+        }
+
+        if (isSharedSongAudioKind(storedAudioMode)) {
+          setRehearsalAudioModeSelection(storedAudioMode);
+        }
+      } catch (error) {
+        console.error('Error cargando preferencias de ensayo', error);
+      }
+    };
+
+    void loadRehearsalPreferences();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isSpeechRecognitionSupported]);
+
+  useEffect(() => {
+    setHasSessionPreparedRehearsalMedia(Boolean(readSessionPreparation()));
+  }, [readSessionPreparation]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1572,6 +1842,7 @@ export const RehearsalView: React.FC<Props> = ({
       await wait(650);
 
       void primeSongPlayback();
+      markSessionPreparationReady(undefined, undefined, voiceResult);
       if (listenModeSelection === 'intelligent') {
         await releaseListening();
         setAutoListenEnabled(false);
@@ -1601,6 +1872,7 @@ export const RehearsalView: React.FC<Props> = ({
     resetMicrophoneCalibration,
     startListening,
     listenModeSelection,
+    markSessionPreparationReady,
   ]);
 
   const handlePreflightHeardVoice = useCallback(() => {
@@ -1614,6 +1886,7 @@ export const RehearsalView: React.FC<Props> = ({
         setHasCompletedRehearsalPreflight(true);
         setRehearsalPreflightPhase(null);
         setRehearsalMediaStatus(null);
+        markSessionPreparationReady('manual');
         void releaseListening();
         return;
       }
@@ -1633,10 +1906,12 @@ export const RehearsalView: React.FC<Props> = ({
     setHasCompletedRehearsalPreflight(true);
     setRehearsalPreflightPhase(null);
     setRehearsalMediaStatus(null);
+    markSessionPreparationReady();
   }, [
     autoListenEnabled,
     calibrateRehearsalMicrophone,
     listenModeSelection,
+    markSessionPreparationReady,
     prepareRehearsalMedia,
     primeSongPlayback,
     rehearsalPreflightPhase,
@@ -1996,10 +2271,35 @@ export const RehearsalView: React.FC<Props> = ({
     !hasConfirmedRehearsalSetup ||
     listenModeSelection === 'pending' ||
     rehearsalAudioModeSelection === 'pending';
+  const hasSelectedRehearsalModes =
+    listenModeSelection !== 'pending' && rehearsalAudioModeSelection !== 'pending';
+  const canReusePreparedSession =
+    hasSessionPreparedRehearsalMedia &&
+    hasSelectedRehearsalModes &&
+    listenModeSelection !== 'manual';
+  const startConfiguredLabel = canReusePreparedSession
+    ? 'Iniciar sin calibrar'
+    : hasSelectedRehearsalModes
+      ? 'Continuar con esta seleccion'
+      : 'Empezar ensayo';
 
-  const handleStartConfiguredRehearsal = useCallback(() => {
+  const handleStartConfiguredRehearsal = useCallback((options?: { forceCalibration?: boolean }) => {
     if (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') {
       return;
+    }
+
+    if (!options?.forceCalibration && hasSessionPreparedRehearsalMedia) {
+      void restorePreparedRehearsalSession().then((wasRestored) => {
+        if (!wasRestored) {
+          clearSessionPreparation();
+          handleStartConfiguredRehearsal({ forceCalibration: true });
+        }
+      });
+      return;
+    }
+
+    if (options?.forceCalibration) {
+      clearSessionPreparation();
     }
 
     setHasConfirmedRehearsalSetup(true);
@@ -2026,15 +2326,20 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalMediaStatus(null);
     setCompatibilityMessage(null);
     setShowCompatibilityInfo(false);
+    markSessionPreparationReady('manual');
     void releaseListening();
     void stopRecognition();
   }, [
+    clearSessionPreparation,
     enableAutoListenForDevice,
     enableIntelligentListenForDevice,
+    hasSessionPreparedRehearsalMedia,
     listenModeSelection,
+    markSessionPreparationReady,
     primeSongPlayback,
     releaseListening,
     rehearsalAudioModeSelection,
+    restorePreparedRehearsalSession,
     stopRecognition,
   ]);
 
@@ -2053,6 +2358,17 @@ export const RehearsalView: React.FC<Props> = ({
               Selecciona Ensayar sin micro si todavia no estas confiado con tus frases y necesitas
               leerlas con calma.
             </Text>
+            {hasSelectedRehearsalModes ? (
+              <Text style={styles.preflightStatusSecondary}>
+                Hemos dejado seleccionados tus ultimos modos. Puedes continuar con ellos o cambiarlos
+                aqui mismo.
+              </Text>
+            ) : null}
+            {canReusePreparedSession ? (
+              <Text style={styles.preflightStatus}>
+                Audio y micro ya preparados en esta sesion.
+              </Text>
+            ) : null}
             <Text style={styles.preflightSectionTitle}>Modo de dialogo</Text>
             <View style={styles.preflightActions}>
               <TouchableOpacity
@@ -2062,7 +2378,7 @@ export const RehearsalView: React.FC<Props> = ({
                     ? styles.preflightConfirmButton
                     : styles.preflightUnselectedButton,
                 ]}
-                onPress={() => setListenModeSelection('auto')}
+                onPress={() => handleSelectListenMode('auto')}
               >
                 <Text
                   style={[
@@ -2083,7 +2399,7 @@ export const RehearsalView: React.FC<Props> = ({
                 ]}
                 onPress={() => {
                   if (isSpeechRecognitionSupported) {
-                    setListenModeSelection('intelligent');
+                    handleSelectListenMode('intelligent');
                   }
                 }}
                 disabled={!isSpeechRecognitionSupported}
@@ -2104,7 +2420,7 @@ export const RehearsalView: React.FC<Props> = ({
                     ? styles.preflightManualButton
                     : styles.preflightUnselectedButton,
                 ]}
-                onPress={() => setListenModeSelection('manual')}
+                onPress={() => handleSelectListenMode('manual')}
               >
                 <Text
                   style={[
@@ -2134,7 +2450,7 @@ export const RehearsalView: React.FC<Props> = ({
                     ? styles.preflightMusicKaraokeButton
                     : styles.preflightUnselectedButton,
                 ]}
-                onPress={() => setRehearsalAudioModeSelection('karaoke')}
+                onPress={() => handleSelectRehearsalAudioMode('karaoke')}
               >
                 <Text
                   style={[
@@ -2152,7 +2468,7 @@ export const RehearsalView: React.FC<Props> = ({
                     ? styles.preflightMusicGuideButton
                     : styles.preflightUnselectedButton,
                 ]}
-                onPress={() => setRehearsalAudioModeSelection('vocal_guide')}
+                onPress={() => handleSelectRehearsalAudioMode('vocal_guide')}
               >
                 <Text
                   style={[
@@ -2171,13 +2487,21 @@ export const RehearsalView: React.FC<Props> = ({
                 (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') &&
                   styles.buttonDisabled,
               ]}
-              onPress={handleStartConfiguredRehearsal}
+              onPress={() => handleStartConfiguredRehearsal()}
               disabled={
                 listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending'
               }
             >
-              <Text style={styles.btnText}>Empezar ensayo</Text>
+              <Text style={styles.btnText}>{startConfiguredLabel}</Text>
             </TouchableOpacity>
+            {canReusePreparedSession ? (
+              <TouchableOpacity
+                style={[styles.preflightActionButton, styles.preflightFallbackButton]}
+                onPress={() => handleStartConfiguredRehearsal({ forceCalibration: true })}
+              >
+                <Text style={styles.preflightFallbackText}>Recalibrar antes de empezar</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </View>

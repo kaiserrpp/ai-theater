@@ -5,3 +5,5 @@ export const LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY =
   '@teatro_ia_rehearsal_audio_compatibility';
 export const REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY = '@teatro_ia_rehearsal_audio_compatibility_v2';
 export const INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX = '@teatro_ia_line_variants:';
+export const REHEARSAL_LISTEN_MODE_STORAGE_KEY = '@teatro_ia_rehearsal_listen_mode';
+export const REHEARSAL_AUDIO_MODE_STORAGE_KEY = '@teatro_ia_rehearsal_audio_mode';

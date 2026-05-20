@@ -17,6 +17,13 @@ export type MicrophoneCalibrationResult = {
   voiceToNoiseRatio: number;
 };
 
+export type MicrophoneCalibrationSnapshot = {
+  status?: MicrophoneCalibrationStatus;
+  noiseFloor: number;
+  voiceLevel: number;
+  voiceThreshold: number;
+};
+
 interface UseSilenceAdvanceOptions {
   enabledForCurrentLine: boolean;
   lineKey: string | null;
@@ -41,6 +48,7 @@ interface UseSilenceAdvanceResult {
   lineStateLabel: string;
   calibrateAmbientNoise: (durationMs?: number) => Promise<MicrophoneCalibrationResult>;
   calibrateVoiceLevel: (durationMs?: number) => Promise<MicrophoneCalibrationResult>;
+  applyMicrophoneCalibration: (snapshot: MicrophoneCalibrationSnapshot) => void;
   resetMicrophoneCalibration: () => void;
   startListening: () => Promise<void>;
   stopListening: () => Promise<void>;
@@ -237,6 +245,24 @@ export const useSilenceAdvance = ({
     setMicrophoneNoiseFloor(0);
     setMicrophoneVoiceLevel(0);
     setVoiceThreshold(MIN_VOICE_THRESHOLD);
+  }, []);
+
+  const applyMicrophoneCalibration = useCallback((snapshot: MicrophoneCalibrationSnapshot) => {
+    const safeNoiseFloor = Math.max(0, snapshot.noiseFloor);
+    const safeVoiceLevel = Math.max(0, snapshot.voiceLevel);
+    const safeThreshold = Math.max(MIN_VOICE_THRESHOLD, snapshot.voiceThreshold);
+    const safeStatus =
+      snapshot.status === 'weak' || snapshot.status === 'ready' ? snapshot.status : 'ready';
+
+    microphoneNoiseFloorRef.current = safeNoiseFloor;
+    microphoneVoiceLevelRef.current = safeVoiceLevel;
+    currentThresholdRef.current = safeThreshold;
+    releaseThresholdRef.current = safeThreshold * THRESHOLD_RELEASE_FACTOR;
+    setMicrophoneNoiseFloor(safeNoiseFloor);
+    setMicrophoneVoiceLevel(safeVoiceLevel);
+    setVoiceThreshold(safeThreshold);
+    setMicrophoneCalibrationStatus(safeStatus);
+    setMicrophoneCalibrationProgress(1);
   }, []);
 
   const getReusableStream = useCallback(() => {
@@ -807,6 +833,7 @@ export const useSilenceAdvance = ({
     lineStateLabel,
     calibrateAmbientNoise,
     calibrateVoiceLevel,
+    applyMicrophoneCalibration,
     resetMicrophoneCalibration,
     startListening,
     stopListening,
