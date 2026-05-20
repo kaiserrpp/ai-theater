@@ -4,6 +4,7 @@ type SpeechCallbacks = {
   onStart?: () => void;
   onDone?: () => void;
   onError?: (error: Error) => void;
+  rate?: number;
 };
 
 type WindowWithSpeech = Window & typeof globalThis & {
@@ -72,9 +73,12 @@ export const stopRehearsalSpeech = () => {
 };
 
 export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) => {
+  const speechRate = callbacks.rate ?? 0.96;
+
   if (typeof window === 'undefined') {
     Speech.speak(text, {
       language: 'es-ES',
+      rate: speechRate,
       onStart: callbacks.onStart,
       onDone: callbacks.onDone,
       onError: (error) => callbacks.onError?.(error instanceof Error ? error : new Error('speech-error')),
@@ -96,7 +100,7 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
     let started = false;
     const utterance = new Utterance(text);
     utterance.lang = 'es-ES';
-    utterance.rate = 0.96;
+    utterance.rate = speechRate;
     utterance.pitch = 1;
     utterance.volume = 1;
 

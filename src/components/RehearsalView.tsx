@@ -1627,6 +1627,7 @@ export const RehearsalView: React.FC<Props> = ({
       speechStartTimeout = setTimeout(() => {
         setSpeechStatusMessage('Lanzando la linea con Siri...');
         speakRehearsalSpeech(speakableLineText, {
+          rate: 1.14,
           onStart: () => {
             if (isCancelled) {
               return;
