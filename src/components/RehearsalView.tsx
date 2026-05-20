@@ -2369,6 +2369,14 @@ export const RehearsalView: React.FC<Props> = ({
                 Audio y micro ya preparados en esta sesion.
               </Text>
             ) : null}
+            {canReusePreparedSession ? (
+              <TouchableOpacity
+                style={[styles.preflightActionButton, styles.preflightFallbackButton]}
+                onPress={() => handleStartConfiguredRehearsal({ forceCalibration: true })}
+              >
+                <Text style={styles.preflightFallbackText}>Recalibrar antes de empezar</Text>
+              </TouchableOpacity>
+            ) : null}
             <Text style={styles.preflightSectionTitle}>Modo de dialogo</Text>
             <View style={styles.preflightActions}>
               <TouchableOpacity
@@ -2494,14 +2502,6 @@ export const RehearsalView: React.FC<Props> = ({
             >
               <Text style={styles.btnText}>{startConfiguredLabel}</Text>
             </TouchableOpacity>
-            {canReusePreparedSession ? (
-              <TouchableOpacity
-                style={[styles.preflightActionButton, styles.preflightFallbackButton]}
-                onPress={() => handleStartConfiguredRehearsal({ forceCalibration: true })}
-              >
-                <Text style={styles.preflightFallbackText}>Recalibrar antes de empezar</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
         </View>
       </View>
