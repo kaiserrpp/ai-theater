@@ -472,3 +472,37 @@ Objetivo de la siguiente prueba:
 - comprobar si el ensayo se siente mas fluido
 - revisar si aparecen falsos positivos tras usar `fluent_final`
 - usar las nuevas metricas para separar ritmo de fidelidad al texto
+
+## Fase 1.6 - Frases cortas, parafrasis y comando de voz
+
+Informe revisado:
+- enviado el 2026-05-19
+- 86 entradas
+- 65 autoavances reales
+- 21 lineas buenas manuales
+- 0 falsos positivos
+- tasa real: 76%
+
+Cambios aplicados:
+- nuevo comando de voz: decir `Linea buena` acepta la replica como si se pulsara el boton
+- si `Linea buena` aparece al final de una transcripcion, se recorta el comando y se guarda solo la replica como variante
+- nueva razon de autoavance: `short_flexible`
+- nueva razon de autoavance: `strong_coverage`
+- equivalencias anadidas desde el informe:
+  - `Davey` / `David` / `Baby`
+  - `baja la voz` / `habla mas bajo`
+  - `un monton` / `un punado`
+  - `bromeando` / `de broma`
+  - `voz` / `voces`
+  - `vengan` / `venid`
+  - `Shh` / `che`
+  - `tal vez` / `quizas`
+  - `que tal si` / `por que no`
+  - `no esta mal` / `suena bien`
+  - `The Journal` con transcripciones aproximadas
+
+Simulacion con informe 2026-05-19:
+- autoavances reales: 65/86
+- lineas manuales que ahora avanzarian: 18
+- autoavance proyectado: 83/86, aproximadamente 97%
+- se dejan fuera 3 lineas por ser demasiado parciales o con muy poca cobertura

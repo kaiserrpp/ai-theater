@@ -25,9 +25,12 @@ const STOP_WORDS = new Set([
   'es',
   'ese',
   'esa',
+  'eso',
   'esta',
+  'estas',
   'este',
   'esto',
+  'entonces',
   'for',
   'hay',
   'i',
@@ -116,6 +119,19 @@ const NEXT_LINE_COMMANDS = [
   'next',
 ];
 
+const GOOD_LINE_COMMANDS = [
+  'linea buena',
+  'lÃ­nea buena',
+  'linea valida',
+  'lÃ­nea valida',
+  'linea correcta',
+  'lÃ­nea correcta',
+  'la linea es buena',
+  'la lÃ­nea es buena',
+  'aceptar linea',
+  'aceptar lÃ­nea',
+];
+
 const NUMBER_TOKEN_ALIASES: Record<string, string> = {
   '0': 'cero',
   '1': 'uno',
@@ -151,6 +167,8 @@ const TOKEN_ALIASES: Record<string, string> = {
   cabalga: 'cabalgas',
   cabalgar: 'cabalgas',
   chist: 'reaction',
+  claro: 'bien',
+  conocido: 'conocidos',
   comprobar: 'averiguarlo',
   comprobarlo: 'averiguarlo',
   cratchi: 'crutchie',
@@ -161,8 +179,18 @@ const TOKEN_ALIASES: Record<string, string> = {
   delanci: 'delancey',
   delantzi: 'delancey',
   dici: 'dices',
+  david: 'davey',
+  davy: 'davey',
+  baby: 'davey',
+  che: 'reaction',
+  dellornar: 'journal',
+  dellornal: 'journal',
+  delyornar: 'journal',
+  entienda: 'sentido',
+  entiendo: 'sentido',
   fe: 'fe',
   gratis: 'crutchie',
+  haceis: 'hacen',
   haceos: 'hacer',
   hagan: 'hacer',
   haganse: 'hacer',
@@ -171,8 +199,10 @@ const TOKEN_ALIASES: Record<string, string> = {
   hicieremoslo: 'hacer',
   hiciesemos: 'hacer',
   hiciesemoslo: 'hacer',
+  journal: 'journal',
   jackeline: 'jackkelly',
   jacqueline: 'jackkelly',
+  lado: 'lugar',
   mantened: 'mantener',
   manteneros: 'mantener',
   mantenganse: 'mantener',
@@ -192,8 +222,11 @@ const TOKEN_ALIASES: Record<string, string> = {
   pasen: 'pasar',
   penthhouse: 'penthouse',
   pena: 'triste',
+  punado: 'monton',
   quereis: 'quieres',
   querriais: 'pareceria',
+  quizas: 'quiza',
+  lamento: 'triste',
   resears: 'research',
   romeo: 'romeo',
   santafe: 'santafe',
@@ -209,7 +242,11 @@ const TOKEN_ALIASES: Record<string, string> = {
   tanta: 'santa',
   teneis: 'tienen',
   todavia: 'aun',
+  tranquilas: 'tranquilo',
+  tranquilos: 'tranquilo',
   vale: 'bien',
+  venid: 'vengan',
+  voces: 'voz',
   vuelvete: 'volver',
   wisel: 'weasel',
 };
@@ -218,19 +255,32 @@ const PHRASE_ALIASES: [RegExp, string][] = [
   [/\ba lo mejor\b/g, ' quiza '],
   [/\bcarita de pena\b/g, ' cara triste '],
   [/\bcara de pena\b/g, ' cara triste '],
+  [/\bde broma\b/g, ' bromeando '],
   [/\bdaos prisa\b/g, ' apurense '],
   [/\bdar pena\b/g, ' triste '],
   [/\bde acuerdo\b/g, ' bien '],
+  [/\bdebe\s+tratarse\b/g, ' tiene ser '],
+  [/\bhabla\s+mas\s+bajo\b/g, ' baja voz '],
+  [/\bhas\s+echado\s+la\s+llave\b/g, ' cierras puerta llave '],
   [/\bjack\s+kelly\b/g, ' jackkelly '],
   [/\ble\s+importa\s+si\b/g, ' podriamos '],
   [/\bme\s+da\s+larkin\b/g, ' medda larkin '],
+  [/\blamento\s+mucho\s+lo\s+de\b/g, ' triste '],
+  [/\bnos\s+vamos\s+a\b/g, ' iremos '],
   [/\bnueva york\b/g, ' ny '],
+  [/\bpor\s+que\s+no\s+nos\b/g, ' propuesta nos '],
   [/\bque\s+os\s+parece\s+si\b/g, ' propuesta '],
   [/\bque\s+tal\s+si\b/g, ' propuesta '],
   [/\bsanta fe\b/g, ' santafe '],
   [/\bsenorita\s+me\s+da\b/g, ' senorita medda '],
+  [/\bse\s+me\s+ocurre\s+un\s+problema\b/g, ' hay problema '],
   [/\bsetenta\s+treinta\b/g, ' 70 30 '],
   [/\bsesenta\s+cuarenta\b/g, ' 60 40 '],
+  [/\bsi\s+asi\s+es\b/g, ' bien '],
+  [/\bsi\s+claro\s+tiene\s+sentido\b/g, ' sentido '],
+  [/\btal\s+vez\b/g, ' quiza '],
+  [/\bno\s+esta\s+mal\b/g, ' suena bien '],
+  [/\bvamos\s+a\s+la\s+huelga\b/g, ' hacemos huelga '],
   [/\bun\s+vete\s+a\s+dormir\b/g, ' vuelve dormir '],
   [/\bvete\s+a\s+dormir\b/g, ' vuelve dormir '],
 ];
@@ -243,7 +293,9 @@ const FLUENT_FINAL_MIN_CONTENT_TOKENS = 6;
 export type AutomaticLineMatchReason =
   | 'global_score'
   | 'high_final_confidence'
-  | 'fluent_final';
+  | 'fluent_final'
+  | 'short_flexible'
+  | 'strong_coverage';
 
 export type LineMatchResult = {
   score: number;
@@ -311,6 +363,37 @@ const normalizeToken = (token: string) => {
 
 const compactRepeatedTokens = (tokens: string[]) =>
   tokens.filter((token, index) => index === 0 || token !== tokens[index - 1]);
+
+const commandMatches = (normalizedText: string, commands: string[]) =>
+  commands.some((command) => normalizeSpeechText(command) === normalizedText);
+
+const splitTrailingCommand = (heardText: string, commands: string[]) => {
+  const normalizedText = normalizeSpeechText(heardText);
+  const normalizedTokens = normalizedText.split(' ').filter(Boolean);
+
+  if (!normalizedTokens.length) {
+    return null;
+  }
+
+  for (const command of commands) {
+    const commandTokens = normalizeSpeechText(command).split(' ').filter(Boolean);
+
+    if (!commandTokens.length || commandTokens.length > normalizedTokens.length) {
+      continue;
+    }
+
+    const commandStartIndex = normalizedTokens.length - commandTokens.length;
+    const hasCommandAtEnd = commandTokens.every(
+      (token, index) => normalizedTokens[commandStartIndex + index] === token
+    );
+
+    if (hasCommandAtEnd) {
+      return normalizedTokens.slice(0, commandStartIndex).join(' ');
+    }
+  }
+
+  return null;
+};
 
 export const normalizeSpeechText = (value: string) =>
   compactRepeatedTokens(
@@ -587,6 +670,36 @@ export const getAutomaticLineMatchReason = (
     return 'high_final_confidence';
   }
 
+  const passesStrongCoverage =
+    !hasNegationMismatch &&
+    result.score >= 0.84 &&
+    result.coverageScore >= 0.85 &&
+    result.precisionScore >= 0.75 &&
+    result.orderScore >= 0.8;
+
+  if (passesStrongCoverage) {
+    return 'strong_coverage';
+  }
+
+  const passesShortFlexible =
+    expectedTokens.length >= 3 &&
+    expectedTokens.length <= 5 &&
+    result.precisionScore >= 0.45 &&
+    result.orderScore >= 0.4 &&
+    (
+      (result.finalPhraseScore >= 0.8 && result.coverageScore >= 0.6) ||
+      (
+        result.score >= 0.78 &&
+        result.coverageScore >= 0.8 &&
+        result.precisionScore >= 0.75 &&
+        result.orderScore >= 0.75
+      )
+    );
+
+  if (passesShortFlexible) {
+    return 'short_flexible';
+  }
+
   const passesFluentFinal =
     expectedTokens.length >= FLUENT_FINAL_MIN_CONTENT_TOKENS &&
     result.finalPhraseWordCount >= 4 &&
@@ -607,6 +720,21 @@ export const isNextLineCommand = (heardText: string) => {
   }
 
   return NEXT_LINE_COMMANDS.some((command) => normalizeSpeechText(command) === normalizedText);
+};
+
+export const getGoodLineCommandAcceptedText = (heardText: string) => {
+  const normalizedText = normalizeSpeechText(heardText);
+  const tokens = normalizedText.split(' ').filter(Boolean);
+
+  if (!tokens.length || tokens.length > 40) {
+    return null;
+  }
+
+  if (commandMatches(normalizedText, GOOD_LINE_COMMANDS)) {
+    return '';
+  }
+
+  return splitTrailingCommand(heardText, GOOD_LINE_COMMANDS);
 };
 
 export const inferSpeechRecognitionLanguage = (lineText: string) => {

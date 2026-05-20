@@ -23,6 +23,7 @@ import {
 import {
   INTELLIGENT_AUTO_ADVANCE_THRESHOLD,
   getAutomaticLineMatchReason,
+  getGoodLineCommandAcceptedText,
   hashLineText,
   inferSpeechRecognitionLanguage,
   isSafeAutomaticLineMatch,
@@ -384,6 +385,7 @@ export const RehearsalView: React.FC<Props> = ({
   const selectedMusicalNumberAudioIdsRef = useRef<Record<string, string>>({});
   const intelligentSessionIdRef = useRef(createSessionId());
   const processedCommandLineKeyRef = useRef<string | null>(null);
+  const processedGoodLineCommandKeyRef = useRef<string | null>(null);
   const processedAutoAdvanceLineKeyRef = useRef<string | null>(null);
   const lastIntelligentAutoAdvanceRef = useRef<LastIntelligentAutoAdvance | null>(null);
 
@@ -612,17 +614,21 @@ export const RehearsalView: React.FC<Props> = ({
   );
 
   const recordIntelligentFeedback = useCallback(
-    (result: IntelligentLineFeedbackResult) => {
+    (result: IntelligentLineFeedbackResult, heardTextOverride?: string) => {
       if (!currentLine || currentLineIndexInScript < 0) {
         return null;
       }
 
-      const heardText = speechRecognitionTranscript.trim();
-      const score = Number(intelligentLineMatch.score.toFixed(3));
+      const heardText = heardTextOverride ?? speechRecognitionTranscript.trim();
+      const feedbackLineMatch =
+        heardTextOverride === undefined
+          ? intelligentLineMatch
+          : scoreLineMatch(speakableLineText, heardText, currentAcceptedLineVariants);
+      const score = Number(feedbackLineMatch.score.toFixed(3));
       const autoAdvanceReason = getAutomaticLineMatchReason(
         speakableLineText,
         heardText,
-        intelligentLineMatch
+        feedbackLineMatch
       );
       const entry: IntelligentLineFeedbackEntry = {
         lineIndex: currentLineIndexInScript,
@@ -631,17 +637,17 @@ export const RehearsalView: React.FC<Props> = ({
         expectedText: currentLine.t,
         heardText,
         score,
-        coverageScore: Number(intelligentLineMatch.coverageScore.toFixed(3)),
-        orderScore: Number(intelligentLineMatch.orderScore.toFixed(3)),
-        finalScore: Number(intelligentLineMatch.finalScore.toFixed(3)),
-        finalPhraseScore: Number(intelligentLineMatch.finalPhraseScore.toFixed(3)),
-        finalPhraseWordCount: intelligentLineMatch.finalPhraseWordCount,
-        precisionScore: Number(intelligentLineMatch.precisionScore.toFixed(3)),
-        negationPenaltyApplied: intelligentLineMatch.negationPenaltyApplied,
+        coverageScore: Number(feedbackLineMatch.coverageScore.toFixed(3)),
+        orderScore: Number(feedbackLineMatch.orderScore.toFixed(3)),
+        finalScore: Number(feedbackLineMatch.finalScore.toFixed(3)),
+        finalPhraseScore: Number(feedbackLineMatch.finalPhraseScore.toFixed(3)),
+        finalPhraseWordCount: feedbackLineMatch.finalPhraseWordCount,
+        precisionScore: Number(feedbackLineMatch.precisionScore.toFixed(3)),
+        negationPenaltyApplied: feedbackLineMatch.negationPenaltyApplied,
         autoAdvanceReason,
         result,
-        matchedReferenceText: intelligentLineMatch.referenceText,
-        matchedReferenceIndex: intelligentLineMatch.referenceIndex,
+        matchedReferenceText: feedbackLineMatch.referenceText,
+        matchedReferenceIndex: feedbackLineMatch.referenceIndex,
         language: intelligentRecognitionLanguage,
         createdAt: new Date().toISOString(),
       };
@@ -654,6 +660,7 @@ export const RehearsalView: React.FC<Props> = ({
       currentLine,
       currentLineIndexInScript,
       currentSceneTitle,
+      currentAcceptedLineVariants,
       intelligentLineMatch,
       intelligentRecognitionLanguage,
       speakableLineText,
@@ -661,8 +668,8 @@ export const RehearsalView: React.FC<Props> = ({
     ]
   );
 
-  const saveCurrentTranscriptAsVariant = useCallback(async () => {
-    const heardText = speechRecognitionTranscript.trim();
+  const saveCurrentTranscriptAsVariant = useCallback(async (heardTextOverride?: string) => {
+    const heardText = heardTextOverride ?? speechRecognitionTranscript.trim();
 
     if (!currentLineVariantKey || !heardText) {
       return;
@@ -679,9 +686,9 @@ export const RehearsalView: React.FC<Props> = ({
     await persistLineVariants(nextVariants);
   }, [currentLineVariantKey, lineVariants, persistLineVariants, speechRecognitionTranscript]);
 
-  const handleAcceptIntelligentLine = useCallback(async () => {
-    recordIntelligentFeedback('linea_buena');
-    await saveCurrentTranscriptAsVariant();
+  const handleAcceptIntelligentLine = useCallback(async (heardTextOverride?: string) => {
+    recordIntelligentFeedback('linea_buena', heardTextOverride);
+    await saveCurrentTranscriptAsVariant(heardTextOverride);
     resetSpeechRecognitionTranscript();
     advanceLine();
   }, [
@@ -765,6 +772,35 @@ export const RehearsalView: React.FC<Props> = ({
     resolvedScriptId,
     scriptTitle,
     shareId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !shouldUseIntelligentRecognition ||
+      !currentLineVariantKey ||
+      !speechRecognitionTranscript.trim()
+    ) {
+      return;
+    }
+
+    const acceptedText = getGoodLineCommandAcceptedText(speechRecognitionTranscript);
+
+    if (acceptedText === null) {
+      return;
+    }
+
+    const commandKey = `${currentLineVariantKey}:${speechRecognitionTranscript}:linea_buena`;
+    if (processedGoodLineCommandKeyRef.current === commandKey) {
+      return;
+    }
+
+    processedGoodLineCommandKeyRef.current = commandKey;
+    void handleAcceptIntelligentLine(acceptedText);
+  }, [
+    currentLineVariantKey,
+    handleAcceptIntelligentLine,
+    shouldUseIntelligentRecognition,
+    speechRecognitionTranscript,
   ]);
 
   useEffect(() => {
@@ -856,6 +892,7 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     if (currentLineVariantKey) {
       processedCommandLineKeyRef.current = null;
+      processedGoodLineCommandKeyRef.current = null;
       processedAutoAdvanceLineKeyRef.current = null;
       setFeedbackStatusMessage(null);
     }
@@ -2242,6 +2279,7 @@ export const RehearsalView: React.FC<Props> = ({
         <Text style={styles.intelligentHint}>
           Avanzamos si la coincidencia supera {Math.round(INTELLIGENT_AUTO_ADVANCE_THRESHOLD * 100)}% o si el cierre
           de la replica encaja bien. El detalle queda guardado para repasar despues.
+          Tambien puedes decir Linea buena para aceptar la replica por voz.
         </Text>
         <View style={styles.intelligentTranscriptBlock}>
           <Text style={styles.intelligentLabel}>Debias decir</Text>
