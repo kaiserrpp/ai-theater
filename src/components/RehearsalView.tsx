@@ -1951,6 +1951,33 @@ export const RehearsalView: React.FC<Props> = ({
     });
   }, [disableAutoListenForDevice, listenModeSelection, prepareRehearsalMedia, rehearsalPreflightPhase]);
 
+  const advancePastMusicalNumber = useCallback((musicalNumberId: string | null) => {
+    const musicalNumber = musicalNumberId
+      ? musicalNumbers.find((candidate) => candidate.id === musicalNumberId)
+      : null;
+
+    if (!musicalNumber) {
+      advanceLine();
+      return;
+    }
+
+    setCurrentIndex((previousIndex) => {
+      const currentScriptIndex = filteredGuion[previousIndex]
+        ? guion.indexOf(filteredGuion[previousIndex])
+        : -1;
+
+      if (currentScriptIndex > musicalNumber.endLineIndex) {
+        return previousIndex;
+      }
+
+      const nextLineIndex = filteredGuion.findIndex(
+        (line) => guion.indexOf(line) > musicalNumber.endLineIndex
+      );
+
+      return nextLineIndex >= 0 ? nextLineIndex : filteredGuion.length;
+    });
+  }, [advanceLine, filteredGuion, guion, musicalNumbers]);
+
   const handlePlaySongAudio = useCallback((
     audioUrl: string,
     audioId: string,
@@ -1983,6 +2010,12 @@ export const RehearsalView: React.FC<Props> = ({
     player.onended = () => {
       setPlayingAudioId(null);
       activeAudioPlaybackRef.current = null;
+      if (options?.playbackKind === 'musical-number') {
+        autoStartedMusicalNumberKeyRef.current = null;
+        advancePastMusicalNumber(options.ownerId ?? null);
+        return;
+      }
+
       if (options?.advanceOnEnd) {
         advanceLine();
       }
@@ -2024,6 +2057,7 @@ export const RehearsalView: React.FC<Props> = ({
       setAudioError('No se pudo reproducir este audio.');
     });
   }, [
+    advancePastMusicalNumber,
     advanceLine,
     getSongAudioPlayer,
     isAutoplayBlockedError,
