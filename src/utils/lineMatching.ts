@@ -164,6 +164,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   atraparmeos: 'atrapar',
   autentico: 'verdadero',
   averiguar: 'averiguarlo',
+  bocaza: 'bocota',
   cabalga: 'cabalgas',
   cabalgar: 'cabalgas',
   chist: 'reaction',
@@ -173,6 +174,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   comprobarlo: 'averiguarlo',
   cratchi: 'crutchie',
   crachi: 'crutchie',
+  croati: 'crutchie',
   crazy: 'crutchie',
   cruchi: 'crutchie',
   crutchy: 'crutchie',
@@ -239,6 +241,8 @@ const TOKEN_ALIASES: Record<string, string> = {
   sneider: 'snyder',
   schneider: 'snyder',
   sitio: 'lugar',
+  distinta: 'diferente',
+  distinto: 'diferente',
   tanta: 'santa',
   teneis: 'tienen',
   todavia: 'aun',
@@ -403,6 +407,72 @@ export const normalizeSpeechText = (value: string) =>
       .map((token) => normalizeToken(token.trim()))
       .filter(Boolean)
   ).join(' ');
+
+const EQUIVALENT_LINE_REFERENCES: {
+  expectedPattern: RegExp;
+  references: string[];
+}[] = [
+  {
+    expectedPattern: /\bnewsies\s+ataquenlos\b/,
+    references: ['Music, a por ellos', 'Newsies, a por ellos'],
+  },
+  {
+    expectedPattern: /^crutchie$/,
+    references: ['Croati'],
+  },
+  {
+    expectedPattern: /\bquieres\s+ver\s+lugar.*newsies\s+exprimidos.*bocota.*fallado/,
+    references: [
+      'Quieres ver lo que yo veo. Que te parece esto. Newsies exprimidos. Todo por mi bocaza, les he fallado a todos.',
+    ],
+  },
+  {
+    expectedPattern: /\bpoco\s+diferente.*donde.*creciste\b/,
+    references: ['Un lugar muy distinto donde tu creciste'],
+  },
+  {
+    expectedPattern: /\byo\s+no\s+dije\s+nada\s+sobre\b/,
+    references: ['No quise decir nada sobre'],
+  },
+  {
+    expectedPattern: /\bno\s+pense.*tenia.*hacerlo.*tratando.*traidora\b/,
+    references: [
+      'Nunca pense que tenia que habertelo preguntado, quizas si hubiera sabido que estaba tratando con una traidora',
+    ],
+  },
+  {
+    expectedPattern: /\bsolo\s+hay\s+problema.*no\s+tenemos\s+forma\s+imprimirlo\b/,
+    references: ['Solo se me ocurre un problema. No tenemos como imprimirlo'],
+  },
+  {
+    expectedPattern: /\bde\s+que\s+va\s+esto.*me\s+estoy\s+enganando.*hay\s+algo\b/,
+    references: [
+      'Espera. Para. De que va esto. Me estoy enganando a mi mismo o es que realmente hay algo',
+    ],
+  },
+  {
+    expectedPattern: /\bno\s+pero\s+si.*bastante\s+miedo\b/,
+    references: ['Pero si, bastante miedo tu'],
+  },
+  {
+    expectedPattern: /\bsin\s+problema\s+gobernador.*huelga\s+resuelta.*ponga\s+camino\b/,
+    references: [
+      'Espera, tranquilo senor Gobernador. Una vez terminada la huelga es probable que me ponga en camino',
+    ],
+  },
+  {
+    expectedPattern: /\bahorra\s+aliento.*inutil\b/,
+    references: ['Ahorrate el aliento. Es inutil'],
+  },
+];
+
+const getEquivalentLineReferences = (expectedText: string) => {
+  const normalizedExpectedText = normalizeSpeechText(expectedText);
+
+  return EQUIVALENT_LINE_REFERENCES.flatMap(({ expectedPattern, references }) =>
+    expectedPattern.test(normalizedExpectedText) ? references : []
+  );
+};
 
 const tokenize = (value: string) =>
   normalizeSpeechText(value)
@@ -637,7 +707,11 @@ export const scoreLineMatch = (
   heardText: string,
   acceptedVariants: string[] = []
 ) => {
-  const references = [expectedText, ...acceptedVariants.filter((variant) => variant.trim())];
+  const references = [
+    expectedText,
+    ...getEquivalentLineReferences(expectedText),
+    ...acceptedVariants.filter((variant) => variant.trim()),
+  ];
 
   return references
     .map((referenceText, referenceIndex) =>
