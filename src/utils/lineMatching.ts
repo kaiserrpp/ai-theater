@@ -293,6 +293,7 @@ const FLUENT_FINAL_MIN_CONTENT_TOKENS = 6;
 export type AutomaticLineMatchReason =
   | 'global_score'
   | 'high_final_confidence'
+  | 'replica_closure'
   | 'fluent_final'
   | 'short_flexible'
   | 'strong_coverage';
@@ -538,6 +539,28 @@ const getFinalPhraseScore = (referenceText: string, heardText: string) => {
   };
 };
 
+const finalPhraseAppearsBeforeEnding = (referenceText: string) => {
+  const referenceTokens = tokenize(referenceText);
+  const finalReferenceTokens = getTailTokens(referenceTokens, FLUENT_FINAL_WORD_COUNT);
+  const finalStartIndex = referenceTokens.length - finalReferenceTokens.length;
+
+  if (finalReferenceTokens.length < 4 || finalStartIndex <= 0) {
+    return false;
+  }
+
+  for (let startIndex = 0; startIndex < finalStartIndex; startIndex += 1) {
+    const hasSameSequence = finalReferenceTokens.every((token, offset) =>
+      tokensMatch(referenceTokens[startIndex + offset], token)
+    );
+
+    if (hasSameSequence) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 const getEmptyResult = (referenceText: string, referenceIndex: number): LineMatchResult => ({
   score: 0,
   referenceText,
@@ -700,15 +723,33 @@ export const getAutomaticLineMatchReason = (
     return 'short_flexible';
   }
 
+  const hasRepeatedFinalPhrase = finalPhraseAppearsBeforeEnding(
+    result.referenceText || expectedText
+  );
+
   const passesFluentFinal =
     expectedTokens.length >= FLUENT_FINAL_MIN_CONTENT_TOKENS &&
     result.finalPhraseWordCount >= 4 &&
     result.finalPhraseScore >= 0.8 &&
+    !hasRepeatedFinalPhrase &&
     result.coverageScore >= 0.6 &&
     result.precisionScore >= 0.5 &&
     result.orderScore >= 0.45;
 
-  return passesFluentFinal ? 'fluent_final' : null;
+  if (passesFluentFinal) {
+    return 'fluent_final';
+  }
+
+  const passesReplicaClosure =
+    expectedTokens.length >= 4 &&
+    result.finalPhraseWordCount >= 4 &&
+    result.finalPhraseScore >= 0.8 &&
+    !hasRepeatedFinalPhrase &&
+    result.precisionScore >= 0.45 &&
+    result.orderScore >= 0.25 &&
+    (result.coverageScore >= 0.35 || result.finalScore >= 1);
+
+  return passesReplicaClosure ? 'replica_closure' : null;
 };
 
 export const isNextLineCommand = (heardText: string) => {
