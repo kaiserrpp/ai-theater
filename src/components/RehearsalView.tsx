@@ -14,6 +14,7 @@ import {
 } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
 import {
+  MusicalTimelineCue,
   SharedMusicalNumberAsset,
   SharedSongAsset,
   SharedSongAudioAsset,
@@ -457,6 +458,7 @@ export const RehearsalView: React.FC<Props> = ({
     playbackKind?: 'song' | 'musical-number';
     ownerId?: string | null;
     advanceOnEnd?: boolean;
+    timelineCues?: MusicalTimelineCue[];
   } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoStartedSongKeyRef = useRef<string | null>(null);
@@ -464,6 +466,9 @@ export const RehearsalView: React.FC<Props> = ({
   const activeAudioPlaybackRef = useRef<{
     kind: 'song' | 'musical-number';
     ownerId: string | null;
+    audioId: string | null;
+    timelineCues: MusicalTimelineCue[];
+    firedTimelineCueIds: Set<string>;
   } | null>(null);
   const selectedMusicalNumberAudioIdsRef = useRef<Record<string, string>>({});
   const intelligentSessionIdRef = useRef(createSessionId());
@@ -1206,6 +1211,7 @@ export const RehearsalView: React.FC<Props> = ({
       player.currentTime = 0;
       player.onended = null;
       player.onerror = null;
+      player.ontimeupdate = null;
     }
 
     setPlayingAudioId(null);
@@ -1219,6 +1225,7 @@ export const RehearsalView: React.FC<Props> = ({
       player.currentTime = 0;
       player.onended = null;
       player.onerror = null;
+      player.ontimeupdate = null;
       player.removeAttribute('src');
       player.load();
       audioRef.current = null;
@@ -1978,6 +1985,23 @@ export const RehearsalView: React.FC<Props> = ({
     });
   }, [advanceLine, filteredGuion, guion, musicalNumbers]);
 
+  const jumpToScriptLineIndex = useCallback((targetLineIndex: number) => {
+    setCurrentIndex((previousIndex) => {
+      const exactTargetIndex = filteredGuion.findIndex(
+        (line) => guion.indexOf(line) === targetLineIndex
+      );
+      const fallbackTargetIndex = exactTargetIndex >= 0
+        ? exactTargetIndex
+        : filteredGuion.findIndex((line) => guion.indexOf(line) > targetLineIndex);
+
+      if (fallbackTargetIndex < 0 || fallbackTargetIndex <= previousIndex) {
+        return previousIndex;
+      }
+
+      return fallbackTargetIndex;
+    });
+  }, [filteredGuion, guion]);
+
   const handlePlaySongAudio = useCallback((
     audioUrl: string,
     audioId: string,
@@ -1987,6 +2011,7 @@ export const RehearsalView: React.FC<Props> = ({
       playbackKind?: 'song' | 'musical-number';
       ownerId?: string | null;
       rememberForMusicalNumberId?: string | null;
+      timelineCues?: MusicalTimelineCue[];
     }
   ) => {
     const player = getSongAudioPlayer();
@@ -2010,6 +2035,7 @@ export const RehearsalView: React.FC<Props> = ({
     player.onended = () => {
       setPlayingAudioId(null);
       activeAudioPlaybackRef.current = null;
+      player.ontimeupdate = null;
       if (options?.playbackKind === 'musical-number') {
         autoStartedMusicalNumberKeyRef.current = null;
         advancePastMusicalNumber(options.ownerId ?? null);
@@ -2023,7 +2049,38 @@ export const RehearsalView: React.FC<Props> = ({
     player.onerror = () => {
       setPlayingAudioId(null);
       activeAudioPlaybackRef.current = null;
+      player.ontimeupdate = null;
       setAudioError('No se pudo reproducir este audio.');
+    };
+    player.ontimeupdate = () => {
+      const activePlayback = activeAudioPlaybackRef.current;
+      if (
+        !activePlayback ||
+        activePlayback.kind !== 'musical-number' ||
+        activePlayback.ownerId !== options?.ownerId ||
+        !activePlayback.timelineCues.length
+      ) {
+        return;
+      }
+
+      const currentTimeMs = Math.max(0, Math.round(player.currentTime * 1000));
+      const dueCue = activePlayback.timelineCues.find((cue) => {
+        const cueKey = cue.id || `${cue.targetLineIndex}:${cue.atMs}`;
+        return cue.atMs <= currentTimeMs + 120 && !activePlayback.firedTimelineCueIds.has(cueKey);
+      });
+
+      if (!dueCue) {
+        return;
+      }
+
+      const cueKey = dueCue.id || `${dueCue.targetLineIndex}:${dueCue.atMs}`;
+      activePlayback.firedTimelineCueIds.add(cueKey);
+      stopRehearsalSpeech();
+      setSpeechStatusMessage(null);
+      setTemporarilySuspendingAutoListen(false);
+      void stopListening();
+      void stopRecognition();
+      jumpToScriptLineIndex(dueCue.targetLineIndex);
     };
 
     player.src = audioUrl;
@@ -2033,6 +2090,11 @@ export const RehearsalView: React.FC<Props> = ({
     activeAudioPlaybackRef.current = {
       kind: options?.playbackKind ?? 'song',
       ownerId: options?.ownerId ?? null,
+      audioId,
+      timelineCues: (options?.timelineCues ?? [])
+        .filter((cue) => cue.atMs >= 0 && cue.targetLineIndex >= 0)
+        .sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs),
+      firedTimelineCueIds: new Set(),
     };
 
     void player.play().catch((error: unknown) => {
@@ -2045,6 +2107,7 @@ export const RehearsalView: React.FC<Props> = ({
           playbackKind: options?.playbackKind,
           ownerId: options?.ownerId ?? null,
           advanceOnEnd: options?.advanceOnEnd,
+          timelineCues: options?.timelineCues,
         });
         setAudioError(
           isSongPlaybackUnlocked
@@ -2062,8 +2125,11 @@ export const RehearsalView: React.FC<Props> = ({
     getSongAudioPlayer,
     isAutoplayBlockedError,
     isSongPlaybackUnlocked,
+    jumpToScriptLineIndex,
     playingAudioId,
     stopSongAudio,
+    stopListening,
+    stopRecognition,
   ]);
 
   useEffect(() => {
@@ -2110,6 +2176,7 @@ export const RehearsalView: React.FC<Props> = ({
       playbackKind: 'musical-number',
       ownerId: currentMusicalNumber.id,
       rememberForMusicalNumberId: currentMusicalNumber.id,
+      timelineCues: preferredMusicalNumberAudio.timelineCues ?? [],
     });
   }, [
     canStartRehearsalAudio,
@@ -2574,6 +2641,7 @@ export const RehearsalView: React.FC<Props> = ({
                   playbackKind: blockedAutoplayAudio.playbackKind,
                   ownerId: blockedAutoplayAudio.ownerId,
                   rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
+                  timelineCues: blockedAutoplayAudio.timelineCues,
                 })
               }
             >
@@ -2601,6 +2669,7 @@ export const RehearsalView: React.FC<Props> = ({
                     playbackKind: currentMusicalNumber ? 'musical-number' : 'song',
                     ownerId: currentMusicalNumber?.id ?? currentSongAsset?.id ?? null,
                     rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
+                    timelineCues: currentMusicalNumber ? audio.timelineCues ?? [] : [],
                   })
                 }
               >
@@ -3006,6 +3075,7 @@ export const RehearsalView: React.FC<Props> = ({
                           playbackKind: blockedAutoplayAudio.playbackKind,
                           ownerId: blockedAutoplayAudio.ownerId,
                           rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
+                          timelineCues: blockedAutoplayAudio.timelineCues,
                         })
                       }
                     >
@@ -3033,6 +3103,7 @@ export const RehearsalView: React.FC<Props> = ({
                             playbackKind: currentMusicalNumber ? 'musical-number' : 'song',
                             ownerId: currentMusicalNumber?.id ?? currentSongAsset?.id ?? null,
                             rememberForMusicalNumberId: currentMusicalNumber?.id ?? null,
+                            timelineCues: currentMusicalNumber ? audio.timelineCues ?? [] : [],
                           })
                         }
                       >

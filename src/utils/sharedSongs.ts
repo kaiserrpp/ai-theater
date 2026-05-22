@@ -1,5 +1,6 @@
 import { Dialogue } from '../types/script';
 import {
+  MusicalTimelineCue,
   SharedMusicalNumberAsset,
   SharedSongAsset,
   SharedSongAudioAsset,
@@ -29,6 +30,39 @@ const normalizeGuideRoles = (value: unknown) => {
 
 const normalizeSongAudioKind = (value: unknown): SharedSongAudioKind =>
   value === 'vocal_guide' ? 'vocal_guide' : 'karaoke';
+
+const normalizeTimelineCues = (value: unknown): MusicalTimelineCue[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((cue): cue is Partial<MusicalTimelineCue> => Boolean(cue) && typeof cue === 'object')
+    .map((cue, index) => {
+      const targetLineIndex =
+        typeof cue.targetLineIndex === 'number' && Number.isFinite(cue.targetLineIndex)
+          ? Math.max(0, Math.round(cue.targetLineIndex))
+          : -1;
+      const atMs =
+        typeof cue.atMs === 'number' && Number.isFinite(cue.atMs)
+          ? Math.max(0, Math.round(cue.atMs))
+          : -1;
+      const targetKind: MusicalTimelineCue['targetKind'] =
+        cue.targetKind === 'song' ? 'song' : 'dialogue';
+
+      return {
+        id:
+          typeof cue.id === 'string' && cue.id.trim().length > 0
+            ? cue.id.trim()
+            : `cue-${targetLineIndex}-${index + 1}`,
+        atMs,
+        targetLineIndex,
+        targetKind,
+      };
+    })
+    .filter((cue) => cue.atMs >= 0 && cue.targetLineIndex >= 0)
+    .sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs);
+};
 
 const normalizeSongAudios = (song: unknown): SharedSongAudioAsset[] => {
   if (!song || typeof song !== 'object') {
@@ -67,6 +101,7 @@ const normalizeSongAudios = (song: unknown): SharedSongAudioAsset[] => {
             ? audio.contentType
             : null,
         size: typeof audio.size === 'number' ? audio.size : null,
+        timelineCues: normalizeTimelineCues(audio.timelineCues),
         updatedAt:
           typeof audio.updatedAt === 'string' && audio.updatedAt.trim().length > 0
             ? audio.updatedAt
@@ -92,6 +127,7 @@ const normalizeSongAudios = (song: unknown): SharedSongAudioAsset[] => {
             : null,
         contentType: null,
         size: null,
+        timelineCues: [],
         updatedAt: new Date().toISOString(),
       },
     ];

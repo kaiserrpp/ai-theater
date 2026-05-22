@@ -2,6 +2,14 @@ import { ScriptData } from './script';
 import type { CharacterMergeMap } from '../utils/scriptRoleMerges';
 
 export type SharedSongAudioKind = 'karaoke' | 'vocal_guide';
+export type MusicalTimelineCueTargetKind = 'dialogue' | 'song';
+
+export interface MusicalTimelineCue {
+  id: string;
+  atMs: number;
+  targetLineIndex: number;
+  targetKind: MusicalTimelineCueTargetKind;
+}
 
 export interface SharedSongAudioAsset {
   id: string;
@@ -12,6 +20,7 @@ export interface SharedSongAudioAsset {
   audioFileName: string | null;
   contentType: string | null;
   size: number | null;
+  timelineCues: MusicalTimelineCue[];
   updatedAt: string;
 }
 
@@ -79,6 +88,7 @@ export interface SharedSongAudioRegistrationInput {
   audioFileName?: string | null;
   contentType?: string | null;
   size?: number | null;
+  timelineCues?: MusicalTimelineCue[];
 }
 
 export interface SharedSongAudioUpdateInput {
@@ -93,6 +103,7 @@ export interface SharedSongAudioUpdateInput {
   audioFileName?: string | null;
   contentType?: string | null;
   size?: number | null;
+  timelineCues?: MusicalTimelineCue[];
 }
 
 export interface SharedSongAudioDeleteInput {
@@ -143,6 +154,7 @@ export interface SharedMusicalNumberAudioRegistrationInput {
   audioFileName?: string | null;
   contentType?: string | null;
   size?: number | null;
+  timelineCues?: MusicalTimelineCue[];
 }
 
 export interface SharedMusicalNumberAudioUpdateInput {
@@ -162,6 +174,7 @@ export interface SharedMusicalNumberAudioUpdateInput {
   audioFileName?: string | null;
   contentType?: string | null;
   size?: number | null;
+  timelineCues?: MusicalTimelineCue[];
 }
 
 export interface SharedMusicalNumberAudioDeleteInput {

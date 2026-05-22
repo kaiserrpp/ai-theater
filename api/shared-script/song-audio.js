@@ -18,6 +18,37 @@ const normalizeGuideRoles = (value) => {
   );
 };
 
+const normalizeTimelineCues = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((cue) => cue && typeof cue === 'object' && !Array.isArray(cue))
+    .map((cue, index) => {
+      const targetLineIndex =
+        typeof cue.targetLineIndex === 'number' && Number.isFinite(cue.targetLineIndex)
+          ? Math.max(0, Math.round(cue.targetLineIndex))
+          : -1;
+      const atMs =
+        typeof cue.atMs === 'number' && Number.isFinite(cue.atMs)
+          ? Math.max(0, Math.round(cue.atMs))
+          : -1;
+
+      return {
+        id:
+          typeof cue.id === 'string' && cue.id.trim()
+            ? cue.id.trim()
+            : `cue-${targetLineIndex}-${index + 1}`,
+        atMs,
+        targetLineIndex,
+        targetKind: cue.targetKind === 'song' ? 'song' : 'dialogue',
+      };
+    })
+    .filter((cue) => cue.atMs >= 0 && cue.targetLineIndex >= 0)
+    .sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs);
+};
+
 const resolveLabel = (label, kind, fallbackLabel) => {
   if (typeof label === 'string' && label.trim()) {
     return label.trim();
@@ -125,6 +156,7 @@ module.exports = async (request, response) => {
             ? payload.contentType.trim()
             : null,
         size: typeof payload.size === 'number' ? payload.size : null,
+        timelineCues: normalizeTimelineCues(payload.timelineCues),
         updatedAt: now,
       };
 
@@ -224,6 +256,9 @@ module.exports = async (request, response) => {
                         ? payload.contentType.trim()
                         : existingAudio.contentType,
                     size: typeof payload.size === 'number' ? payload.size : existingAudio.size,
+                    timelineCues: Array.isArray(payload.timelineCues)
+                      ? normalizeTimelineCues(payload.timelineCues)
+                      : existingAudio.timelineCues || [],
                     updatedAt: now,
                   }
                 : audio

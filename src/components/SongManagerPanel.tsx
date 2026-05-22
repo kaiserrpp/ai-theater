@@ -28,6 +28,7 @@ import {
   verifySongAdminPassword,
 } from '../api/sharedScripts';
 import {
+  MusicalTimelineCue,
   SharedMusicalNumberAsset,
   SharedScriptManifest,
   SharedSongAudioAsset,
@@ -67,6 +68,15 @@ type MusicalNumberSceneEntry = {
   meta: string;
   detailText: string;
   songId: string | null;
+};
+type MusicalNumberTimelineBlock = {
+  id: string;
+  kind: 'dialogue' | 'song';
+  startLineIndex: number;
+  endLineIndex: number;
+  title: string;
+  meta: string;
+  detailText: string;
 };
 type PracticeMusicalNumberAsset = SharedMusicalNumberAsset & {
   cueSongs: SharedSongAsset[];
@@ -139,6 +149,68 @@ const formatPlaybackTime = (value: number) => {
   const minutes = Math.floor(value / 60);
   const seconds = Math.floor(value % 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+};
+
+const formatTimelineTime = (valueMs: number) => {
+  if (!Number.isFinite(valueMs) || valueMs <= 0) {
+    return '0:00.0';
+  }
+
+  const totalTenths = Math.round(valueMs / 100);
+  const minutes = Math.floor(totalTenths / 600);
+  const seconds = Math.floor((totalTenths % 600) / 10);
+  const tenths = totalTenths % 10;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}.${tenths}`;
+};
+
+const buildTimelineCueId = (targetLineIndex: number) => `cue-${targetLineIndex}`;
+
+const buildTimelineBlocks = (
+  entries: MusicalNumberSceneEntry[]
+): MusicalNumberTimelineBlock[] => {
+  const blocks: MusicalNumberTimelineBlock[] = [];
+
+  entries.forEach((entry) => {
+    if (entry.kind === 'song') {
+      blocks.push({
+        id: `song-${entry.lineIndex}`,
+        kind: 'song',
+        startLineIndex: entry.lineIndex,
+        endLineIndex: entry.lineIndex,
+        title: entry.title,
+        meta: entry.meta,
+        detailText: entry.detailText,
+      });
+      return;
+    }
+
+    const previousBlock = blocks[blocks.length - 1];
+    if (previousBlock?.kind === 'dialogue' && previousBlock.endLineIndex + 1 === entry.lineIndex) {
+      const lineCount = entry.lineIndex - previousBlock.startLineIndex + 1;
+      previousBlock.endLineIndex = entry.lineIndex;
+      previousBlock.title =
+        lineCount === 2
+          ? `${previousBlock.title} / ${entry.title}`
+          : previousBlock.title.includes('Dialogo')
+            ? previousBlock.title
+            : `Dialogo desde ${previousBlock.title}`;
+      previousBlock.meta = `${lineCount} lineas habladas`;
+      previousBlock.detailText = `${previousBlock.detailText}\n${entry.title}: ${entry.detailText}`;
+      return;
+    }
+
+    blocks.push({
+      id: `dialogue-${entry.lineIndex}`,
+      kind: 'dialogue',
+      startLineIndex: entry.lineIndex,
+      endLineIndex: entry.lineIndex,
+      title: entry.title,
+      meta: '1 linea hablada',
+      detailText: `${entry.title}: ${entry.detailText}`,
+    });
+  });
+
+  return blocks;
 };
 
 const getMusicalNumberSortIndex = (musicalNumber: SharedMusicalNumberAsset) =>
@@ -304,6 +376,10 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [isSavingMusicalNumberAudio, setIsSavingMusicalNumberAudio] = useState(false);
   const [deletingMusicalNumberAudioId, setDeletingMusicalNumberAudioId] = useState<string | null>(null);
   const [isMusicalNumberAudioFormVisible, setIsMusicalNumberAudioFormVisible] = useState(false);
+  const [syncingMusicalNumberAudioId, setSyncingMusicalNumberAudioId] = useState<string | null>(null);
+  const [syncCueDrafts, setSyncCueDrafts] = useState<MusicalTimelineCue[]>([]);
+  const [syncActiveBlockIndex, setSyncActiveBlockIndex] = useState(0);
+  const [isSavingTimelineCues, setIsSavingTimelineCues] = useState(false);
   const [playingPreviewAudioId, setPlayingPreviewAudioId] = useState<string | null>(null);
   const [isPreviewAudioPaused, setIsPreviewAudioPaused] = useState(false);
   const [previewAudioError, setPreviewAudioError] = useState<string | null>(null);
@@ -512,6 +588,9 @@ export const SongManagerPanel: React.FC<Props> = ({
     setMusicalNumberUploadProgress(null);
     setEditingMusicalNumberAudioId(null);
     setIsMusicalNumberAudioFormVisible(false);
+    setSyncingMusicalNumberAudioId(null);
+    setSyncCueDrafts([]);
+    setSyncActiveBlockIndex(0);
   }, [selectedMusicalNumberId]);
 
   const selectedSong = useMemo<SharedSongAsset | null>(() => {
@@ -532,6 +611,14 @@ export const SongManagerPanel: React.FC<Props> = ({
       null
     );
   }, [orderedMusicalNumbers, selectedMusicalNumberId]);
+
+  const selectedMusicalNumberTimelineBlocks = useMemo(
+    () =>
+      selectedMusicalNumber
+        ? buildTimelineBlocks(buildMusicalNumberRangeEntries(selectedMusicalNumber))
+        : [],
+    [buildMusicalNumberRangeEntries, selectedMusicalNumber]
+  );
 
   const selectedPracticeMusicalNumber = useMemo<PracticeMusicalNumberAsset | null>(() => {
     if (viewMode !== 'my-songs' && viewMode !== 'all-songs') {
@@ -930,12 +1017,13 @@ export const SongManagerPanel: React.FC<Props> = ({
   );
 
   const startPreviewPlayback = useCallback(
-    async (audio: SharedSongAudioAsset, cycleId: number) => {
+    async (audio: SharedSongAudioAsset, cycleId: number, startAtSeconds = 0) => {
       if (!previewAudioElement) {
         setPreviewAudioError('La reproduccion de audio solo esta disponible en la app web.');
         return;
       }
 
+      const safeStartAtSeconds = Math.max(0, startAtSeconds);
       const updateProgress = () => {
         const nextDuration = Number.isFinite(previewAudioElement.duration)
           ? previewAudioElement.duration
@@ -991,7 +1079,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       };
 
       try {
-        previewAudioElement.currentTime = 0;
+        previewAudioElement.currentTime = safeStartAtSeconds;
+        setPreviewAudioCurrentTime(safeStartAtSeconds);
         setPlayingPreviewAudioId(audio.id);
         setIsPreviewAudioPaused(false);
         await previewAudioElement.play();
@@ -1074,6 +1163,25 @@ export const SongManagerPanel: React.FC<Props> = ({
     [playbackProgressBarWidth, previewAudioDuration, previewAudioElement]
   );
 
+  const playPreviewAudioFrom = useCallback(
+    async (audio: SharedSongAudioAsset, startAtSeconds = 0) => {
+      if (!previewAudioElement) {
+        setPreviewAudioError('La reproduccion de audio solo esta disponible en la app web.');
+        return;
+      }
+
+      setPreviewAudioError(null);
+      cancelQueuedReplay(false);
+      stopPreviewAudio({ cancelLoop: false });
+      playbackSessionRef.current = { kind: 'single', audio };
+      setActivePlaylistMode(null);
+
+      const cycleId = replayCycleRef.current;
+      await startPreviewPlayback(audio, cycleId, startAtSeconds);
+    },
+    [cancelQueuedReplay, previewAudioElement, startPreviewPlayback, stopPreviewAudio]
+  );
+
   const handlePlayPreviewAudio = useCallback(
     async (audio: SharedSongAudioAsset) => {
       if (!previewAudioElement) {
@@ -1086,16 +1194,9 @@ export const SongManagerPanel: React.FC<Props> = ({
         return;
       }
 
-      setPreviewAudioError(null);
-      cancelQueuedReplay(false);
-      stopPreviewAudio({ cancelLoop: false });
-      playbackSessionRef.current = { kind: 'single', audio };
-      setActivePlaylistMode(null);
-
-      const cycleId = replayCycleRef.current;
-      await startPreviewPlayback(audio, cycleId);
+      await playPreviewAudioFrom(audio, 0);
     },
-    [cancelQueuedReplay, playingPreviewAudioId, previewAudioElement, startPreviewPlayback, stopPreviewAudio]
+    [playingPreviewAudioId, playPreviewAudioFrom, previewAudioElement, stopPreviewAudio]
   );
 
   const handleStartPlaylist = useCallback(
@@ -1874,6 +1975,136 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
   };
 
+  const startSyncingMusicalNumberAudio = useCallback(
+    async (audio: SharedSongAudioAsset) => {
+      setSyncingMusicalNumberAudioId(audio.id);
+      setSyncCueDrafts(audio.timelineCues ?? []);
+      setSyncActiveBlockIndex(0);
+      setManagerError(null);
+      await playPreviewAudioFrom(audio, 0);
+    },
+    [playPreviewAudioFrom]
+  );
+
+  const cancelTimelineSync = useCallback(() => {
+    setSyncingMusicalNumberAudioId(null);
+    setSyncCueDrafts([]);
+    setSyncActiveBlockIndex(0);
+    setIsSavingTimelineCues(false);
+  }, []);
+
+  const markNextTimelineBlock = useCallback(() => {
+    if (!previewAudioElement || !selectedMusicalNumberTimelineBlocks.length) {
+      return;
+    }
+
+    const targetBlockIndex = syncActiveBlockIndex + 1;
+    const targetBlock = selectedMusicalNumberTimelineBlocks[targetBlockIndex];
+    if (!targetBlock) {
+      return;
+    }
+
+    const atMs = Math.max(0, Math.round(previewAudioElement.currentTime * 1000));
+    const nextCue: MusicalTimelineCue = {
+      id: buildTimelineCueId(targetBlock.startLineIndex),
+      atMs,
+      targetLineIndex: targetBlock.startLineIndex,
+      targetKind: targetBlock.kind,
+    };
+
+    setSyncCueDrafts((previousCues) =>
+      [
+        ...previousCues.filter((cue) => cue.targetLineIndex !== targetBlock.startLineIndex),
+        nextCue,
+      ].sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs)
+    );
+    setSyncActiveBlockIndex(targetBlockIndex);
+  }, [previewAudioElement, selectedMusicalNumberTimelineBlocks, syncActiveBlockIndex]);
+
+  const adjustTimelineCue = useCallback((cueId: string, deltaMs: number) => {
+    setSyncCueDrafts((previousCues) =>
+      previousCues
+        .map((cue) =>
+          cue.id === cueId
+            ? {
+                ...cue,
+                atMs: Math.max(0, cue.atMs + deltaMs),
+              }
+            : cue
+        )
+        .sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs)
+    );
+  }, []);
+
+  const deleteTimelineCue = useCallback((cueId: string) => {
+    setSyncCueDrafts((previousCues) => previousCues.filter((cue) => cue.id !== cueId));
+  }, []);
+
+  const previewTimelineCue = useCallback(
+    async (audio: SharedSongAudioAsset, cue: MusicalTimelineCue) => {
+      const startAtSeconds = Math.max(0, cue.atMs / 1000 - 3);
+      await playPreviewAudioFrom(audio, startAtSeconds);
+    },
+    [playPreviewAudioFrom]
+  );
+
+  const rerecordTimelineCue = useCallback(
+    async (audio: SharedSongAudioAsset, cue: MusicalTimelineCue) => {
+      const blockIndex = selectedMusicalNumberTimelineBlocks.findIndex(
+        (block) => block.startLineIndex === cue.targetLineIndex
+      );
+      setSyncActiveBlockIndex(Math.max(0, blockIndex - 1));
+      await previewTimelineCue(audio, cue);
+    },
+    [previewTimelineCue, selectedMusicalNumberTimelineBlocks]
+  );
+
+  const saveTimelineCues = useCallback(
+    async (audio: SharedSongAudioAsset) => {
+      if (!sharedScript || !selectedMusicalNumber) {
+        return;
+      }
+
+      setIsSavingTimelineCues(true);
+      setManagerError(null);
+
+      try {
+        const manifest = await updateSharedMusicalNumberAudio({
+          shareId: sharedScript.shareId,
+          musicalNumberId: selectedMusicalNumber.id,
+          musicalNumberTitle: selectedMusicalNumber.title,
+          sceneTitle: selectedMusicalNumber.sceneTitle,
+          startLineIndex: selectedMusicalNumber.startLineIndex,
+          endLineIndex: selectedMusicalNumber.endLineIndex,
+          songIds: selectedMusicalNumber.songIds,
+          audioId: audio.id,
+          password: password.trim(),
+          label: audio.label,
+          kind: audio.kind,
+          guideRoles: audio.guideRoles,
+          timelineCues: syncCueDrafts,
+        });
+
+        await refreshSharedManifest(manifest);
+        cancelTimelineSync();
+      } catch (error) {
+        setManagerError(
+          error instanceof Error ? error.message : 'No se pudo guardar la sincronizacion.'
+        );
+      } finally {
+        setIsSavingTimelineCues(false);
+      }
+    },
+    [
+      cancelTimelineSync,
+      password,
+      refreshSharedManifest,
+      selectedMusicalNumber,
+      sharedScript,
+      syncCueDrafts,
+    ]
+  );
+
   const isDisabled = !sharedScript;
   const isPanelVisible = forcePanelVisible ?? (standalone || isVisible);
   const canManageSongs = Platform.OS === 'web';
@@ -1917,6 +2148,10 @@ export const SongManagerPanel: React.FC<Props> = ({
     setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
     setMusicalNumberGuideRoles([]);
     setMusicalNumberUploadProgress(null);
+    setSyncingMusicalNumberAudioId(null);
+    setSyncCueDrafts([]);
+    setSyncActiveBlockIndex(0);
+    setIsSavingTimelineCues(false);
     setManagerError(null);
     setPasswordError(null);
     setPreviewAudioError(null);
@@ -2183,6 +2418,175 @@ export const SongManagerPanel: React.FC<Props> = ({
     </View>
   );
 
+  const renderTimelineSyncEditor = (
+    musicalNumber: SharedMusicalNumberAsset,
+    audio: SharedSongAudioAsset
+  ) => {
+    if (syncingMusicalNumberAudioId !== audio.id) {
+      return null;
+    }
+
+    const blocks = selectedMusicalNumber?.id === musicalNumber.id
+      ? selectedMusicalNumberTimelineBlocks
+      : buildTimelineBlocks(buildMusicalNumberRangeEntries(musicalNumber));
+    const activeBlock = blocks[syncActiveBlockIndex] ?? blocks[0] ?? null;
+    const nextBlock = blocks[syncActiveBlockIndex + 1] ?? null;
+    const cuesByLineIndex = new Map(syncCueDrafts.map((cue) => [cue.targetLineIndex, cue]));
+
+    return (
+      <View style={styles.timelineSyncBox}>
+        <Text style={styles.sectionTitle}>Sincronizar bloques</Text>
+        <Text style={styles.timelineSyncHint}>
+          Reproduce el numero musical y pulsa Siguiente bloque cuando la pista deba cambiar
+          entre dialogo y cancion.
+        </Text>
+        <View style={styles.timelineNowBox}>
+          <Text style={styles.timelineNowLabel}>Bloque actual</Text>
+          <Text style={styles.timelineNowTitle}>
+            {activeBlock ? activeBlock.title : 'Sin bloque activo'}
+          </Text>
+          <Text style={styles.timelineNowMeta}>
+            Tiempo de audio: {formatPlaybackTime(previewAudioCurrentTime)}
+          </Text>
+          <Text style={styles.timelineNowMeta}>
+            Siguiente: {nextBlock ? nextBlock.title : 'No quedan mas bloques'}
+          </Text>
+        </View>
+        <View style={styles.timelineActions}>
+          <TouchableOpacity
+            style={[styles.audioActionButton, styles.audioPlayButton]}
+            onPress={() => void playPreviewAudioFrom(audio, 0)}
+          >
+            <Text style={styles.audioPlayText}>Reproducir desde inicio</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.audioActionButton,
+              styles.timelinePrimaryButton,
+              !nextBlock && styles.buttonDisabled,
+            ]}
+            onPress={markNextTimelineBlock}
+            disabled={!nextBlock}
+          >
+            <Text style={styles.timelinePrimaryButtonText}>Siguiente bloque</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.timelineBlockList}>
+          {blocks.map((block, blockIndex) => {
+            const cue = cuesByLineIndex.get(block.startLineIndex);
+            const isActive = blockIndex === syncActiveBlockIndex;
+
+            return (
+              <TouchableOpacity
+                key={`${audio.id}-timeline-block-${block.id}`}
+                style={[styles.timelineBlockRow, isActive && styles.timelineBlockRowActive]}
+                onPress={() => setSyncActiveBlockIndex(blockIndex)}
+              >
+                <View
+                  style={[
+                    styles.rangeEntryBadge,
+                    block.kind === 'song'
+                      ? styles.rangeEntryBadgeSong
+                      : styles.rangeEntryBadgeDialogue,
+                  ]}
+                >
+                  <Text style={styles.rangeEntryBadgeText}>
+                    {block.kind === 'song' ? 'Cancion' : 'Dialogo'}
+                  </Text>
+                </View>
+                <View style={styles.timelineBlockText}>
+                  <Text style={styles.rangeEntryTitle}>{block.title}</Text>
+                  <Text style={styles.rangeEntryMeta}>
+                    {block.meta}
+                    {cue ? ` - ${formatTimelineTime(cue.atMs)}` : ''}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <View style={styles.timelineCueList}>
+          <Text style={styles.sectionTitle}>Marcas guardadas en borrador</Text>
+          {syncCueDrafts.length === 0 ? (
+            <Text style={styles.infoText}>Aun no hay transiciones marcadas para este audio.</Text>
+          ) : (
+            syncCueDrafts.map((cue) => {
+              const block = blocks.find((candidate) => candidate.startLineIndex === cue.targetLineIndex);
+
+              return (
+                <View key={`${audio.id}-cue-${cue.id}`} style={styles.timelineCueRow}>
+                  <View style={styles.timelineCueText}>
+                    <Text style={styles.timelineCueTime}>{formatTimelineTime(cue.atMs)}</Text>
+                    <Text style={styles.rangeEntryTitle}>
+                      {block?.title ?? `Linea ${cue.targetLineIndex + 1}`}
+                    </Text>
+                    <Text style={styles.rangeEntryMeta}>
+                      {cue.targetKind === 'song' ? 'Entra cancion' : 'Entra dialogo'}
+                    </Text>
+                  </View>
+                  <View style={styles.timelineCueActions}>
+                    <TouchableOpacity
+                      style={styles.timelineSmallButton}
+                      onPress={() => adjustTimelineCue(cue.id, -100)}
+                    >
+                      <Text style={styles.timelineSmallButtonText}>-0.1</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.timelineSmallButton}
+                      onPress={() => adjustTimelineCue(cue.id, 100)}
+                    >
+                      <Text style={styles.timelineSmallButtonText}>+0.1</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.timelineSmallButton}
+                      onPress={() => void previewTimelineCue(audio, cue)}
+                    >
+                      <Text style={styles.timelineSmallButtonText}>Probar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.timelineSmallButton}
+                      onPress={() => void rerecordTimelineCue(audio, cue)}
+                    >
+                      <Text style={styles.timelineSmallButtonText}>Regrabar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.timelineSmallButton, styles.timelineDeleteButton]}
+                      onPress={() => deleteTimelineCue(cue.id)}
+                    >
+                      <Text style={styles.timelineDeleteButtonText}>Borrar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </View>
+        {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
+        <View style={styles.timelineActions}>
+          <TouchableOpacity
+            style={[
+              styles.primaryAction,
+              isSavingTimelineCues && styles.buttonDisabled,
+            ]}
+            onPress={() => void saveTimelineCues(audio)}
+            disabled={isSavingTimelineCues}
+          >
+            <Text style={styles.primaryActionText}>
+              {isSavingTimelineCues ? 'Guardando...' : 'Guardar sincronizacion'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryAction}
+            onPress={cancelTimelineSync}
+            disabled={isSavingTimelineCues}
+          >
+            <Text style={styles.secondaryActionText}>Cerrar revision</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderMusicalNumberDetail = (musicalNumber: SharedMusicalNumberAsset | null = selectedMusicalNumber) => {
     if (!musicalNumber) {
       return null;
@@ -2373,6 +2777,20 @@ export const SongManagerPanel: React.FC<Props> = ({
                     <Text style={styles.audioActionText}>Editar</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
+                    style={[styles.audioActionButton, styles.audioEditButton]}
+                    onPress={() =>
+                      syncingMusicalNumberAudioId === audio.id
+                        ? cancelTimelineSync()
+                        : void startSyncingMusicalNumberAudio(audio)
+                    }
+                  >
+                    <Text style={styles.audioActionText}>
+                      {syncingMusicalNumberAudioId === audio.id
+                        ? 'Cerrar sync'
+                        : `${(audio.timelineCues ?? []).length} marca${(audio.timelineCues ?? []).length === 1 ? '' : 's'}`}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
                     style={[styles.audioActionButton, styles.audioDeleteButton]}
                     onPress={() => void handleDeleteMusicalNumberAudio(audio.id)}
                     disabled={deletingMusicalNumberAudioId === audio.id}
@@ -2382,6 +2800,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                     </Text>
                   </TouchableOpacity>
                 </View>
+                {renderTimelineSyncEditor(musicalNumber, audio)}
               </View>
             ))}
           </View>
@@ -4247,6 +4666,118 @@ const styles = StyleSheet.create({
   rangeEntryMeta: {
     color: '#6b5b49',
     lineHeight: 20,
+  },
+  timelineSyncBox: {
+    gap: 12,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(24, 78, 119, 0.22)',
+    backgroundColor: 'rgba(24, 78, 119, 0.06)',
+  },
+  timelineSyncHint: {
+    color: '#4f5b62',
+    lineHeight: 20,
+  },
+  timelineNowBox: {
+    gap: 4,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#d8e6ef',
+  },
+  timelineNowLabel: {
+    color: '#184e77',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  timelineNowTitle: {
+    color: '#2f2a24',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  timelineNowMeta: {
+    color: '#55656f',
+    lineHeight: 19,
+  },
+  timelineActions: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  timelinePrimaryButton: {
+    backgroundColor: '#184e77',
+    borderColor: '#184e77',
+  },
+  timelinePrimaryButtonText: {
+    color: '#fff',
+    fontWeight: '800',
+  },
+  timelineBlockList: {
+    gap: 8,
+  },
+  timelineBlockRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#d8e6ef',
+    backgroundColor: '#fff',
+  },
+  timelineBlockRowActive: {
+    borderColor: '#184e77',
+    backgroundColor: 'rgba(24, 78, 119, 0.08)',
+  },
+  timelineBlockText: {
+    flex: 1,
+    gap: 3,
+  },
+  timelineCueList: {
+    gap: 8,
+  },
+  timelineCueRow: {
+    gap: 8,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e4d1b3',
+    backgroundColor: '#fff',
+  },
+  timelineCueText: {
+    gap: 3,
+  },
+  timelineCueTime: {
+    color: '#184e77',
+    fontWeight: '900',
+  },
+  timelineCueActions: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  timelineSmallButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#d8e6ef',
+    backgroundColor: '#f6fbff',
+  },
+  timelineSmallButtonText: {
+    color: '#184e77',
+    fontWeight: '800',
+  },
+  timelineDeleteButton: {
+    borderColor: '#f0c8c8',
+    backgroundColor: '#fff4f4',
+  },
+  timelineDeleteButtonText: {
+    color: '#b3261e',
+    fontWeight: '800',
   },
   boundaryActionRow: {
     flexDirection: 'row',

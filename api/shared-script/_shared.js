@@ -75,6 +75,37 @@ const normalizeGuideRoles = (value) => {
 const normalizeSongAudioKind = (value) =>
   SONG_AUDIO_KINDS.has(value) ? value : 'karaoke';
 
+const normalizeTimelineCues = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((cue) => isObject(cue))
+    .map((cue, index) => {
+      const targetLineIndex =
+        typeof cue.targetLineIndex === 'number' && Number.isFinite(cue.targetLineIndex)
+          ? Math.max(0, Math.round(cue.targetLineIndex))
+          : -1;
+      const atMs =
+        typeof cue.atMs === 'number' && Number.isFinite(cue.atMs)
+          ? Math.max(0, Math.round(cue.atMs))
+          : -1;
+
+      return {
+        id:
+          typeof cue.id === 'string' && cue.id.trim()
+            ? cue.id.trim()
+            : `cue-${targetLineIndex}-${index + 1}`,
+        atMs,
+        targetLineIndex,
+        targetKind: cue.targetKind === 'song' ? 'song' : 'dialogue',
+      };
+    })
+    .filter((cue) => cue.atMs >= 0 && cue.targetLineIndex >= 0)
+    .sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs);
+};
+
 const normalizeSongAudio = (value, fallbackIndex = 0) => {
   if (!isObject(value) || typeof value.audioUrl !== 'string' || !value.audioUrl.trim()) {
     return null;
@@ -105,6 +136,7 @@ const normalizeSongAudio = (value, fallbackIndex = 0) => {
         ? value.contentType.trim()
         : null,
     size: typeof value.size === 'number' ? value.size : null,
+    timelineCues: normalizeTimelineCues(value.timelineCues),
     updatedAt:
       typeof value.updatedAt === 'string' && value.updatedAt.trim()
         ? value.updatedAt.trim()
