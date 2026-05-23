@@ -1998,6 +1998,16 @@ export const SongManagerPanel: React.FC<Props> = ({
     [playPreviewAudioFrom]
   );
 
+  const restartTimelineStructureFromBeginning = useCallback(
+    async (audio: SharedSongAudioAsset) => {
+      setSyncCueDrafts([]);
+      setSyncActiveEntryIndex(0);
+      setManagerError(null);
+      await playPreviewAudioFrom(audio, 0);
+    },
+    [playPreviewAudioFrom]
+  );
+
   const cancelTimelineSync = useCallback(() => {
     setSyncingMusicalNumberAudioId(null);
     setSyncCueDrafts([]);
@@ -2494,10 +2504,15 @@ export const SongManagerPanel: React.FC<Props> = ({
         </Text>
         <View style={styles.timelineActions}>
           <TouchableOpacity
-            style={[styles.audioActionButton, styles.audioPlayButton]}
-            onPress={() => void playPreviewAudioFrom(audio, 0)}
+            style={[
+              styles.audioActionButton,
+              styles.audioPlayButton,
+              isSavingTimelineCues && styles.buttonDisabled,
+            ]}
+            onPress={() => void restartTimelineStructureFromBeginning(audio)}
+            disabled={isSavingTimelineCues}
           >
-            <Text style={styles.audioPlayText}>Reproducir desde inicio</Text>
+            <Text style={styles.audioPlayText}>Reiniciar desde cero</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
