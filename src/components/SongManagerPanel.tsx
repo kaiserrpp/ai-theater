@@ -2662,7 +2662,7 @@ export const SongManagerPanel: React.FC<Props> = ({
             onPress={cancelTimelineSync}
             disabled={isSavingTimelineCues}
           >
-            <Text style={styles.secondaryActionText}>Cerrar revision</Text>
+            <Text style={styles.secondaryActionText}>Descartar cambios</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -2859,16 +2859,25 @@ export const SongManagerPanel: React.FC<Props> = ({
                     <Text style={styles.audioActionText}>Editar</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.audioActionButton, styles.audioEditButton]}
+                    style={[
+                      styles.audioActionButton,
+                      styles.audioEditButton,
+                      syncingMusicalNumberAudioId === audio.id &&
+                        isSavingTimelineCues &&
+                        styles.buttonDisabled,
+                    ]}
                     onPress={() =>
                       syncingMusicalNumberAudioId === audio.id
-                        ? cancelTimelineSync()
+                        ? void saveTimelineCues(audio)
                         : void startSyncingMusicalNumberAudio(audio)
                     }
+                    disabled={syncingMusicalNumberAudioId === audio.id && isSavingTimelineCues}
                   >
                     <Text style={styles.audioActionText}>
                       {syncingMusicalNumberAudioId === audio.id
-                        ? 'Cerrar sync'
+                        ? isSavingTimelineCues
+                          ? 'Guardando...'
+                          : 'Guardar sync'
                         : `Estructurar (${(audio.timelineCues ?? []).length})`}
                     </Text>
                   </TouchableOpacity>
