@@ -74,6 +74,14 @@ type LastIntelligentAutoAdvance = {
   entry: IntelligentLineFeedbackEntry;
 };
 
+const DEFAULT_REHEARSAL_SPEECH_RATE = 1.14;
+const MIN_TIMED_REHEARSAL_SPEECH_RATE = 0.92;
+const MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.55;
+const TIMELINE_CUE_SAFETY_MS = 260;
+const APP_LINE_ADVANCE_DELAY_MS = 500;
+const USER_LINE_RESPONSE_BUFFER_MS = 900;
+const APP_SPEECH_WORDS_PER_SECOND = 2.65;
+const USER_SPEECH_WORDS_PER_SECOND = 2.35;
 const REHEARSAL_SESSION_PREPARATION_PREFIX = 'teatro_ia_rehearsal_session_preparation:';
 
 const isConfirmedListenMode = (value: unknown): value is ConfirmedRehearsalListenMode =>
@@ -200,6 +208,36 @@ const getSceneTitleForLine = (guion: Dialogue[], lineIndex: number) => {
 
 const buildLineVariantKey = (lineIndex: number, lineText: string) =>
   `${lineIndex}:${hashLineText(lineText)}`;
+
+const countSpokenWords = (value: string) =>
+  value
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+
+const countSentencePauses = (value: string) => (value.match(/[.!?;:]+/g) ?? []).length;
+
+const estimateSpeechDurationMs = (
+  value: string,
+  wordsPerSecond: number,
+  rate = 1
+) => {
+  const wordCount = countSpokenWords(value);
+  if (wordCount === 0) {
+    return 250;
+  }
+
+  const baseDurationMs =
+    (wordCount / wordsPerSecond) * 1000 + countSentencePauses(value) * 160;
+  return Math.max(700, baseDurationMs) / Math.max(rate, 0.1);
+};
+
+const clampSpeechRate = (value: number) =>
+  Math.max(
+    MIN_TIMED_REHEARSAL_SPEECH_RATE,
+    Math.min(MAX_TIMED_REHEARSAL_SPEECH_RATE, value)
+  );
 
 const formatMicroLevel = (value: number) => `${(value * 100).toFixed(1)}%`;
 
@@ -1580,6 +1618,96 @@ export const RehearsalView: React.FC<Props> = ({
     stopListening,
   ]);
 
+  const getAdaptiveRehearsalSpeechRate = useCallback(() => {
+    const activePlayback = activeAudioPlaybackRef.current;
+    const player = audioRef.current;
+
+    if (
+      !currentMusicalNumber ||
+      !currentLine ||
+      currentLineIndexInScript < 0 ||
+      !activePlayback ||
+      activePlayback.kind !== 'musical-number' ||
+      activePlayback.ownerId !== currentMusicalNumber.id ||
+      !activePlayback.timelineCues.length ||
+      !player
+    ) {
+      return DEFAULT_REHEARSAL_SPEECH_RATE;
+    }
+
+    const currentTimeMs = Math.max(0, Math.round(player.currentTime * 1000));
+    const upcomingCue = activePlayback.timelineCues.find(
+      (cue) =>
+        cue.atMs > currentTimeMs + TIMELINE_CUE_SAFETY_MS &&
+        cue.targetLineIndex > currentLineIndexInScript
+    );
+
+    if (!upcomingCue) {
+      return DEFAULT_REHEARSAL_SPEECH_RATE;
+    }
+
+    const targetFilteredIndex = filteredGuion.findIndex(
+      (line) => guion.indexOf(line) >= upcomingCue.targetLineIndex
+    );
+
+    if (targetFilteredIndex <= currentIndex) {
+      return DEFAULT_REHEARSAL_SPEECH_RATE;
+    }
+
+    const futureEstimatedMs = filteredGuion
+      .slice(currentIndex + 1, targetFilteredIndex)
+      .reduce((totalMs, line) => {
+        if (!line || isSceneMarker(line) || isSongCue(line)) {
+          return totalMs;
+        }
+
+        const lineText = line.t?.replace(/\s+/g, ' ').trim() ?? '';
+        if (!lineText) {
+          return totalMs + 200;
+        }
+
+        if (lineMatchesRoles(line, myRoles)) {
+          return (
+            totalMs +
+            estimateSpeechDurationMs(lineText, USER_SPEECH_WORDS_PER_SECOND) +
+            USER_LINE_RESPONSE_BUFFER_MS
+          );
+        }
+
+        return (
+          totalMs +
+          estimateSpeechDurationMs(
+            lineText,
+            APP_SPEECH_WORDS_PER_SECOND,
+            DEFAULT_REHEARSAL_SPEECH_RATE
+          ) +
+          APP_LINE_ADVANCE_DELAY_MS
+        );
+      }, 0);
+
+    const remainingBudgetMs = upcomingCue.atMs - currentTimeMs - TIMELINE_CUE_SAFETY_MS;
+    const availableForCurrentLineMs = remainingBudgetMs - futureEstimatedMs;
+
+    if (!Number.isFinite(availableForCurrentLineMs) || availableForCurrentLineMs <= 0) {
+      return MAX_TIMED_REHEARSAL_SPEECH_RATE;
+    }
+
+    const currentLineBaseDurationMs = estimateSpeechDurationMs(
+      speakableLineText,
+      APP_SPEECH_WORDS_PER_SECOND
+    );
+    return clampSpeechRate(currentLineBaseDurationMs / availableForCurrentLineMs);
+  }, [
+    currentIndex,
+    currentLine,
+    currentLineIndexInScript,
+    currentMusicalNumber,
+    filteredGuion,
+    guion,
+    myRoles,
+    speakableLineText,
+  ]);
+
   useEffect(() => {
     stopRehearsalSpeech();
     stopStandaloneSongAudio();
@@ -1633,8 +1761,9 @@ export const RehearsalView: React.FC<Props> = ({
 
       speechStartTimeout = setTimeout(() => {
         setSpeechStatusMessage('Lanzando la linea con Siri...');
+        const speechRate = getAdaptiveRehearsalSpeechRate();
         speakRehearsalSpeech(speakableLineText, {
-          rate: 1.14,
+          rate: speechRate,
           onStart: () => {
             if (isCancelled) {
               return;
@@ -1646,7 +1775,7 @@ export const RehearsalView: React.FC<Props> = ({
               return;
             }
             setSpeechStatusMessage('Linea reproducida. Avanzando...');
-            advanceTimeout = setTimeout(advanceLine, 500);
+            advanceTimeout = setTimeout(advanceLine, APP_LINE_ADVANCE_DELAY_MS);
           },
           onError: (error) => {
             if (isCancelled) {
@@ -1683,6 +1812,7 @@ export const RehearsalView: React.FC<Props> = ({
     isListeningActive,
     listeningStatus,
     isMyTurn,
+    getAdaptiveRehearsalSpeechRate,
     speakableLineText,
     stopListening,
     stopStandaloneSongAudio,

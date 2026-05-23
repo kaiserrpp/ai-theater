@@ -2121,6 +2121,8 @@ export const SongManagerPanel: React.FC<Props> = ({
         });
 
         await refreshSharedManifest(manifest);
+        stopPreviewAudio();
+        setPreviewAudioError(null);
         cancelTimelineSync();
       } catch (error) {
         setManagerError(
@@ -2136,6 +2138,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       refreshSharedManifest,
       selectedMusicalNumber,
       sharedScript,
+      stopPreviewAudio,
       syncCueDrafts,
     ]
   );
