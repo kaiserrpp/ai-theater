@@ -213,6 +213,14 @@ const buildTimelineBlocks = (
   return blocks;
 };
 
+const findTimelineBlockForLineIndex = (
+  blocks: MusicalNumberTimelineBlock[],
+  lineIndex: number
+) =>
+  blocks.find(
+    (block) => lineIndex >= block.startLineIndex && lineIndex <= block.endLineIndex
+  ) ?? null;
+
 const getMusicalNumberSortIndex = (musicalNumber: SharedMusicalNumberAsset) =>
   typeof musicalNumber.startLineIndex === 'number' && musicalNumber.startLineIndex >= 0
     ? musicalNumber.startLineIndex
@@ -378,7 +386,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [isMusicalNumberAudioFormVisible, setIsMusicalNumberAudioFormVisible] = useState(false);
   const [syncingMusicalNumberAudioId, setSyncingMusicalNumberAudioId] = useState<string | null>(null);
   const [syncCueDrafts, setSyncCueDrafts] = useState<MusicalTimelineCue[]>([]);
-  const [syncActiveBlockIndex, setSyncActiveBlockIndex] = useState(0);
+  const [syncActiveEntryIndex, setSyncActiveEntryIndex] = useState(0);
   const [isSavingTimelineCues, setIsSavingTimelineCues] = useState(false);
   const [playingPreviewAudioId, setPlayingPreviewAudioId] = useState<string | null>(null);
   const [isPreviewAudioPaused, setIsPreviewAudioPaused] = useState(false);
@@ -590,7 +598,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsMusicalNumberAudioFormVisible(false);
     setSyncingMusicalNumberAudioId(null);
     setSyncCueDrafts([]);
-    setSyncActiveBlockIndex(0);
+    setSyncActiveEntryIndex(0);
   }, [selectedMusicalNumberId]);
 
   const selectedSong = useMemo<SharedSongAsset | null>(() => {
@@ -612,12 +620,16 @@ export const SongManagerPanel: React.FC<Props> = ({
     );
   }, [orderedMusicalNumbers, selectedMusicalNumberId]);
 
-  const selectedMusicalNumberTimelineBlocks = useMemo(
+  const selectedMusicalNumberTimelineEntries = useMemo(
     () =>
       selectedMusicalNumber
-        ? buildTimelineBlocks(buildMusicalNumberRangeEntries(selectedMusicalNumber))
+        ? buildMusicalNumberRangeEntries(selectedMusicalNumber)
         : [],
     [buildMusicalNumberRangeEntries, selectedMusicalNumber]
+  );
+  const selectedMusicalNumberTimelineBlocks = useMemo(
+    () => buildTimelineBlocks(selectedMusicalNumberTimelineEntries),
+    [selectedMusicalNumberTimelineEntries]
   );
 
   const selectedPracticeMusicalNumber = useMemo<PracticeMusicalNumberAsset | null>(() => {
@@ -1979,7 +1991,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     async (audio: SharedSongAudioAsset) => {
       setSyncingMusicalNumberAudioId(audio.id);
       setSyncCueDrafts(audio.timelineCues ?? []);
-      setSyncActiveBlockIndex(0);
+      setSyncActiveEntryIndex(0);
       setManagerError(null);
       await playPreviewAudioFrom(audio, 0);
     },
@@ -1989,37 +2001,60 @@ export const SongManagerPanel: React.FC<Props> = ({
   const cancelTimelineSync = useCallback(() => {
     setSyncingMusicalNumberAudioId(null);
     setSyncCueDrafts([]);
-    setSyncActiveBlockIndex(0);
+    setSyncActiveEntryIndex(0);
     setIsSavingTimelineCues(false);
   }, []);
 
-  const markNextTimelineBlock = useCallback(() => {
-    if (!previewAudioElement || !selectedMusicalNumberTimelineBlocks.length) {
+  const advanceTimelineStructure = useCallback(() => {
+    if (
+      !previewAudioElement ||
+      !selectedMusicalNumberTimelineEntries.length ||
+      !selectedMusicalNumberTimelineBlocks.length
+    ) {
       return;
     }
 
-    const targetBlockIndex = syncActiveBlockIndex + 1;
-    const targetBlock = selectedMusicalNumberTimelineBlocks[targetBlockIndex];
-    if (!targetBlock) {
+    const currentEntry = selectedMusicalNumberTimelineEntries[syncActiveEntryIndex];
+    const nextEntry = selectedMusicalNumberTimelineEntries[syncActiveEntryIndex + 1];
+    if (!currentEntry || !nextEntry) {
       return;
     }
 
-    const atMs = Math.max(0, Math.round(previewAudioElement.currentTime * 1000));
-    const nextCue: MusicalTimelineCue = {
-      id: buildTimelineCueId(targetBlock.startLineIndex),
-      atMs,
-      targetLineIndex: targetBlock.startLineIndex,
-      targetKind: targetBlock.kind,
-    };
-
-    setSyncCueDrafts((previousCues) =>
-      [
-        ...previousCues.filter((cue) => cue.targetLineIndex !== targetBlock.startLineIndex),
-        nextCue,
-      ].sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs)
+    const currentBlock = findTimelineBlockForLineIndex(
+      selectedMusicalNumberTimelineBlocks,
+      currentEntry.lineIndex
     );
-    setSyncActiveBlockIndex(targetBlockIndex);
-  }, [previewAudioElement, selectedMusicalNumberTimelineBlocks, syncActiveBlockIndex]);
+    const nextBlock = findTimelineBlockForLineIndex(
+      selectedMusicalNumberTimelineBlocks,
+      nextEntry.lineIndex
+    );
+
+    if (currentBlock && nextBlock && currentBlock.id !== nextBlock.id) {
+      const atMs = Math.max(0, Math.round(previewAudioElement.currentTime * 1000));
+      const nextCue: MusicalTimelineCue = {
+        id: buildTimelineCueId(nextBlock.startLineIndex),
+        atMs,
+        targetLineIndex: nextBlock.startLineIndex,
+        targetKind: nextBlock.kind,
+      };
+
+      setSyncCueDrafts((previousCues) =>
+        [
+          ...previousCues.filter((cue) => cue.targetLineIndex !== nextBlock.startLineIndex),
+          nextCue,
+        ].sort((leftCue, rightCue) => leftCue.atMs - rightCue.atMs)
+      );
+    }
+
+    setSyncActiveEntryIndex((previousIndex) =>
+      Math.min(previousIndex + 1, selectedMusicalNumberTimelineEntries.length - 1)
+    );
+  }, [
+    previewAudioElement,
+    selectedMusicalNumberTimelineBlocks,
+    selectedMusicalNumberTimelineEntries,
+    syncActiveEntryIndex,
+  ]);
 
   const adjustTimelineCue = useCallback((cueId: string, deltaMs: number) => {
     setSyncCueDrafts((previousCues) =>
@@ -2050,13 +2085,13 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const rerecordTimelineCue = useCallback(
     async (audio: SharedSongAudioAsset, cue: MusicalTimelineCue) => {
-      const blockIndex = selectedMusicalNumberTimelineBlocks.findIndex(
-        (block) => block.startLineIndex === cue.targetLineIndex
+      const entryIndex = selectedMusicalNumberTimelineEntries.findIndex(
+        (entry) => entry.lineIndex >= cue.targetLineIndex
       );
-      setSyncActiveBlockIndex(Math.max(0, blockIndex - 1));
+      setSyncActiveEntryIndex(Math.max(0, entryIndex - 1));
       await previewTimelineCue(audio, cue);
     },
-    [previewTimelineCue, selectedMusicalNumberTimelineBlocks]
+    [previewTimelineCue, selectedMusicalNumberTimelineEntries]
   );
 
   const saveTimelineCues = useCallback(
@@ -2150,7 +2185,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setMusicalNumberUploadProgress(null);
     setSyncingMusicalNumberAudioId(null);
     setSyncCueDrafts([]);
-    setSyncActiveBlockIndex(0);
+    setSyncActiveEntryIndex(0);
     setIsSavingTimelineCues(false);
     setManagerError(null);
     setPasswordError(null);
@@ -2426,32 +2461,34 @@ export const SongManagerPanel: React.FC<Props> = ({
       return null;
     }
 
+    const entries = selectedMusicalNumber?.id === musicalNumber.id
+      ? selectedMusicalNumberTimelineEntries
+      : buildMusicalNumberRangeEntries(musicalNumber);
     const blocks = selectedMusicalNumber?.id === musicalNumber.id
       ? selectedMusicalNumberTimelineBlocks
-      : buildTimelineBlocks(buildMusicalNumberRangeEntries(musicalNumber));
-    const activeBlock = blocks[syncActiveBlockIndex] ?? blocks[0] ?? null;
-    const nextBlock = blocks[syncActiveBlockIndex + 1] ?? null;
+      : buildTimelineBlocks(entries);
+    const safeActiveEntryIndex = Math.min(
+      syncActiveEntryIndex,
+      Math.max(entries.length - 1, 0)
+    );
+    const activeEntry = entries[safeActiveEntryIndex] ?? null;
+    const nextEntry = entries[safeActiveEntryIndex + 1] ?? null;
+    const activeBlock = activeEntry
+      ? findTimelineBlockForLineIndex(blocks, activeEntry.lineIndex)
+      : null;
+    const nextBlock = nextEntry
+      ? findTimelineBlockForLineIndex(blocks, nextEntry.lineIndex)
+      : null;
+    const willRecordCue = Boolean(activeBlock && nextBlock && activeBlock.id !== nextBlock.id);
     const cuesByLineIndex = new Map(syncCueDrafts.map((cue) => [cue.targetLineIndex, cue]));
 
     return (
       <View style={styles.timelineSyncBox}>
-        <Text style={styles.sectionTitle}>Sincronizar bloques</Text>
+        <Text style={styles.sectionTitle}>Estructurar numero musical</Text>
         <Text style={styles.timelineSyncHint}>
-          Reproduce el numero musical y pulsa Siguiente bloque cuando la pista deba cambiar
-          entre dialogo y cancion.
+          Funciona como un ensayo sin micro: avanza linea a linea. Solo se guarda una marca
+          cuando el salto entra o sale de un bloque de cancion.
         </Text>
-        <View style={styles.timelineNowBox}>
-          <Text style={styles.timelineNowLabel}>Bloque actual</Text>
-          <Text style={styles.timelineNowTitle}>
-            {activeBlock ? activeBlock.title : 'Sin bloque activo'}
-          </Text>
-          <Text style={styles.timelineNowMeta}>
-            Tiempo de audio: {formatPlaybackTime(previewAudioCurrentTime)}
-          </Text>
-          <Text style={styles.timelineNowMeta}>
-            Siguiente: {nextBlock ? nextBlock.title : 'No quedan mas bloques'}
-          </Text>
-        </View>
         <View style={styles.timelineActions}>
           <TouchableOpacity
             style={[styles.audioActionButton, styles.audioPlayButton]}
@@ -2463,24 +2500,69 @@ export const SongManagerPanel: React.FC<Props> = ({
             style={[
               styles.audioActionButton,
               styles.timelinePrimaryButton,
-              !nextBlock && styles.buttonDisabled,
+              !nextEntry && styles.buttonDisabled,
             ]}
-            onPress={markNextTimelineBlock}
-            disabled={!nextBlock}
+            onPress={advanceTimelineStructure}
+            disabled={!nextEntry}
           >
-            <Text style={styles.timelinePrimaryButtonText}>Siguiente bloque</Text>
+            <Text style={styles.timelinePrimaryButtonText}>Siguiente</Text>
           </TouchableOpacity>
         </View>
+        <View style={styles.timelineRehearsalCard}>
+          {activeEntry ? (
+            <>
+              <View
+                style={[
+                  styles.timelineRehearsalBadge,
+                  activeEntry.kind === 'song'
+                    ? styles.timelineRehearsalBadgeSong
+                    : styles.timelineRehearsalBadgeDialogue,
+                ]}
+              >
+                <Text style={styles.timelineRehearsalBadgeText}>
+                  {activeEntry.kind === 'song' ? 'Cancion' : 'Linea'}
+                </Text>
+              </View>
+              <Text style={styles.timelineRehearsalTitle}>{activeEntry.title}</Text>
+              <Text style={styles.timelineRehearsalText}>{activeEntry.detailText}</Text>
+              <Text style={styles.timelineNowMeta}>
+                Audio: {formatPlaybackTime(previewAudioCurrentTime)}
+                {activeBlock ? ` - Bloque: ${activeBlock.title}` : ''}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.infoText}>No hay lineas dentro de este numero musical.</Text>
+          )}
+        </View>
+        <View style={styles.timelineNowBox}>
+          <Text style={styles.timelineNowLabel}>Proximo salto</Text>
+          <Text style={styles.timelineNowTitle}>
+            {nextEntry ? nextEntry.title : 'No quedan mas lineas'}
+          </Text>
+          <Text style={styles.timelineNowMeta}>
+            {willRecordCue && nextBlock
+              ? `Se guardara marca para entrar en ${nextBlock.title}.`
+              : nextEntry
+                ? 'No se guardara marca: sigues dentro del mismo bloque hablado.'
+                : 'Revision terminada.'}
+          </Text>
+        </View>
         <View style={styles.timelineBlockList}>
+          <Text style={styles.sectionTitle}>Estructura detectada</Text>
           {blocks.map((block, blockIndex) => {
             const cue = cuesByLineIndex.get(block.startLineIndex);
-            const isActive = blockIndex === syncActiveBlockIndex;
+            const isActive = activeBlock?.id === block.id;
 
             return (
               <TouchableOpacity
                 key={`${audio.id}-timeline-block-${block.id}`}
                 style={[styles.timelineBlockRow, isActive && styles.timelineBlockRowActive]}
-                onPress={() => setSyncActiveBlockIndex(blockIndex)}
+                onPress={() => {
+                  const entryIndex = entries.findIndex(
+                    (entry) => entry.lineIndex >= block.startLineIndex
+                  );
+                  setSyncActiveEntryIndex(Math.max(0, entryIndex));
+                }}
               >
                 <View
                   style={[
@@ -2787,7 +2869,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                     <Text style={styles.audioActionText}>
                       {syncingMusicalNumberAudioId === audio.id
                         ? 'Cerrar sync'
-                        : `${(audio.timelineCues ?? []).length} marca${(audio.timelineCues ?? []).length === 1 ? '' : 's'}`}
+                        : `Estructurar (${(audio.timelineCues ?? []).length})`}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -4701,6 +4783,45 @@ const styles = StyleSheet.create({
   timelineNowMeta: {
     color: '#55656f',
     lineHeight: 19,
+  },
+  timelineRehearsalCard: {
+    gap: 10,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#edd6b2',
+    backgroundColor: '#fff8ef',
+    alignItems: 'center',
+  },
+  timelineRehearsalBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  timelineRehearsalBadgeSong: {
+    backgroundColor: 'rgba(122, 77, 19, 0.12)',
+    borderColor: 'rgba(122, 77, 19, 0.28)',
+  },
+  timelineRehearsalBadgeDialogue: {
+    backgroundColor: 'rgba(24, 78, 119, 0.1)',
+    borderColor: 'rgba(24, 78, 119, 0.24)',
+  },
+  timelineRehearsalBadgeText: {
+    color: '#5f3a00',
+    fontWeight: '800',
+  },
+  timelineRehearsalTitle: {
+    color: '#432818',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  timelineRehearsalText: {
+    color: '#4d3b16',
+    fontSize: 18,
+    lineHeight: 26,
+    textAlign: 'center',
   },
   timelineActions: {
     flexDirection: 'row',
