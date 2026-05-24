@@ -247,6 +247,19 @@ const isLikelyMobileSpeechDevice = () => {
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
 };
 
+type WindowWithAudioContext = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+const getBrowserAudioContextConstructor = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const scopedWindow = window as WindowWithAudioContext;
+  return scopedWindow.AudioContext ?? scopedWindow.webkitAudioContext ?? null;
+};
+
 const formatMicroLevel = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 const createWavObjectUrl = ({
@@ -517,6 +530,11 @@ export const RehearsalView: React.FC<Props> = ({
     timelineCues?: MusicalTimelineCue[];
   } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const songAudioContextRef = useRef<AudioContext | null>(null);
+  const songAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const songAudioGainRef = useRef<GainNode | null>(null);
+  const desiredSongAudioVolumeRef = useRef(1);
+  const hasSongAudioGainFailedRef = useRef(false);
   const autoStartedSongKeyRef = useRef<string | null>(null);
   const autoStartedMusicalNumberKeyRef = useRef<string | null>(null);
   const activeAudioPlaybackRef = useRef<{
@@ -1303,6 +1321,24 @@ export const RehearsalView: React.FC<Props> = ({
       audioRef.current = null;
     }
 
+    if (songAudioSourceRef.current) {
+      songAudioSourceRef.current.disconnect();
+      songAudioSourceRef.current = null;
+    }
+
+    if (songAudioGainRef.current) {
+      songAudioGainRef.current.disconnect();
+      songAudioGainRef.current = null;
+    }
+
+    if (songAudioContextRef.current) {
+      const context = songAudioContextRef.current;
+      songAudioContextRef.current = null;
+      void context.close().catch(() => undefined);
+    }
+
+    desiredSongAudioVolumeRef.current = 1;
+    hasSongAudioGainFailedRef.current = false;
     setPlayingAudioId(null);
     activeAudioPlaybackRef.current = null;
   }, []);
@@ -1329,14 +1365,82 @@ export const RehearsalView: React.FC<Props> = ({
     return audioRef.current;
   }, []);
 
+  const ensureSongAudioOutput = useCallback(() => {
+    const player = audioRef.current;
+    if (!player || hasSongAudioGainFailedRef.current) {
+      return null;
+    }
+
+    if (songAudioContextRef.current && songAudioGainRef.current) {
+      return {
+        context: songAudioContextRef.current,
+        gainNode: songAudioGainRef.current,
+      };
+    }
+
+    const AudioContextConstructor = getBrowserAudioContextConstructor();
+    if (!AudioContextConstructor) {
+      return null;
+    }
+
+    try {
+      const context = songAudioContextRef.current ?? new AudioContextConstructor();
+      const sourceNode =
+        songAudioSourceRef.current ?? context.createMediaElementSource(player);
+      const gainNode = context.createGain();
+
+      gainNode.gain.value = desiredSongAudioVolumeRef.current;
+      sourceNode.connect(gainNode);
+      gainNode.connect(context.destination);
+
+      songAudioContextRef.current = context;
+      songAudioSourceRef.current = sourceNode;
+      songAudioGainRef.current = gainNode;
+
+      return { context, gainNode };
+    } catch {
+      hasSongAudioGainFailedRef.current = true;
+
+      if (songAudioGainRef.current) {
+        songAudioGainRef.current.disconnect();
+        songAudioGainRef.current = null;
+      }
+
+      return null;
+    }
+  }, []);
+
+  const prepareSongAudioOutput = useCallback(async () => {
+    const output = ensureSongAudioOutput();
+    if (!output) {
+      return;
+    }
+
+    if (output.context.state === 'suspended') {
+      await output.context.resume().catch(() => undefined);
+    }
+  }, [ensureSongAudioOutput]);
+
   const setSongAudioVolume = useCallback((nextVolume: number) => {
     const player = audioRef.current;
     if (!player) {
       return;
     }
 
-    player.volume = Math.max(0, Math.min(nextVolume, 1));
-  }, []);
+    const safeVolume = Math.max(0, Math.min(nextVolume, 1));
+    desiredSongAudioVolumeRef.current = safeVolume;
+
+    const output = ensureSongAudioOutput();
+    if (output) {
+      const currentTime = output.context.currentTime;
+      output.gainNode.gain.cancelScheduledValues(currentTime);
+      output.gainNode.gain.setTargetAtTime(safeVolume, currentTime, 0.035);
+      player.volume = 1;
+      return;
+    }
+
+    player.volume = safeVolume;
+  }, [ensureSongAudioOutput]);
 
   const primeSongPlayback = useCallback(async () => {
     const player = getSongAudioPlayer();
@@ -1357,6 +1461,7 @@ export const RehearsalView: React.FC<Props> = ({
       player.muted = true;
       player.src = silentObjectUrl;
       player.load();
+      await prepareSongAudioOutput();
       await player.play();
       player.pause();
       player.currentTime = 0;
@@ -1371,7 +1476,7 @@ export const RehearsalView: React.FC<Props> = ({
     } finally {
       URL.revokeObjectURL(silentObjectUrl);
     }
-  }, [getSongAudioPlayer]);
+  }, [getSongAudioPlayer, prepareSongAudioOutput]);
 
   const restorePreparedRehearsalSession = useCallback(async () => {
     if (
@@ -2254,7 +2359,7 @@ export const RehearsalView: React.FC<Props> = ({
 
     player.src = audioUrl;
     player.load();
-    player.volume = 1;
+    setSongAudioVolume(1);
     setPlayingAudioId(audioId);
     activeAudioPlaybackRef.current = {
       kind: options?.playbackKind ?? 'song',
@@ -2266,7 +2371,7 @@ export const RehearsalView: React.FC<Props> = ({
       firedTimelineCueIds: new Set(),
     };
 
-    void player.play().catch((error: unknown) => {
+    void prepareSongAudioOutput().then(() => player.play()).catch((error: unknown) => {
       setPlayingAudioId(null);
       activeAudioPlaybackRef.current = null;
       if (options?.autoStart && isAutoplayBlockedError(error)) {
@@ -2296,6 +2401,8 @@ export const RehearsalView: React.FC<Props> = ({
     isSongPlaybackUnlocked,
     jumpToScriptLineIndex,
     playingAudioId,
+    prepareSongAudioOutput,
+    setSongAudioVolume,
     stopSongAudio,
   ]);
 
