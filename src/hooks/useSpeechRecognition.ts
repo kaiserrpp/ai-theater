@@ -76,6 +76,8 @@ export const useSpeechRecognition = ({
   const restartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptRef = useRef('');
   const committedTranscriptRef = useRef('');
+  const ignoredResultCountRef = useRef(0);
+  const latestResultCountRef = useRef(0);
   const [status, setStatus] = useState<SpeechRecognitionStatus>(
     SpeechRecognitionConstructor ? 'idle' : 'unsupported'
   );
@@ -85,6 +87,7 @@ export const useSpeechRecognition = ({
   const [error, setError] = useState<string | null>(null);
 
   const isSupported = Boolean(SpeechRecognitionConstructor);
+  const hasLineKey = Boolean(lineKey);
 
   const clearRestartTimeout = useCallback(() => {
     if (restartTimeoutRef.current) {
@@ -119,6 +122,7 @@ export const useSpeechRecognition = ({
   const resetTranscript = useCallback(() => {
     transcriptRef.current = '';
     committedTranscriptRef.current = '';
+    ignoredResultCountRef.current = latestResultCountRef.current;
     setTranscript('');
     setFinalTranscript('');
     setInterimTranscript('');
@@ -133,6 +137,8 @@ export const useSpeechRecognition = ({
 
     clearRestartTimeout();
     shouldListenRef.current = true;
+    ignoredResultCountRef.current = 0;
+    latestResultCountRef.current = 0;
 
     const recognition = new SpeechRecognitionConstructor();
     recognition.continuous = true;
@@ -156,8 +162,10 @@ export const useSpeechRecognition = ({
       let sessionTranscript = '';
       let nextFinalTranscript = '';
       let nextInterimTranscript = '';
+      const startIndex = Math.max(0, ignoredResultCountRef.current);
+      latestResultCountRef.current = event.results.length;
 
-      for (let index = 0; index < event.results.length; index += 1) {
+      for (let index = startIndex; index < event.results.length; index += 1) {
         const result = event.results[index];
         const alternative = result?.[0];
         const text = alternative?.transcript?.trim();
@@ -227,8 +235,12 @@ export const useSpeechRecognition = ({
 
   useEffect(() => {
     resetTranscript();
+  }, [lineKey, resetTranscript]);
 
-    if (!enabled || !lineKey) {
+  useEffect(() => {
+    const canListen = enabled && hasLineKey;
+
+    if (!canListen) {
       stopRecognition();
       return;
     }
@@ -238,7 +250,7 @@ export const useSpeechRecognition = ({
     return () => {
       stopRecognition();
     };
-  }, [enabled, lineKey, resetTranscript, startRecognition, stopRecognition]);
+  }, [enabled, hasLineKey, startRecognition, stopRecognition]);
 
   useEffect(
     () => () => {

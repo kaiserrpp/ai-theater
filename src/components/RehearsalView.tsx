@@ -74,9 +74,12 @@ type LastIntelligentAutoAdvance = {
   entry: IntelligentLineFeedbackEntry;
 };
 
-const DEFAULT_REHEARSAL_SPEECH_RATE = 1.14;
-const MIN_TIMED_REHEARSAL_SPEECH_RATE = 0.92;
-const MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.55;
+const DESKTOP_REHEARSAL_SPEECH_RATE = 1.14;
+const MOBILE_REHEARSAL_SPEECH_RATE = 0.9;
+const DESKTOP_MIN_TIMED_REHEARSAL_SPEECH_RATE = 0.92;
+const MOBILE_MIN_TIMED_REHEARSAL_SPEECH_RATE = 0.78;
+const DESKTOP_MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.55;
+const MOBILE_MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.18;
 const TIMELINE_CUE_SAFETY_MS = 260;
 const APP_LINE_ADVANCE_DELAY_MS = 500;
 const USER_LINE_RESPONSE_BUFFER_MS = 900;
@@ -233,11 +236,16 @@ const estimateSpeechDurationMs = (
   return Math.max(700, baseDurationMs) / Math.max(rate, 0.1);
 };
 
-const clampSpeechRate = (value: number) =>
-  Math.max(
-    MIN_TIMED_REHEARSAL_SPEECH_RATE,
-    Math.min(MAX_TIMED_REHEARSAL_SPEECH_RATE, value)
-  );
+const clampSpeechRate = (value: number, minRate: number, maxRate: number) =>
+  Math.max(minRate, Math.min(maxRate, value));
+
+const isLikelyMobileSpeechDevice = () => {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+};
 
 const formatMicroLevel = (value: number) => `${(value * 100).toFixed(1)}%`;
 
@@ -446,6 +454,16 @@ export const RehearsalView: React.FC<Props> = ({
   onExit,
 }) => {
   const filteredGuion = useMemo(() => filterScriptByScenes(guion, filterScenes), [filterScenes, guion]);
+  const isMobileSpeechDevice = useMemo(isLikelyMobileSpeechDevice, []);
+  const defaultRehearsalSpeechRate = isMobileSpeechDevice
+    ? MOBILE_REHEARSAL_SPEECH_RATE
+    : DESKTOP_REHEARSAL_SPEECH_RATE;
+  const minTimedRehearsalSpeechRate = isMobileSpeechDevice
+    ? MOBILE_MIN_TIMED_REHEARSAL_SPEECH_RATE
+    : DESKTOP_MIN_TIMED_REHEARSAL_SPEECH_RATE;
+  const maxTimedRehearsalSpeechRate = isMobileSpeechDevice
+    ? MOBILE_MAX_TIMED_REHEARSAL_SPEECH_RATE
+    : DESKTOP_MAX_TIMED_REHEARSAL_SPEECH_RATE;
   const resolvedScriptId = useMemo(
     () =>
       providedScriptId ??
@@ -513,6 +531,7 @@ export const RehearsalView: React.FC<Props> = ({
   const processedCommandLineKeyRef = useRef<string | null>(null);
   const processedGoodLineCommandKeyRef = useRef<string | null>(null);
   const processedAutoAdvanceLineKeyRef = useRef<string | null>(null);
+  const activeIntelligentRecognitionLanguageRef = useRef('es-ES');
   const lastIntelligentAutoAdvanceRef = useRef<LastIntelligentAutoAdvance | null>(null);
   const rehearsalSessionPreparationKey = useMemo(
     () => buildRehearsalSessionPreparationKey(resolvedScriptId),
@@ -649,6 +668,22 @@ export const RehearsalView: React.FC<Props> = ({
     !isSongCue(currentLine) &&
     isMyTurn &&
     speakableLineText.length > 0;
+  const shouldKeepIntelligentRecognitionWarm =
+    shouldUseIntelligentRecognition ||
+    (
+      isMobileSpeechDevice &&
+      isIntelligentListenMode &&
+      isRehearsalMediaReady &&
+      hasCompletedRehearsalPreflight &&
+      !isFinished &&
+      Boolean(currentLine) &&
+      !isSceneMarker(currentLine) &&
+      !isSongCue(currentLine) &&
+      speakableLineText.length > 0
+    );
+  if (shouldUseIntelligentRecognition) {
+    activeIntelligentRecognitionLanguageRef.current = intelligentRecognitionLanguage;
+  }
   const shouldKeepListeningWarmDuringSong =
     effectiveAutoListenEnabled &&
     isRehearsalMediaReady &&
@@ -715,8 +750,8 @@ export const RehearsalView: React.FC<Props> = ({
     restartRecognition,
     stopRecognition,
   } = useSpeechRecognition({
-    enabled: shouldUseIntelligentRecognition,
-    lang: intelligentRecognitionLanguage,
+    enabled: shouldKeepIntelligentRecognitionWarm,
+    lang: activeIntelligentRecognitionLanguageRef.current,
     lineKey: currentLineVariantKey,
   });
 
@@ -1632,7 +1667,7 @@ export const RehearsalView: React.FC<Props> = ({
       !activePlayback.timelineCues.length ||
       !player
     ) {
-      return DEFAULT_REHEARSAL_SPEECH_RATE;
+      return defaultRehearsalSpeechRate;
     }
 
     const currentTimeMs = Math.max(0, Math.round(player.currentTime * 1000));
@@ -1643,7 +1678,7 @@ export const RehearsalView: React.FC<Props> = ({
     );
 
     if (!upcomingCue) {
-      return DEFAULT_REHEARSAL_SPEECH_RATE;
+      return defaultRehearsalSpeechRate;
     }
 
     const targetFilteredIndex = filteredGuion.findIndex(
@@ -1651,7 +1686,7 @@ export const RehearsalView: React.FC<Props> = ({
     );
 
     if (targetFilteredIndex <= currentIndex) {
-      return DEFAULT_REHEARSAL_SPEECH_RATE;
+      return defaultRehearsalSpeechRate;
     }
 
     const futureEstimatedMs = filteredGuion
@@ -1679,7 +1714,7 @@ export const RehearsalView: React.FC<Props> = ({
           estimateSpeechDurationMs(
             lineText,
             APP_SPEECH_WORDS_PER_SECOND,
-            DEFAULT_REHEARSAL_SPEECH_RATE
+            defaultRehearsalSpeechRate
           ) +
           APP_LINE_ADVANCE_DELAY_MS
         );
@@ -1689,21 +1724,28 @@ export const RehearsalView: React.FC<Props> = ({
     const availableForCurrentLineMs = remainingBudgetMs - futureEstimatedMs;
 
     if (!Number.isFinite(availableForCurrentLineMs) || availableForCurrentLineMs <= 0) {
-      return MAX_TIMED_REHEARSAL_SPEECH_RATE;
+      return maxTimedRehearsalSpeechRate;
     }
 
     const currentLineBaseDurationMs = estimateSpeechDurationMs(
       speakableLineText,
       APP_SPEECH_WORDS_PER_SECOND
     );
-    return clampSpeechRate(currentLineBaseDurationMs / availableForCurrentLineMs);
+    return clampSpeechRate(
+      currentLineBaseDurationMs / availableForCurrentLineMs,
+      minTimedRehearsalSpeechRate,
+      maxTimedRehearsalSpeechRate
+    );
   }, [
     currentIndex,
     currentLine,
     currentLineIndexInScript,
     currentMusicalNumber,
+    defaultRehearsalSpeechRate,
     filteredGuion,
     guion,
+    maxTimedRehearsalSpeechRate,
+    minTimedRehearsalSpeechRate,
     myRoles,
     speakableLineText,
   ]);
