@@ -254,6 +254,14 @@ export const useSpeechRecognition = ({
     };
   }, [enabled, hasLineKey, startRecognition, stopRecognition]);
 
+  useEffect(() => {
+    if (!enabled || !hasLineKey || status !== 'idle' || recognitionRef.current) {
+      return;
+    }
+
+    startRecognition();
+  }, [enabled, hasLineKey, startRecognition, status]);
+
   useEffect(
     () => () => {
       stopRecognition();

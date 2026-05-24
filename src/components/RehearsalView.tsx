@@ -2249,8 +2249,6 @@ export const RehearsalView: React.FC<Props> = ({
       stopRehearsalSpeech();
       setSpeechStatusMessage(null);
       setTemporarilySuspendingAutoListen(false);
-      void stopListening();
-      void stopRecognition();
       jumpToScriptLineIndex(dueCue.targetLineIndex);
     };
 
@@ -2299,8 +2297,6 @@ export const RehearsalView: React.FC<Props> = ({
     jumpToScriptLineIndex,
     playingAudioId,
     stopSongAudio,
-    stopListening,
-    stopRecognition,
   ]);
 
   useEffect(() => {
