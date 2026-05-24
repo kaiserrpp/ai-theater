@@ -501,7 +501,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
   const [showCompatibilityInfo, setShowCompatibilityInfo] = useState(false);
-  const [isRehearsalMediaReady, setIsRehearsalMediaReady] = useState(true);
+  const [isRehearsalMediaReady, setIsRehearsalMediaReady] = useState(false);
   const [isPreparingRehearsalMedia, setIsPreparingRehearsalMedia] = useState(false);
   const [rehearsalMediaStatus, setRehearsalMediaStatus] = useState<string | null>(null);
   const [hasPreparedRehearsalMedia, setHasPreparedRehearsalMedia] = useState(false);
@@ -643,8 +643,10 @@ export const RehearsalView: React.FC<Props> = ({
     [currentMusicalNumber, currentSongAsset, effectiveRehearsalAudioKind, myRoles]
   );
   const canStartRehearsalAudio =
+    hasConfirmedRehearsalSetup &&
     isRehearsalMediaReady &&
     hasCompletedRehearsalPreflight &&
+    !rehearsalPreflightPhase &&
     listenModeSelection !== 'pending' &&
     rehearsalAudioModeSelection !== 'pending';
   const currentSongKey = isSongCue(currentLine)
@@ -666,10 +668,15 @@ export const RehearsalView: React.FC<Props> = ({
   const intelligentRecognitionLanguage = inferSpeechRecognitionLanguage(speakableLineText);
   const isIntelligentListenMode = listenModeSelection === 'intelligent';
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
+  const canRunRehearsalLinePlayback =
+    hasConfirmedRehearsalSetup &&
+    isRehearsalMediaReady &&
+    hasCompletedRehearsalPreflight &&
+    !rehearsalPreflightPhase;
   const shouldArmListeningForCurrentLine =
+    canRunRehearsalLinePlayback &&
     effectiveAutoListenEnabled &&
     !isIntelligentListenMode &&
-    isRehearsalMediaReady &&
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
@@ -677,9 +684,8 @@ export const RehearsalView: React.FC<Props> = ({
     isMyTurn &&
     speakableLineText.length > 0;
   const shouldUseIntelligentRecognition =
+    canRunRehearsalLinePlayback &&
     isIntelligentListenMode &&
-    isRehearsalMediaReady &&
-    hasCompletedRehearsalPreflight &&
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
@@ -691,8 +697,7 @@ export const RehearsalView: React.FC<Props> = ({
     (
       isMobileSpeechDevice &&
       isIntelligentListenMode &&
-      isRehearsalMediaReady &&
-      hasCompletedRehearsalPreflight &&
+      canRunRehearsalLinePlayback &&
       !isFinished &&
       Boolean(currentLine)
     );
@@ -700,8 +705,8 @@ export const RehearsalView: React.FC<Props> = ({
     activeIntelligentRecognitionLanguageRef.current = intelligentRecognitionLanguage;
   }
   const shouldKeepListeningWarmDuringSong =
+    canRunRehearsalLinePlayback &&
     effectiveAutoListenEnabled &&
-    isRehearsalMediaReady &&
     Boolean(currentLine) &&
     isSongCue(currentLine);
   const recognitionLineKey =
@@ -1855,6 +1860,10 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    if (!canRunRehearsalLinePlayback) {
+      return;
+    }
+
     stopRehearsalSpeech();
     stopStandaloneSongAudio();
     let isCancelled = false;
@@ -1952,6 +1961,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, [
     advanceLine,
     autoListenEnabled,
+    canRunRehearsalLinePlayback,
     currentLine,
     temporarilySuspendingAutoListen,
     isFinished,
@@ -1981,6 +1991,8 @@ export const RehearsalView: React.FC<Props> = ({
 
   const prepareRehearsalMedia = useCallback(async (phase = rehearsalPreflightPhase ?? 'auto-initial') => {
     const shouldUseAutoListen = phase !== 'manual-check';
+    stopRehearsalSpeech();
+    stopStandaloneSongAudio();
     const primeSongPlaybackPromise = primeSongPlayback();
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
@@ -2061,9 +2073,12 @@ export const RehearsalView: React.FC<Props> = ({
     rehearsalPreflightPhase,
     startListening,
     stopListening,
+    stopStandaloneSongAudio,
   ]);
 
   const calibrateRehearsalMicrophone = useCallback(async () => {
+    stopRehearsalSpeech();
+    stopStandaloneSongAudio();
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false);
@@ -2155,6 +2170,7 @@ export const RehearsalView: React.FC<Props> = ({
     releaseListening,
     resetMicrophoneCalibration,
     startListening,
+    stopStandaloneSongAudio,
     listenModeSelection,
     markSessionPreparationReady,
   ]);
