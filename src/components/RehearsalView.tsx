@@ -15,6 +15,7 @@ import {
 import { Dialogue } from '../types/script';
 import {
   MusicalTimelineCue,
+  MusicalTimelineCueTargetKind,
   SharedMusicalNumberAsset,
   SharedSongAsset,
   SharedSongAudioAsset,
@@ -650,6 +651,56 @@ export const RehearsalView: React.FC<Props> = ({
     listenModeSelection !== 'pending' &&
     rehearsalAudioModeSelection !== 'pending';
   const isCurrentLineSongCue = isSongCue(currentLine);
+  const currentMusicalBlockKind = useMemo<MusicalTimelineCueTargetKind | null>(() => {
+    const activePlayback = activeAudioPlaybackRef.current;
+
+    if (
+      !playingAudioId ||
+      !currentMusicalNumber ||
+      activePlayback?.kind !== 'musical-number' ||
+      activePlayback.ownerId !== currentMusicalNumber.id ||
+      currentLineIndexInScript < currentMusicalNumber.startLineIndex ||
+      currentLineIndexInScript > currentMusicalNumber.endLineIndex
+    ) {
+      return null;
+    }
+
+    if (isCurrentLineSongCue) {
+      return 'song';
+    }
+
+    const firstMusicalLine = guion[currentMusicalNumber.startLineIndex];
+    let activeKind: MusicalTimelineCueTargetKind = isSongCue(firstMusicalLine)
+      ? 'song'
+      : 'dialogue';
+    let activeBoundaryLineIndex = currentMusicalNumber.startLineIndex;
+
+    activePlayback.timelineCues.forEach((cue) => {
+      const cueIsInsideCurrentNumber =
+        cue.targetLineIndex >= currentMusicalNumber.startLineIndex &&
+        cue.targetLineIndex <= currentMusicalNumber.endLineIndex;
+
+      if (
+        !cueIsInsideCurrentNumber ||
+        cue.targetLineIndex > currentLineIndexInScript ||
+        cue.targetLineIndex < activeBoundaryLineIndex
+      ) {
+        return;
+      }
+
+      activeKind = cue.targetKind;
+      activeBoundaryLineIndex = cue.targetLineIndex;
+    });
+
+    return activeKind;
+  }, [
+    currentLineIndexInScript,
+    currentMusicalNumber,
+    guion,
+    isCurrentLineSongCue,
+    playingAudioId,
+  ]);
+  const isCurrentMusicalSongBlock = isCurrentLineSongCue || currentMusicalBlockKind === 'song';
   const currentSongKey = isCurrentLineSongCue
     ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
     : null;
@@ -681,7 +732,7 @@ export const RehearsalView: React.FC<Props> = ({
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
-    !isCurrentLineSongCue &&
+    !isCurrentMusicalSongBlock &&
     isMyTurn &&
     speakableLineText.length > 0;
   const shouldUseIntelligentRecognition =
@@ -690,7 +741,7 @@ export const RehearsalView: React.FC<Props> = ({
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
-    !isCurrentLineSongCue &&
+    !isCurrentMusicalSongBlock &&
     isMyTurn &&
     speakableLineText.length > 0;
   const shouldKeepIntelligentRecognitionWarm =
@@ -701,7 +752,7 @@ export const RehearsalView: React.FC<Props> = ({
       canRunRehearsalLinePlayback &&
       !isFinished &&
       Boolean(currentLine) &&
-      !isCurrentLineSongCue
+      !isCurrentMusicalSongBlock
     );
   if (shouldUseIntelligentRecognition) {
     activeIntelligentRecognitionLanguageRef.current = intelligentRecognitionLanguage;
@@ -710,7 +761,7 @@ export const RehearsalView: React.FC<Props> = ({
     canRunRehearsalLinePlayback &&
     effectiveAutoListenEnabled &&
     Boolean(currentLine) &&
-    isCurrentLineSongCue;
+    isCurrentMusicalSongBlock;
   const recognitionLineKey =
     currentLineVariantKey ?? (shouldKeepIntelligentRecognitionWarm ? `warm:${currentIndex}` : null);
 
@@ -1379,11 +1430,21 @@ export const RehearsalView: React.FC<Props> = ({
       return null;
     }
 
-    if (songAudioContextRef.current && songAudioGainRef.current) {
+    if (
+      songAudioContextRef.current &&
+      songAudioGainRef.current &&
+      songAudioContextRef.current.state !== 'closed'
+    ) {
       return {
         context: songAudioContextRef.current,
         gainNode: songAudioGainRef.current,
       };
+    }
+
+    if (songAudioContextRef.current?.state === 'closed') {
+      songAudioContextRef.current = null;
+      songAudioSourceRef.current = null;
+      songAudioGainRef.current = null;
     }
 
     const AudioContextConstructor = getBrowserAudioContextConstructor();
@@ -2517,7 +2578,7 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
-    if (isSongCue(currentLine)) {
+    if (isCurrentMusicalSongBlock) {
       setSongAudioVolume(1);
       return;
     }
@@ -2528,7 +2589,7 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     setSongAudioVolume(0.34);
-  }, [currentLine, currentMusicalNumber?.id, isMyTurn, setSongAudioVolume]);
+  }, [currentMusicalNumber?.id, isCurrentMusicalSongBlock, isMyTurn, setSongAudioVolume]);
 
   useEffect(() => {
     if (!canStartRehearsalAudio) {
