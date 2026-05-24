@@ -52,6 +52,7 @@ interface UseSilenceAdvanceResult {
   resetMicrophoneCalibration: () => void;
   startListening: () => Promise<void>;
   stopListening: () => Promise<void>;
+  releaseListeningInput: () => Promise<void>;
   releaseListening: () => Promise<void>;
 }
 
@@ -356,7 +357,7 @@ export const useSilenceAdvance = ({
     setListeningError(null);
   }, [getReusableStream, isListeningSupported, resetTrackingState, teardownAudioGraph]);
 
-  const releaseListening = useCallback(async () => {
+  const releaseListeningInput = useCallback(async () => {
     requestVersionRef.current += 1;
     await teardownAudioGraph();
 
@@ -368,10 +369,14 @@ export const useSilenceAdvance = ({
 
     processedLineKeyRef.current = null;
     resetTrackingState();
-    resetMicrophoneCalibration();
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
     setListeningError(null);
-  }, [isListeningSupported, resetMicrophoneCalibration, resetTrackingState, teardownAudioGraph]);
+  }, [isListeningSupported, resetTrackingState, teardownAudioGraph]);
+
+  const releaseListening = useCallback(async () => {
+    await releaseListeningInput();
+    resetMicrophoneCalibration();
+  }, [releaseListeningInput, resetMicrophoneCalibration]);
 
   useEffect(() => () => {
     void releaseListening();
@@ -837,6 +842,7 @@ export const useSilenceAdvance = ({
     resetMicrophoneCalibration,
     startListening,
     stopListening,
+    releaseListeningInput,
     releaseListening,
   };
 };

@@ -649,7 +649,8 @@ export const RehearsalView: React.FC<Props> = ({
     !rehearsalPreflightPhase &&
     listenModeSelection !== 'pending' &&
     rehearsalAudioModeSelection !== 'pending';
-  const currentSongKey = isSongCue(currentLine)
+  const isCurrentLineSongCue = isSongCue(currentLine);
+  const currentSongKey = isCurrentLineSongCue
     ? `${currentIndex}:${currentSongAsset?.id ?? currentLine?.songTitle ?? 'song'}`
     : null;
   const currentMusicalNumberKey = currentMusicalNumber
@@ -680,7 +681,7 @@ export const RehearsalView: React.FC<Props> = ({
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
-    !isSongCue(currentLine) &&
+    !isCurrentLineSongCue &&
     isMyTurn &&
     speakableLineText.length > 0;
   const shouldUseIntelligentRecognition =
@@ -689,7 +690,7 @@ export const RehearsalView: React.FC<Props> = ({
     !isFinished &&
     Boolean(currentLine) &&
     !isSceneMarker(currentLine) &&
-    !isSongCue(currentLine) &&
+    !isCurrentLineSongCue &&
     isMyTurn &&
     speakableLineText.length > 0;
   const shouldKeepIntelligentRecognitionWarm =
@@ -699,16 +700,17 @@ export const RehearsalView: React.FC<Props> = ({
       isIntelligentListenMode &&
       canRunRehearsalLinePlayback &&
       !isFinished &&
-      Boolean(currentLine)
+      Boolean(currentLine) &&
+      !isCurrentLineSongCue
     );
   if (shouldUseIntelligentRecognition) {
     activeIntelligentRecognitionLanguageRef.current = intelligentRecognitionLanguage;
   }
-  const shouldKeepListeningWarmDuringSong =
+  const shouldSuspendListeningDuringSong =
     canRunRehearsalLinePlayback &&
     effectiveAutoListenEnabled &&
     Boolean(currentLine) &&
-    isSongCue(currentLine);
+    isCurrentLineSongCue;
   const recognitionLineKey =
     currentLineVariantKey ?? (shouldKeepIntelligentRecognitionWarm ? `warm:${currentIndex}` : null);
 
@@ -755,6 +757,7 @@ export const RehearsalView: React.FC<Props> = ({
     resetMicrophoneCalibration,
     startListening,
     stopListening,
+    releaseListeningInput,
     releaseListening,
   } = useSilenceAdvance({
     enabledForCurrentLine: shouldArmListeningForCurrentLine,
@@ -1744,7 +1747,10 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
-    if (shouldKeepListeningWarmDuringSong) {
+    if (shouldSuspendListeningDuringSong) {
+      if (isListeningActive || listeningStatus === 'requesting') {
+        void releaseListeningInput();
+      }
       return;
     }
 
@@ -1755,8 +1761,9 @@ export const RehearsalView: React.FC<Props> = ({
     effectiveAutoListenEnabled,
     isListeningActive,
     listeningStatus,
+    releaseListeningInput,
     rehearsalPreflightPhase,
-    shouldKeepListeningWarmDuringSong,
+    shouldSuspendListeningDuringSong,
     shouldArmListeningForCurrentLine,
     startListening,
     stopListening,
