@@ -81,8 +81,8 @@ const MOBILE_MIN_TIMED_REHEARSAL_SPEECH_RATE = 0.78;
 const DESKTOP_MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.55;
 const MOBILE_MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.18;
 const TIMELINE_CUE_SAFETY_MS = 260;
-const APP_LINE_ADVANCE_DELAY_MS = 500;
-const USER_LINE_RESPONSE_BUFFER_MS = 900;
+const APP_LINE_ADVANCE_DELAY_MS = 220;
+const USER_LINE_RESPONSE_BUFFER_MS = 550;
 const APP_SPEECH_WORDS_PER_SECOND = 2.65;
 const USER_SPEECH_WORDS_PER_SECOND = 2.35;
 const REHEARSAL_SESSION_PREPARATION_PREFIX = 'teatro_ia_rehearsal_session_preparation:';
@@ -676,10 +676,7 @@ export const RehearsalView: React.FC<Props> = ({
       isRehearsalMediaReady &&
       hasCompletedRehearsalPreflight &&
       !isFinished &&
-      Boolean(currentLine) &&
-      !isSceneMarker(currentLine) &&
-      !isSongCue(currentLine) &&
-      speakableLineText.length > 0
+      Boolean(currentLine)
     );
   if (shouldUseIntelligentRecognition) {
     activeIntelligentRecognitionLanguageRef.current = intelligentRecognitionLanguage;
@@ -689,6 +686,8 @@ export const RehearsalView: React.FC<Props> = ({
     isRehearsalMediaReady &&
     Boolean(currentLine) &&
     isSongCue(currentLine);
+  const recognitionLineKey =
+    currentLineVariantKey ?? (shouldKeepIntelligentRecognitionWarm ? `warm:${currentIndex}` : null);
 
   const isAutoplayBlockedError = useCallback((error: unknown) => {
     const errorName =
@@ -752,7 +751,7 @@ export const RehearsalView: React.FC<Props> = ({
   } = useSpeechRecognition({
     enabled: shouldKeepIntelligentRecognitionWarm,
     lang: activeIntelligentRecognitionLanguageRef.current,
-    lineKey: currentLineVariantKey,
+    lineKey: recognitionLineKey,
   });
 
   const intelligentLineMatch = useMemo(
@@ -1120,7 +1119,7 @@ export const RehearsalView: React.FC<Props> = ({
       }
       resetSpeechRecognitionTranscript();
       advanceLine();
-    }, 260);
+    }, 90);
 
     return () => {
       clearTimeout(autoAdvanceTimeout);
@@ -1765,7 +1764,7 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     if (!speakableLineText) {
-      advanceTimeout = setTimeout(advanceLine, 200);
+      advanceTimeout = setTimeout(advanceLine, 80);
       return () => {
         if (advanceTimeout) {
           clearTimeout(advanceTimeout);

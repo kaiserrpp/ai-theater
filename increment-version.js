@@ -14,13 +14,10 @@ function updateJsonVersion(fileName) {
   const content = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   const currentVersion = fileName === 'app.json' ? content.expo.version : content.version;
   const match = typeof currentVersion === 'string' ? currentVersion.match(VERSION_PATTERN) : null;
-  const [, vYear = '', vMonth = '', vPatch = '000'] = match || [];
+  const [, , , vPatch = '000'] = match || [];
 
-  let newPatch = INITIAL_INCREMENT;
-  if (vYear === year && vMonth === month) {
-    const nextNumber = parseInt(vPatch, 10) + 1;
-    newPatch = nextNumber.toString().padStart(3, '0');
-  }
+  const nextNumber = match ? parseInt(vPatch, 10) + 1 : parseInt(INITIAL_INCREMENT, 10);
+  const newPatch = nextNumber.toString().padStart(3, '0');
 
   const newVersion = `${year}.${month}.${newPatch}`;
 

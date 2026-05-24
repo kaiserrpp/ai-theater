@@ -78,6 +78,7 @@ export const useSpeechRecognition = ({
   const committedTranscriptRef = useRef('');
   const ignoredResultCountRef = useRef(0);
   const latestResultCountRef = useRef(0);
+  const languageRef = useRef(lang);
   const [status, setStatus] = useState<SpeechRecognitionStatus>(
     SpeechRecognitionConstructor ? 'idle' : 'unsupported'
   );
@@ -88,6 +89,7 @@ export const useSpeechRecognition = ({
 
   const isSupported = Boolean(SpeechRecognitionConstructor);
   const hasLineKey = Boolean(lineKey);
+  languageRef.current = lang;
 
   const clearRestartTimeout = useCallback(() => {
     if (restartTimeoutRef.current) {
@@ -143,7 +145,7 @@ export const useSpeechRecognition = ({
     const recognition = new SpeechRecognitionConstructor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = lang;
+    recognition.lang = languageRef.current;
     recognition.maxAlternatives = 1;
     recognition.onstart = () => {
       setStatus('listening');
@@ -220,7 +222,7 @@ export const useSpeechRecognition = ({
       setError(errorMessage);
       setStatus('error');
     }
-  }, [SpeechRecognitionConstructor, clearRestartTimeout, isSupported, lang]);
+  }, [SpeechRecognitionConstructor, clearRestartTimeout, isSupported]);
 
   const restartRecognition = useCallback(() => {
     stopRecognition();

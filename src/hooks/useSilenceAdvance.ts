@@ -63,9 +63,9 @@ const MIN_HEALTHY_VOICE_TO_NOISE_RATIO = 1.8;
 const VOICE_CALIBRATION_MAX_WAIT_MS = 10000;
 const VOICE_CALIBRATION_MIN_SIGNAL_FACTOR = 1.04;
 const VOICE_CALIBRATION_MIN_DELTA = 0.0006;
-const SILENCE_MS = 1000;
-const LINE_PREP_MS = 280;
-const VOICE_CONFIRM_MS = 140;
+const SILENCE_MS = 650;
+const LINE_PREP_MS = 140;
+const VOICE_CONFIRM_MS = 90;
 
 type CalibrationRun = {
   mode: 'silence' | 'voice';
