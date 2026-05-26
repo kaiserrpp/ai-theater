@@ -26,11 +26,11 @@ import {
 } from '../types/sharedScript';
 import {
   INTELLIGENT_AUTO_ADVANCE_THRESHOLD,
+  type AutomaticLineMatchReason,
   getAutomaticLineMatchReason,
   getGoodLineCommandAcceptedText,
   hashLineText,
   inferSpeechRecognitionLanguage,
-  isSafeAutomaticLineMatch,
   isNextLineCommand,
   scoreLineMatch,
 } from '../utils/lineMatching';
@@ -84,6 +84,11 @@ const MOBILE_MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.18;
 const TIMELINE_CUE_SAFETY_MS = 260;
 const APP_LINE_ADVANCE_DELAY_MS = 220;
 const USER_LINE_RESPONSE_BUFFER_MS = 550;
+const INTERIM_SAFE_AUTO_ADVANCE_REASONS = new Set<AutomaticLineMatchReason>([
+  'global_score',
+  'high_final_confidence',
+  'strong_coverage',
+]);
 const APP_SPEECH_WORDS_PER_SECOND = 2.65;
 const USER_SPEECH_WORDS_PER_SECOND = 2.35;
 const REHEARSAL_SESSION_PREPARATION_PREFIX = 'teatro_ia_rehearsal_session_preparation:';
@@ -1027,10 +1032,15 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   const handleRetryIntelligentLine = useCallback(() => {
-    recordIntelligentFeedback('reintentar');
-    setFeedbackStatusMessage('Resultado guardado. Reintentamos esta linea.');
+    if (speechRecognitionTranscript.trim()) {
+      recordIntelligentFeedback('reintentar');
+      setFeedbackStatusMessage('Resultado guardado. Reintentamos esta linea.');
+    } else {
+      setFeedbackStatusMessage('Reiniciando la escucha de esta linea.');
+    }
+
     restartRecognition();
-  }, [recordIntelligentFeedback, restartRecognition]);
+  }, [recordIntelligentFeedback, restartRecognition, speechRecognitionTranscript]);
 
   const handleSkipIntelligentLine = useCallback(() => {
     recordIntelligentFeedback('siguiente_linea');
@@ -1160,8 +1170,18 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    const automaticReason = getAutomaticLineMatchReason(
+      speakableLineText,
+      speechRecognitionTranscript,
+      intelligentLineMatch
+    );
     const hasBlockingInterimTranscript =
-      speechRecognitionInterimTranscript.trim() && intelligentLineMatch.score < 0.95;
+      speechRecognitionInterimTranscript.trim() &&
+      intelligentLineMatch.score < 0.95 &&
+      (
+        !automaticReason ||
+        !INTERIM_SAFE_AUTO_ADVANCE_REASONS.has(automaticReason)
+      );
 
     if (
       !shouldUseIntelligentRecognition ||
@@ -1170,12 +1190,12 @@ export const RehearsalView: React.FC<Props> = ({
       currentLineIndexInScript < 0 ||
       hasBlockingInterimTranscript ||
       !speechRecognitionTranscript.trim() ||
-      !isSafeAutomaticLineMatch(speakableLineText, speechRecognitionTranscript, intelligentLineMatch)
+      !automaticReason
     ) {
       return;
     }
 
-    const autoAdvanceKey = `${currentLineVariantKey}:${speechRecognitionTranscript}:${intelligentLineMatch.referenceIndex}`;
+    const autoAdvanceKey = `${currentLineVariantKey}:${speechRecognitionTranscript}:${intelligentLineMatch.referenceIndex}:${automaticReason}`;
     if (processedAutoAdvanceLineKeyRef.current === autoAdvanceKey) {
       return;
     }
@@ -3046,6 +3066,8 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     const hasTranscript = speechRecognitionTranscript.trim().length > 0;
+    const canRetryLine =
+      hasTranscript || speechRecognitionStatus === 'error' || speechRecognitionStatus === 'idle';
     const canRejectAutoAdvance =
       pendingInvalidAutoAdvance?.lineIndex === currentLineIndexInScript;
     const scorePercent = Math.round(intelligentLineMatch.score * 100);
@@ -3171,9 +3193,13 @@ export const RehearsalView: React.FC<Props> = ({
             <Text style={styles.intelligentButtonText}>Linea buena</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.intelligentButton, styles.intelligentRetryButton, !hasTranscript && styles.buttonDisabled]}
+            style={[
+              styles.intelligentButton,
+              styles.intelligentRetryButton,
+              !canRetryLine && styles.buttonDisabled,
+            ]}
             onPress={handleRetryIntelligentLine}
-            disabled={!hasTranscript}
+            disabled={!canRetryLine}
           >
             <Text style={styles.intelligentRetryText}>Reintentar</Text>
           </TouchableOpacity>

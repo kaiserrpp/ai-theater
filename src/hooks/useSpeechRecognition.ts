@@ -121,6 +121,25 @@ export const useSpeechRecognition = ({
     setStatus(isSupported ? 'idle' : 'unsupported');
   }, [clearRestartTimeout, isSupported]);
 
+  const abortRecognitionForRestart = useCallback(() => {
+    const recognition = recognitionRef.current;
+    if (!recognition) {
+      return;
+    }
+
+    try {
+      recognition.onend = null;
+      recognition.onerror = null;
+      recognition.onresult = null;
+      recognition.onstart = null;
+      recognition.abort();
+    } catch {
+      // Some browsers throw if recognition is already stopped.
+    }
+
+    recognitionRef.current = null;
+  }, []);
+
   const resetTranscript = useCallback(() => {
     transcriptRef.current = '';
     committedTranscriptRef.current = '';
@@ -134,6 +153,10 @@ export const useSpeechRecognition = ({
   const startRecognition = useCallback(() => {
     if (!SpeechRecognitionConstructor) {
       setStatus('unsupported');
+      return;
+    }
+
+    if (recognitionRef.current) {
       return;
     }
 
@@ -217,6 +240,7 @@ export const useSpeechRecognition = ({
     try {
       recognition.start();
     } catch (startError) {
+      recognitionRef.current = null;
       const errorMessage =
         startError instanceof Error ? startError.message : 'No se pudo iniciar el reconocimiento.';
       setError(errorMessage);
@@ -225,15 +249,26 @@ export const useSpeechRecognition = ({
   }, [SpeechRecognitionConstructor, clearRestartTimeout, isSupported]);
 
   const restartRecognition = useCallback(() => {
-    stopRecognition();
+    clearRestartTimeout();
+    shouldListenRef.current = true;
+    abortRecognitionForRestart();
     resetTranscript();
+    setStatus(isSupported ? 'idle' : 'unsupported');
 
-    setTimeout(() => {
+    restartTimeoutRef.current = setTimeout(() => {
+      restartTimeoutRef.current = null;
       if (shouldListenRef.current || enabled) {
         startRecognition();
       }
-    }, 120);
-  }, [enabled, resetTranscript, startRecognition, stopRecognition]);
+    }, 320);
+  }, [
+    abortRecognitionForRestart,
+    clearRestartTimeout,
+    enabled,
+    isSupported,
+    resetTranscript,
+    startRecognition,
+  ]);
 
   useEffect(() => {
     resetTranscript();
@@ -255,7 +290,13 @@ export const useSpeechRecognition = ({
   }, [enabled, hasLineKey, startRecognition, stopRecognition]);
 
   useEffect(() => {
-    if (!enabled || !hasLineKey || status !== 'idle' || recognitionRef.current) {
+    if (
+      !enabled ||
+      !hasLineKey ||
+      status !== 'idle' ||
+      recognitionRef.current ||
+      restartTimeoutRef.current
+    ) {
       return;
     }
 

@@ -841,12 +841,16 @@ export const getGoodLineCommandAcceptedText = (heardText: string) => {
   const normalizedText = normalizeSpeechText(heardText);
   const tokens = normalizedText.split(' ').filter(Boolean);
 
-  if (!tokens.length || tokens.length > 40) {
+  if (!tokens.length) {
     return null;
   }
 
-  if (commandMatches(normalizedText, GOOD_LINE_COMMANDS)) {
+  if (tokens.length <= 6 && commandMatches(normalizedText, GOOD_LINE_COMMANDS)) {
     return '';
+  }
+
+  if (tokens.length > 120) {
+    return null;
   }
 
   return splitTrailingCommand(heardText, GOOD_LINE_COMMANDS);
