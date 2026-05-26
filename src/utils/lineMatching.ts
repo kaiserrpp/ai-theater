@@ -212,6 +212,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   medalla: 'medda',
   hiciésemos: 'hacer',
   hiciéramos: 'hacer',
+  news: 'newsies',
   newies: 'newsies',
   newsis: 'newsies',
   newsys: 'newsies',
@@ -270,9 +271,12 @@ const PHRASE_ALIASES: [RegExp, string][] = [
   [/\ble\s+importa\s+si\b/g, ' podriamos '],
   [/\bme\s+da\s+larkin\b/g, ' medda larkin '],
   [/\blamento\s+mucho\s+lo\s+de\b/g, ' triste '],
+  [/\bnew\s+seis\b/g, ' newsies '],
+  [/\bno\s+hubiera\s+ocurrido\s+nunca\b/g, ' nunca hubiera pasado '],
   [/\bnos\s+vamos\s+a\b/g, ' iremos '],
   [/\bnueva york\b/g, ' ny '],
   [/\bpor\s+que\s+no\s+nos\b/g, ' propuesta nos '],
+  [/\bque\s+tal\s+(le|te)\s+fue\b/g, ' como te fue '],
   [/\bque\s+os\s+parece\s+si\b/g, ' propuesta '],
   [/\bque\s+tal\s+si\b/g, ' propuesta '],
   [/\bsanta fe\b/g, ' santafe '],
@@ -281,6 +285,7 @@ const PHRASE_ALIASES: [RegExp, string][] = [
   [/\bsetenta\s+treinta\b/g, ' 70 30 '],
   [/\bsesenta\s+cuarenta\b/g, ' 60 40 '],
   [/\bsi\s+asi\s+es\b/g, ' bien '],
+  [/\bsi\s+claro\b/g, ' bien '],
   [/\bsi\s+claro\s+tiene\s+sentido\b/g, ' sentido '],
   [/\btal\s+vez\b/g, ' quiza '],
   [/\bno\s+esta\s+mal\b/g, ' suena bien '],
@@ -413,6 +418,10 @@ const EQUIVALENT_LINE_REFERENCES: {
   references: string[];
 }[] = [
   {
+    expectedPattern: /\btengo.*spot.*impresionado.*verdad\b/,
+    references: ['La verdad que quedo bastante impresionado verdad'],
+  },
+  {
     expectedPattern: /\bnewsies\s+ataquenlos\b/,
     references: ['Music, a por ellos', 'Newsies, a por ellos'],
   },
@@ -463,6 +472,10 @@ const EQUIVALENT_LINE_REFERENCES: {
   {
     expectedPattern: /\bahorra\s+aliento.*inutil\b/,
     references: ['Ahorrate el aliento. Es inutil'],
+  },
+  {
+    expectedPattern: /\bdave.*cabeza.*paliza.*pulitzer.*poli.*matones\b/,
+    references: ['Ellos nos dieron la paliza. Llamo a la poli y matones'],
   },
 ];
 
