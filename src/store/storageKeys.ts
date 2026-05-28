@@ -7,3 +7,4 @@ export const REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY = '@teatro_ia_rehearsal_a
 export const INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX = '@teatro_ia_line_variants:';
 export const REHEARSAL_LISTEN_MODE_STORAGE_KEY = '@teatro_ia_rehearsal_listen_mode';
 export const REHEARSAL_AUDIO_MODE_STORAGE_KEY = '@teatro_ia_rehearsal_audio_mode';
+export const REHEARSAL_AUDIO_SELECTION_STORAGE_PREFIX = '@teatro_ia_rehearsal_audio_selection:';
