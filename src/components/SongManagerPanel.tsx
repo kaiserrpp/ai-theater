@@ -358,6 +358,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [guideRoles, setGuideRoles] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadStatusMessage, setUploadStatusMessage] = useState<string | null>(null);
   const [managerError, setManagerError] = useState<string | null>(null);
   const [isSongPickerVisible, setIsSongPickerVisible] = useState(false);
   const [isUploadFormVisible, setIsUploadFormVisible] = useState(false);
@@ -584,6 +585,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setAudioKind(DEFAULT_UPLOAD_KIND);
     setGuideRoles([]);
     setUploadProgress(null);
+    setUploadStatusMessage(null);
     setManagerError(null);
     setIsUploadFormVisible(false);
     setEditingAudioId(null);
@@ -594,6 +596,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
     setMusicalNumberGuideRoles([]);
     setMusicalNumberUploadProgress(null);
+    setUploadStatusMessage(null);
     setEditingMusicalNumberAudioId(null);
     setIsMusicalNumberAudioFormVisible(false);
     setSyncingMusicalNumberAudioId(null);
@@ -1415,6 +1418,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setAudioKind(audio.kind);
     setGuideRoles(audio.guideRoles);
     setUploadProgress(null);
+    setUploadStatusMessage(null);
     setManagerError(null);
     setIsUploadFormVisible(true);
   };
@@ -1435,6 +1439,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     const file = await resolveAssetUploadFile(result.assets[0]);
     setUploadProgress(0);
+    setUploadStatusMessage('Subiendo archivo al almacenamiento...');
     const uploadedSource = await uploadSharedSongAudio({
       shareId: sharedScript.shareId,
       targetId: selectedSong.id,
@@ -1445,13 +1450,15 @@ export const SongManagerPanel: React.FC<Props> = ({
     });
 
     if (!isVideoAsset(file)) {
+      setUploadProgress(null);
+      setUploadStatusMessage('Audio subido. Guardando en la obra...');
       return uploadedSource;
     }
 
     setUploadProgress(null);
-    setManagerError('Convirtiendo el video a audio en servidor...');
+    setUploadStatusMessage('Video subido. Extrayendo el audio en servidor...');
 
-    return extractSharedSongAudioFromVideo({
+    const extractedAudio = await extractSharedSongAudioFromVideo({
       shareId: sharedScript.shareId,
       targetId: selectedSong.id,
       targetType: 'song',
@@ -1461,6 +1468,9 @@ export const SongManagerPanel: React.FC<Props> = ({
       sourceFileName: uploadedSource.fileName,
       sourceContentType: uploadedSource.contentType,
     });
+
+    setUploadStatusMessage('Audio extraido. Guardando en la obra...');
+    return extractedAudio;
   };
 
   const handleUploadAudio = async () => {
@@ -1476,11 +1486,14 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
 
     setManagerError(null);
+    setUploadStatusMessage(null);
     setIsUploading(true);
 
     try {
       const uploadedAudio = await pickAndUploadAudioFile();
       if (!uploadedAudio) {
+        setUploadProgress(null);
+        setUploadStatusMessage(null);
         return;
       }
 
@@ -1500,6 +1513,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       await refreshSharedManifest(manifest);
       resetAudioForm();
     } catch (error) {
+      setUploadProgress(null);
+      setUploadStatusMessage(null);
       setManagerError(error instanceof Error ? error.message : 'No se pudo subir el audio.');
     } finally {
       setIsUploading(false);
@@ -1520,6 +1535,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     setIsSavingEdit(true);
     setManagerError(null);
+    setUploadStatusMessage(null);
 
     try {
       const manifest = await updateSharedSongAudio({
@@ -1561,6 +1577,8 @@ export const SongManagerPanel: React.FC<Props> = ({
     try {
       const uploadedAudio = await pickAndUploadAudioFile();
       if (!uploadedAudio) {
+        setUploadProgress(null);
+        setUploadStatusMessage(null);
         return;
       }
 
@@ -1581,6 +1599,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       await refreshSharedManifest(manifest);
       resetAudioForm();
     } catch (error) {
+      setUploadProgress(null);
+      setUploadStatusMessage(null);
       setManagerError(
         error instanceof Error ? error.message : 'No se pudo reemplazar el audio.'
       );
@@ -1765,6 +1785,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     const file = await resolveAssetUploadFile(result.assets[0]);
     setMusicalNumberUploadProgress(0);
+    setUploadStatusMessage('Subiendo archivo al almacenamiento...');
     const uploadedSource = await uploadSharedSongAudio({
       shareId: sharedScript.shareId,
       targetId: selectedMusicalNumber.id,
@@ -1775,13 +1796,15 @@ export const SongManagerPanel: React.FC<Props> = ({
     });
 
     if (!isVideoAsset(file)) {
+      setMusicalNumberUploadProgress(null);
+      setUploadStatusMessage('Audio subido. Guardando en la obra...');
       return uploadedSource;
     }
 
     setMusicalNumberUploadProgress(null);
-    setManagerError('Convirtiendo el video a audio en servidor...');
+    setUploadStatusMessage('Video subido. Extrayendo el audio en servidor...');
 
-    return extractSharedSongAudioFromVideo({
+    const extractedAudio = await extractSharedSongAudioFromVideo({
       shareId: sharedScript.shareId,
       targetId: selectedMusicalNumber.id,
       targetType: 'musical-number',
@@ -1791,6 +1814,9 @@ export const SongManagerPanel: React.FC<Props> = ({
       sourceFileName: uploadedSource.fileName,
       sourceContentType: uploadedSource.contentType,
     });
+
+    setUploadStatusMessage('Audio extraido. Guardando en la obra...');
+    return extractedAudio;
   };
 
   const startEditingMusicalNumberAudio = (audio: SharedSongAudioAsset) => {
@@ -1799,6 +1825,7 @@ export const SongManagerPanel: React.FC<Props> = ({
     setMusicalNumberAudioKind(audio.kind);
     setMusicalNumberGuideRoles(audio.guideRoles);
     setMusicalNumberUploadProgress(null);
+    setUploadStatusMessage(null);
     setManagerError(null);
     setIsMusicalNumberAudioFormVisible(true);
   };
@@ -1819,11 +1846,14 @@ export const SongManagerPanel: React.FC<Props> = ({
     }
 
     setManagerError(null);
+    setUploadStatusMessage(null);
     setIsMusicalNumberUploading(true);
 
     try {
       const uploadedAudio = await pickAndUploadMusicalNumberAudioFile();
       if (!uploadedAudio) {
+        setMusicalNumberUploadProgress(null);
+        setUploadStatusMessage(null);
         return;
       }
 
@@ -1848,6 +1878,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       await refreshSharedManifest(manifest);
       resetMusicalNumberAudioForm();
     } catch (error) {
+      setMusicalNumberUploadProgress(null);
+      setUploadStatusMessage(null);
       setManagerError(error instanceof Error ? error.message : 'No se pudo subir el audio.');
     } finally {
       setIsMusicalNumberUploading(false);
@@ -1871,6 +1903,7 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     setIsSavingMusicalNumberAudio(true);
     setManagerError(null);
+    setUploadStatusMessage(null);
 
     try {
       const manifest = await updateSharedMusicalNumberAudio({
@@ -1920,6 +1953,8 @@ export const SongManagerPanel: React.FC<Props> = ({
     try {
       const uploadedAudio = await pickAndUploadMusicalNumberAudioFile();
       if (!uploadedAudio) {
+        setMusicalNumberUploadProgress(null);
+        setUploadStatusMessage(null);
         return;
       }
 
@@ -1945,6 +1980,8 @@ export const SongManagerPanel: React.FC<Props> = ({
       await refreshSharedManifest(manifest);
       resetMusicalNumberAudioForm();
     } catch (error) {
+      setMusicalNumberUploadProgress(null);
+      setUploadStatusMessage(null);
       setManagerError(
         error instanceof Error ? error.message : 'No se pudo reemplazar el audio.'
       );
@@ -2975,9 +3012,10 @@ export const SongManagerPanel: React.FC<Props> = ({
                 );
               })}
             </View>
-            {musicalNumberUploadProgress !== null ? (
+            {uploadStatusMessage || musicalNumberUploadProgress !== null ? (
               <Text style={styles.progressText}>
-                Subiendo audio... {musicalNumberUploadProgress}%
+                {uploadStatusMessage ?? 'Subiendo audio...'}
+                {musicalNumberUploadProgress !== null ? ` ${musicalNumberUploadProgress}%` : ''}
               </Text>
             ) : null}
             {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
@@ -3938,8 +3976,11 @@ export const SongManagerPanel: React.FC<Props> = ({
                           })}
                         </View>
 
-                        {uploadProgress !== null ? (
-                          <Text style={styles.progressText}>Subiendo audio... {uploadProgress}%</Text>
+                        {uploadStatusMessage || uploadProgress !== null ? (
+                          <Text style={styles.progressText}>
+                            {uploadStatusMessage ?? 'Subiendo audio...'}
+                            {uploadProgress !== null ? ` ${uploadProgress}%` : ''}
+                          </Text>
                         ) : null}
                         {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
 

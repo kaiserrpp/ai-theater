@@ -6,6 +6,8 @@ export interface SharedSongUploadResult {
   size: number | null;
 }
 
+export const MAX_SHARED_SONG_UPLOAD_BYTES = 100 * 1024 * 1024;
+
 interface UploadSharedSongAudioInput {
   shareId: string;
   targetId: string;
