@@ -6,6 +6,8 @@ const {
   parseJsonBody,
 } = require('./_shared');
 
+const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+
 module.exports = async (request, response) => {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -44,7 +46,7 @@ module.exports = async (request, response) => {
 
         return {
           allowedContentTypes: ['audio/*', 'video/*'],
-          maximumSizeInBytes: 100 * 1024 * 1024,
+          maximumSizeInBytes: MAX_UPLOAD_BYTES,
           allowOverwrite: true,
           tokenPayload: JSON.stringify(metadata),
         };

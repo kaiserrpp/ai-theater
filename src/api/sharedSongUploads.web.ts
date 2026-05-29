@@ -1,8 +1,8 @@
-export const MAX_SHARED_SONG_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_SHARED_SONG_UPLOAD_BYTES = 512 * 1024 * 1024;
 const BLOB_API_URL = 'https://vercel.com/api/blob';
 const BLOB_API_VERSION = '12';
-const UPLOAD_TIMEOUT_MS = 5 * 60_000;
-const VIDEO_AUDIO_EXTRACTION_TIMEOUT_MS = 90_000;
+const UPLOAD_TIMEOUT_MS = 20 * 60_000;
+const VIDEO_AUDIO_EXTRACTION_TIMEOUT_MS = 3 * 60_000;
 
 const buildProtectedApiUrl = (
   path: string,

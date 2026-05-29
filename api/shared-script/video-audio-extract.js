@@ -1,10 +1,13 @@
 const { del, put } = require('@vercel/blob');
 const ffmpegPath = require('ffmpeg-static');
+const { createWriteStream } = require('fs');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const { Readable, Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const {
   hasSongAdminPasswordConfigured,
   isValidSongAdminPassword,
@@ -13,6 +16,7 @@ const {
 } = require('./_shared');
 
 const execFileAsync = promisify(execFile);
+const MAX_SOURCE_VIDEO_BYTES = 512 * 1024 * 1024;
 
 const sanitizeFileName = (value) =>
   String(value || '')
@@ -74,6 +78,71 @@ const cleanupFile = async (filePath) => {
   await fs.unlink(filePath).catch(() => undefined);
 };
 
+const formatUploadSize = (bytes) => {
+  const megabytes = bytes / (1024 * 1024);
+  return `${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB`;
+};
+
+const parseContentLength = (value) => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+
+  const parsedValue = Number(value);
+  return Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : null;
+};
+
+const writeResponseBodyToFile = async (videoResponse, filePath) => {
+  const contentLength = parseContentLength(videoResponse.headers.get('content-length'));
+
+  if (contentLength !== null && contentLength > MAX_SOURCE_VIDEO_BYTES) {
+    throw new Error(
+      `El video origen pesa ${formatUploadSize(contentLength)} y el limite actual es ${formatUploadSize(
+        MAX_SOURCE_VIDEO_BYTES
+      )}.`
+    );
+  }
+
+  if (!videoResponse.body) {
+    const inputBuffer = Buffer.from(await videoResponse.arrayBuffer());
+    if (inputBuffer.length > MAX_SOURCE_VIDEO_BYTES) {
+      throw new Error(
+        `El video origen pesa ${formatUploadSize(inputBuffer.length)} y el limite actual es ${formatUploadSize(
+          MAX_SOURCE_VIDEO_BYTES
+        )}.`
+      );
+    }
+
+    await fs.writeFile(filePath, inputBuffer);
+    return inputBuffer.length;
+  }
+
+  let totalBytes = 0;
+  const sizeGuard = new Transform({
+    transform(chunk, _encoding, callback) {
+      totalBytes += chunk.length;
+
+      if (totalBytes > MAX_SOURCE_VIDEO_BYTES) {
+        callback(
+          new Error(
+            `El video origen supera el limite actual de ${formatUploadSize(MAX_SOURCE_VIDEO_BYTES)}.`
+          )
+        );
+        return;
+      }
+
+      callback(null, chunk);
+    },
+  });
+  const sourceStream =
+    typeof Readable.fromWeb === 'function'
+      ? Readable.fromWeb(videoResponse.body)
+      : videoResponse.body;
+
+  await pipeline(sourceStream, sizeGuard, createWriteStream(filePath));
+  return totalBytes;
+};
+
 module.exports = async (request, response) => {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -113,20 +182,6 @@ module.exports = async (request, response) => {
       return;
     }
 
-    const videoResponse = await fetch(sourceUrl, { cache: 'no-store' });
-    if (!videoResponse.ok) {
-      response
-        .status(400)
-        .json({ error: `No se pudo descargar el video origen. Error ${videoResponse.status}.` });
-      return;
-    }
-
-    const inputBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    if (!inputBuffer.length) {
-      response.status(400).json({ error: 'El video origen esta vacio.' });
-      return;
-    }
-
     const uniqueBase = `teatroia-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     tempInputPath = path.join(
       os.tmpdir(),
@@ -138,7 +193,19 @@ module.exports = async (request, response) => {
     );
     tempOutputPath = path.join(os.tmpdir(), `${uniqueBase}.mp3`);
 
-    await fs.writeFile(tempInputPath, inputBuffer);
+    const videoResponse = await fetch(sourceUrl, { cache: 'no-store' });
+    if (!videoResponse.ok) {
+      response
+        .status(400)
+        .json({ error: `No se pudo descargar el video origen. Error ${videoResponse.status}.` });
+      return;
+    }
+
+    const inputSize = await writeResponseBodyToFile(videoResponse, tempInputPath);
+    if (!inputSize) {
+      response.status(400).json({ error: 'El video origen esta vacio.' });
+      return;
+    }
 
     try {
       await execFileAsync(
