@@ -1,7 +1,7 @@
-import { upload as uploadBlob } from '@vercel/blob/client';
-
 export const MAX_SHARED_SONG_UPLOAD_BYTES = 100 * 1024 * 1024;
-const MULTIPART_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
+const BLOB_API_URL = 'https://vercel.com/api/blob';
+const BLOB_API_VERSION = '12';
+const UPLOAD_TIMEOUT_MS = 5 * 60_000;
 const VIDEO_AUDIO_EXTRACTION_TIMEOUT_MS = 90_000;
 
 const buildProtectedApiUrl = (
@@ -63,6 +63,16 @@ interface UploadSharedSongAudioInput {
   onUploadProgress?: (percentage: number) => void;
 }
 
+interface UploadTokenResponse {
+  clientToken: string;
+}
+
+interface BlobUploadResponse {
+  url: string;
+  pathname: string;
+  contentType?: string | null;
+}
+
 interface SharedStorageContextResponse {
   namespace: string;
 }
@@ -113,6 +123,111 @@ const fetchSharedStorageNamespace = async () => {
   return sharedStorageNamespacePromise;
 };
 
+const fetchClientToken = async ({
+  pathname,
+  password,
+  shareId,
+  targetId,
+  targetType,
+}: {
+  pathname: string;
+  password: string;
+  shareId: string;
+  targetId: string;
+  targetType: 'song' | 'musical-number';
+}) => {
+  const response = await fetch(buildProtectedApiUrl('/api/shared-script/song-upload'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-song-admin-password': password,
+    },
+    credentials: 'include',
+    body: JSON.stringify({
+      type: 'blob.generate-client-token',
+      payload: {
+        pathname,
+        clientPayload: JSON.stringify({ shareId, targetId, targetType }),
+        multipart: false,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error || 'No se pudo preparar la subida del audio.');
+  }
+
+  return (await response.json()) as UploadTokenResponse;
+};
+
+const uploadBlobWithClientToken = ({
+  pathname,
+  file,
+  clientToken,
+  contentType,
+  onUploadProgress,
+}: {
+  pathname: string;
+  file: Blob;
+  clientToken: string;
+  contentType?: string;
+  onUploadProgress?: (percentage: number) => void;
+}) =>
+  new Promise<BlobUploadResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.open('PUT', `${BLOB_API_URL}/?pathname=${encodeURIComponent(pathname)}`);
+    xhr.timeout = UPLOAD_TIMEOUT_MS;
+    xhr.responseType = 'json';
+    xhr.setRequestHeader('authorization', `Bearer ${clientToken}`);
+    xhr.setRequestHeader('x-api-version', BLOB_API_VERSION);
+    xhr.setRequestHeader('x-vercel-blob-access', 'public');
+    xhr.setRequestHeader('x-content-length', String(file.size));
+
+    if (contentType) {
+      xhr.setRequestHeader('x-content-type', contentType);
+    }
+
+    if (onUploadProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) {
+          return;
+        }
+
+        const percentage = Math.round((event.loaded / event.total) * 100);
+        onUploadProgress(Math.min(99, percentage));
+      };
+    }
+
+    xhr.onerror = () => reject(new Error('No se pudo subir el audio al almacenamiento.'));
+    xhr.onabort = () => reject(new Error('La subida del audio se ha cancelado.'));
+    xhr.ontimeout = () =>
+      reject(
+        new Error(
+          'La subida al almacenamiento esta tardando demasiado. Prueba con un archivo mas pequeno o sube el audio ya extraido.'
+        )
+      );
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const responseText = typeof xhr.responseText === 'string' ? xhr.responseText : '';
+        reject(new Error(responseText || `Error ${xhr.status} al subir el audio.`));
+        return;
+      }
+
+      const payload = xhr.response as BlobUploadResponse | null;
+      if (!payload?.url || !payload.pathname) {
+        reject(new Error('La respuesta de Blob no incluye el audio subido.'));
+        return;
+      }
+
+      onUploadProgress?.(100);
+      resolve(payload);
+    };
+
+    xhr.send(file);
+  });
+
 export const uploadSharedSongAudio = async ({
   shareId,
   targetId,
@@ -144,18 +259,20 @@ export const uploadSharedSongAudio = async ({
     );
   }
 
-  const blob = await uploadBlob(pathname, file, {
-    access: 'public',
-    handleUploadUrl: buildProtectedApiUrl('/api/shared-script/song-upload'),
-    headers: {
-      'x-song-admin-password': password,
-    },
-    clientPayload: JSON.stringify({ shareId, targetId, targetType }),
+  const { clientToken } = await fetchClientToken({
+    pathname,
+    password,
+    shareId,
+    targetId,
+    targetType,
+  });
+
+  const blob = await uploadBlobWithClientToken({
+    pathname,
+    file,
+    clientToken,
     contentType,
-    multipart: fileSize !== null && fileSize >= MULTIPART_UPLOAD_THRESHOLD_BYTES,
-    onUploadProgress: ({ percentage }) => {
-      onUploadProgress?.(Math.round(percentage));
-    },
+    onUploadProgress,
   });
 
   if (!blob.url || !blob.pathname) {
