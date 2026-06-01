@@ -1050,58 +1050,88 @@ export const SongManagerPanel: React.FC<Props> = ({
         setPreviewAudioDuration(nextDuration);
         setPreviewAudioCurrentTime(nextCurrentTime);
       };
+      const seekToStartTime = () => {
+        if (safeStartAtSeconds <= 0) {
+          setPreviewAudioCurrentTime(0);
+          return;
+        }
+
+        try {
+          previewAudioElement.currentTime = safeStartAtSeconds;
+          setPreviewAudioCurrentTime(safeStartAtSeconds);
+        } catch {
+          setPreviewAudioCurrentTime(0);
+        }
+      };
+      const continuePlayback = () => {
+        if (replayCycleRef.current !== cycleId) {
+          return;
+        }
+
+        const session = playbackSessionRef.current;
+        if (!session) {
+          return;
+        }
+
+        if (session.kind === 'single') {
+          void startPreviewPlayback(session.audio, cycleId);
+          return;
+        }
+
+        const nextIndex = (session.index + 1) % session.entries.length;
+        const nextEntry = session.entries[nextIndex];
+        playbackSessionRef.current = { ...session, index: nextIndex };
+        setSelectedMusicalNumberId(nextEntry.musicalNumber.id);
+        void startPreviewPlayback(nextEntry.audio, cycleId);
+      };
 
       setPreviewAudioCurrentTime(0);
       setPreviewAudioDuration(0);
+      setPreviewAudioError(null);
+      previewAudioElement.pause();
       previewAudioElement.src = audio.audioUrl;
       previewAudioElement.ontimeupdate = updateProgress;
-      previewAudioElement.onloadedmetadata = updateProgress;
+      previewAudioElement.onloadedmetadata = () => {
+        updateProgress();
+        seekToStartTime();
+      };
       previewAudioElement.ondurationchange = updateProgress;
       previewAudioElement.load();
       previewAudioElement.onended = () => {
         updateProgress();
         setPlayingPreviewAudioId(null);
         setIsPreviewAudioPaused(false);
+        const session = playbackSessionRef.current;
+
+        if (session?.kind === 'playlist') {
+          continuePlayback();
+          return;
+        }
+
         replayTimeoutRef.current = setTimeout(() => {
           replayTimeoutRef.current = null;
-          if (replayCycleRef.current !== cycleId) {
-            return;
-          }
-
-          const session = playbackSessionRef.current;
-          if (!session) {
-            return;
-          }
-
-          if (session.kind === 'single') {
-            void startPreviewPlayback(session.audio, cycleId);
-            return;
-          }
-
-          const nextIndex = (session.index + 1) % session.entries.length;
-          const nextEntry = session.entries[nextIndex];
-          playbackSessionRef.current = { ...session, index: nextIndex };
-          setSelectedMusicalNumberId(nextEntry.musicalNumber.id);
-          void startPreviewPlayback(nextEntry.audio, cycleId);
+          continuePlayback();
         }, 3000);
       };
       previewAudioElement.onerror = () => {
         setPlayingPreviewAudioId(null);
-        setIsPreviewAudioPaused(false);
+        setIsPreviewAudioPaused(true);
         setPreviewAudioCurrentTime(0);
         setPreviewAudioDuration(0);
         setPreviewAudioError('No se pudo reproducir este audio.');
       };
 
       try {
-        previewAudioElement.currentTime = safeStartAtSeconds;
-        setPreviewAudioCurrentTime(safeStartAtSeconds);
+        if (safeStartAtSeconds > 0 && previewAudioElement.readyState >= 1) {
+          seekToStartTime();
+        }
+
         setPlayingPreviewAudioId(audio.id);
         setIsPreviewAudioPaused(false);
         await previewAudioElement.play();
       } catch {
         setPlayingPreviewAudioId(null);
-        setIsPreviewAudioPaused(false);
+        setIsPreviewAudioPaused(true);
         setPreviewAudioError('No se pudo reproducir este audio.');
       }
     },
