@@ -2241,7 +2241,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         Boolean(selectedMusicalNumberStartEntry) &&
         Boolean(selectedMusicalNumberEndEntry)));
   const shouldShowFloatingMusicalNumberActions =
-    isMusicalNumberFormVisible && canSaveMusicalNumberForm;
+    isMusicalNumberFormVisible && canSaveMusicalNumberForm && !isScriptlessLibrary;
   const previousSharedScriptIdRef = useRef<string | null>(sharedScript?.shareId ?? null);
 
   useEffect(() => {
