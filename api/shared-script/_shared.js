@@ -223,10 +223,15 @@ const getSongIdsForLineRange = (songs, sceneTitle, startLineIndex, endLineIndex)
     .filter((songId, index, allSongIds) => allSongIds.indexOf(songId) === index);
 };
 
-const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
+const isUnlinkedMusicalNumber = (musicalNumber) =>
+  musicalNumber.startLineIndex === -1 && musicalNumber.endLineIndex === -1;
+
+const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS, options = {}) => {
   if (!Array.isArray(value)) {
     return EMPTY_MUSICAL_NUMBERS;
   }
+
+  const allowUnlinked = Boolean(options.allowUnlinked);
 
   return value
     .filter(
@@ -248,8 +253,10 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
         typeof musicalNumber.endLineIndex === 'number' && musicalNumber.endLineIndex >= 0
           ? musicalNumber.endLineIndex
           : -1;
+      const shouldKeepUnlinked =
+        allowUnlinked && rawStartLineIndex < 0 && rawEndLineIndex < 0;
       const songIdsFromRange =
-        rawStartLineIndex >= 0 && rawEndLineIndex >= 0
+        !shouldKeepUnlinked && rawStartLineIndex >= 0 && rawEndLineIndex >= 0
           ? getSongIdsForLineRange(songs, rawSceneTitle, rawStartLineIndex, rawEndLineIndex)
           : [];
       const legacySongIds = Array.isArray(musicalNumber.songIds)
@@ -264,12 +271,14 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
             )
           )
         : [];
-      const songIds = Array.from(
-        new Set(songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds)
-      );
+      const songIds = shouldKeepUnlinked
+        ? []
+        : Array.from(new Set(songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds));
       const resolvedIndexes = resolveMusicalNumberIndexes(songIds, songs);
       const normalizedRange =
-        rawStartLineIndex >= 0 && rawEndLineIndex >= 0
+        shouldKeepUnlinked
+          ? { startLineIndex: -1, endLineIndex: -1 }
+          : rawStartLineIndex >= 0 && rawEndLineIndex >= 0
           ? normalizeRangeBoundaries(rawStartLineIndex, rawEndLineIndex)
           : normalizeRangeBoundaries(
               resolvedIndexes.startLineIndex,
@@ -279,7 +288,7 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
       return {
         id: musicalNumber.id.trim(),
         title: musicalNumber.title.trim() || 'Numero musical',
-        sceneTitle: rawSceneTitle ?? resolvedIndexes.sceneTitle,
+        sceneTitle: shouldKeepUnlinked ? rawSceneTitle : rawSceneTitle ?? resolvedIndexes.sceneTitle,
         startLineIndex:
           normalizedRange.startLineIndex >= 0
             ? normalizedRange.startLineIndex
@@ -302,13 +311,16 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS) => {
     })
     .filter(
       (musicalNumber) =>
-        musicalNumber.startLineIndex >= 0 &&
-        musicalNumber.endLineIndex >= 0
+        (allowUnlinked && isUnlinkedMusicalNumber(musicalNumber)) ||
+        (musicalNumber.startLineIndex >= 0 && musicalNumber.endLineIndex >= 0)
     );
 };
 
 const normalizeManifest = (value) => {
   const songs = normalizeSongs(value?.songs);
+  const scriptData = isValidScriptData(value?.scriptData)
+    ? value.scriptData
+    : { obra: 'Obra compartida', personajes: [], guion: [] };
 
   return {
     version: MANIFEST_VERSION,
@@ -319,12 +331,12 @@ const normalizeManifest = (value) => {
         : isValidScriptData(value?.scriptData)
           ? value.scriptData.obra
           : 'Obra compartida',
-    scriptData: isValidScriptData(value?.scriptData)
-      ? value.scriptData
-      : { obra: 'Obra compartida', personajes: [], guion: [] },
+    scriptData,
     mergeMap: normalizeMergeMap(value?.mergeMap),
     songs,
-    musicalNumbers: normalizeMusicalNumbers(value?.musicalNumbers, songs),
+    musicalNumbers: normalizeMusicalNumbers(value?.musicalNumbers, songs, {
+      allowUnlinked: scriptData.guion.length === 0,
+    }),
     createdAt:
       typeof value?.createdAt === 'string' && value.createdAt.trim()
         ? value.createdAt
@@ -418,7 +430,14 @@ const buildManifestSummary = (manifest) => ({
   fileName: manifest.fileName,
   mergeCount: Object.keys(normalizeMergeMap(manifest.mergeMap)).length,
   songCount: normalizeSongs(manifest.songs).length,
-  musicalNumberCount: normalizeMusicalNumbers(manifest.musicalNumbers, normalizeSongs(manifest.songs)).length,
+  musicalNumberCount: normalizeMusicalNumbers(
+    manifest.musicalNumbers,
+    normalizeSongs(manifest.songs),
+    {
+      allowUnlinked:
+        isValidScriptData(manifest?.scriptData) && manifest.scriptData.guion.length === 0,
+    }
+  ).length,
   createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : new Date().toISOString(),
   updatedAt: typeof manifest.updatedAt === 'string' ? manifest.updatedAt : new Date().toISOString(),
 });

@@ -263,11 +263,14 @@ export const syncSharedSongsWithScript = (
 
 export const syncSharedMusicalNumbersWithScript = (
   songs: SharedSongAsset[],
-  existingMusicalNumbers: unknown
+  existingMusicalNumbers: unknown,
+  options: { allowUnlinked?: boolean } = {}
 ): SharedMusicalNumberAsset[] => {
   if (!Array.isArray(existingMusicalNumbers)) {
     return [];
   }
+
+  const allowUnlinked = Boolean(options.allowUnlinked);
 
   return existingMusicalNumbers
     .filter(
@@ -287,8 +290,10 @@ export const syncSharedMusicalNumbersWithScript = (
         typeof musicalNumber.sceneTitle === 'string' && musicalNumber.sceneTitle.trim().length > 0
           ? musicalNumber.sceneTitle.trim()
           : null;
+      const shouldKeepUnlinked =
+        allowUnlinked && startLineIndex < 0 && endLineIndex < 0;
       const songIdsFromRange =
-        startLineIndex >= 0 && endLineIndex >= 0
+        !shouldKeepUnlinked && startLineIndex >= 0 && endLineIndex >= 0
           ? getSongIdsForLineRange(songs, sceneTitle, startLineIndex, endLineIndex)
           : [];
       const legacySongIds = Array.isArray(musicalNumber.songIds)
@@ -301,7 +306,9 @@ export const syncSharedMusicalNumbersWithScript = (
             )
           )
         : [];
-      const songIds = Array.from(new Set(songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds));
+      const songIds = shouldKeepUnlinked
+        ? []
+        : Array.from(new Set(songIdsFromRange.length > 0 ? songIdsFromRange : legacySongIds));
       const linkedSongs = getSongsForLineRange(
         songs,
         sceneTitle ?? null,
@@ -312,7 +319,9 @@ export const syncSharedMusicalNumbersWithScript = (
       );
 
       const normalizedRange =
-        startLineIndex >= 0 && endLineIndex >= 0
+        shouldKeepUnlinked
+          ? { startLineIndex: -1, endLineIndex: -1 }
+          : startLineIndex >= 0 && endLineIndex >= 0
           ? normalizeRangeBoundaries(startLineIndex, endLineIndex)
           : linkedSongs.length > 0
             ? normalizeRangeBoundaries(linkedSongs[0].lineIndex, linkedSongs[linkedSongs.length - 1].lineIndex)
@@ -327,7 +336,7 @@ export const syncSharedMusicalNumbersWithScript = (
           typeof musicalNumber.title === 'string' && musicalNumber.title.trim().length > 0
             ? musicalNumber.title.trim()
             : 'Numero musical',
-        sceneTitle: sceneTitle ?? linkedSongs[0]?.sceneTitle ?? null,
+        sceneTitle: shouldKeepUnlinked ? sceneTitle : sceneTitle ?? linkedSongs[0]?.sceneTitle ?? null,
         startLineIndex: normalizedRange.startLineIndex,
         endLineIndex: normalizedRange.endLineIndex,
         songIds,
@@ -341,8 +350,10 @@ export const syncSharedMusicalNumbersWithScript = (
     .filter(
       (musicalNumber): musicalNumber is SharedMusicalNumberAsset =>
         Boolean(musicalNumber) &&
-        musicalNumber.startLineIndex >= 0 &&
-        musicalNumber.endLineIndex >= 0
+        ((allowUnlinked &&
+          musicalNumber.startLineIndex === -1 &&
+          musicalNumber.endLineIndex === -1) ||
+          (musicalNumber.startLineIndex >= 0 && musicalNumber.endLineIndex >= 0))
     );
 };
 

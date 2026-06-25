@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import {
   fetchSharedScriptList,
   fetchSharedScript,
@@ -16,7 +16,7 @@ import { VersionBadge } from '../components/VersionBadge';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
-import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScriptConfig } from '../types/script';
+import { RehearsalCheckpoint, RehearsalCheckpointMap, RehearsalMode, SavedScriptConfig, ScriptData } from '../types/script';
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { getScriptIdentity } from '../utils/scriptIdentity';
 import { CharacterMergeMap, normalizeRoleSelection } from '../utils/scriptRoleMerges';
@@ -66,6 +66,20 @@ const upsertSharedScriptSummary = (
   return [nextScript, ...remainingScripts].sort((leftScript, rightScript) =>
     rightScript.updatedAt.localeCompare(leftScript.updatedAt)
   );
+};
+
+const normalizeSharedManifestForClient = (
+  manifest: SharedScriptManifest
+): SharedScriptManifest => {
+  const songs = syncSharedSongsWithScript(manifest.scriptData.guion, manifest.songs);
+
+  return {
+    ...manifest,
+    songs,
+    musicalNumbers: syncSharedMusicalNumbersWithScript(songs, manifest.musicalNumbers, {
+      allowUnlinked: manifest.scriptData.guion.length === 0,
+    }),
+  };
 };
 
 const formatSharedScriptTimestamp = (value: string) => {
@@ -140,6 +154,7 @@ export const HomeScreen = () => {
   const [selectedSharedScriptId, setSelectedSharedScriptId] = useState<string | null>(null);
   const [isLoadingSharedScriptsCatalog, setIsLoadingSharedScriptsCatalog] = useState(false);
   const [sharedScriptsCatalogError, setSharedScriptsCatalogError] = useState<string | null>(null);
+  const [scriptlessTitle, setScriptlessTitle] = useState('');
 
   const {
     isReady: areRoleMergesReady,
@@ -158,6 +173,11 @@ export const HomeScreen = () => {
   const displayScriptData = mergedScriptData ?? scriptData;
   const effectiveError = sharedError ?? error;
   const effectiveLoading = loading || isLoadingSharedScript || isSharingScript;
+  const songLaunchCount = sharedScript
+    ? sharedScript.scriptData.guion.length === 0
+      ? sharedScript.musicalNumbers.length
+      : sharedScript.songs.length
+    : 0;
 
   const progressText = useMemo(() => {
     if (!effectiveLoading) {
@@ -431,14 +451,7 @@ export const HomeScreen = () => {
   };
 
   const handleSharedScriptManifestUpdate = useCallback((manifest: SharedScriptManifest) => {
-    const normalizedManifest = {
-      ...manifest,
-      songs: syncSharedSongsWithScript(manifest.scriptData.guion, manifest.songs),
-      musicalNumbers: syncSharedMusicalNumbersWithScript(
-        syncSharedSongsWithScript(manifest.scriptData.guion, manifest.songs),
-        manifest.musicalNumbers
-      ),
-    };
+    const normalizedManifest = normalizeSharedManifestForClient(manifest);
 
     setSharedScript(normalizedManifest);
     setSelectedSharedScriptId(normalizedManifest.shareId);
@@ -457,14 +470,7 @@ export const HomeScreen = () => {
 
     try {
       const remoteManifest = await fetchSharedScript(shareId);
-      const manifest = {
-        ...remoteManifest,
-        songs: syncSharedSongsWithScript(remoteManifest.scriptData.guion, remoteManifest.songs),
-        musicalNumbers: syncSharedMusicalNumbersWithScript(
-          syncSharedSongsWithScript(remoteManifest.scriptData.guion, remoteManifest.songs),
-          remoteManifest.musicalNumbers
-        ),
-      };
+      const manifest = normalizeSharedManifestForClient(remoteManifest);
       const localSnapshotConfig =
         sharedScript?.shareId === shareId && scriptData
           ? {
@@ -549,18 +555,12 @@ export const HomeScreen = () => {
         songs: baseSharedSongs,
         musicalNumbers: syncSharedMusicalNumbersWithScript(
           baseSharedSongs,
-          freshestSharedScript?.musicalNumbers ?? sharedScript?.musicalNumbers
+          freshestSharedScript?.musicalNumbers ?? sharedScript?.musicalNumbers,
+          { allowUnlinked: scriptData.guion.length === 0 }
         ),
       });
 
-      const manifest = {
-        ...response.manifest,
-        songs: syncSharedSongsWithScript(response.manifest.scriptData.guion, response.manifest.songs),
-        musicalNumbers: syncSharedMusicalNumbersWithScript(
-          syncSharedSongsWithScript(response.manifest.scriptData.guion, response.manifest.songs),
-          response.manifest.musicalNumbers
-        ),
-      };
+      const manifest = normalizeSharedManifestForClient(response.manifest);
 
       setSharedScript(manifest);
       setSelectedSharedScriptId(manifest.shareId);
@@ -578,6 +578,52 @@ export const HomeScreen = () => {
       setIsSharingScript(false);
     }
   }, [currentScriptFileName, mergeMap, scriptData, sharedScript]);
+
+  const handleCreateScriptlessSharedScript = async () => {
+    const title = scriptlessTitle.trim() || 'Nueva obra sin guion';
+    const nextScriptData: ScriptData = {
+      obra: title,
+      personajes: [],
+      guion: [],
+    };
+
+    resetSelectionState();
+    setCurrentScriptFileName(title);
+    replaceSharedScriptIdInUrl(null);
+    setIsSharingScript(true);
+    setSharedError(null);
+    setSharedStatusText('Creando obra sin guion...');
+
+    try {
+      const response = await publishSharedScript({
+        shareId: null,
+        fileName: title,
+        scriptData: nextScriptData,
+        mergeMap: {},
+        songs: [],
+        musicalNumbers: [],
+      });
+      const manifest = normalizeSharedManifestForClient(response.manifest);
+
+      setSharedScript(manifest);
+      setSelectedSharedScriptId(manifest.shareId);
+      setSharedScriptsCatalog((previousScripts) =>
+        upsertSharedScriptSummary(previousScripts, buildSharedScriptSummaryFromManifest(manifest))
+      );
+      setSharedStatusText('Obra sin guion lista para cargar canciones.');
+      setIsHydratingSharedMergeMap(false);
+      replaceSharedScriptIdInUrl(manifest.shareId);
+      loadSavedScript(manifest.scriptData);
+      setScriptlessTitle('');
+      setIsManagingSongs(true);
+    } catch (createError) {
+      const message = createError instanceof Error ? createError.message : 'No se pudo crear la obra.';
+      setSharedError(`Error compartiendo: ${message}`);
+      setSharedStatusText('');
+    } finally {
+      setIsSharingScript(false);
+    }
+  };
 
   const handleMergeCharacters = () => {
     if (!mergeSource || !mergeTarget) {
@@ -959,7 +1005,7 @@ export const HomeScreen = () => {
                     </View>
                     {sharedScript ? (
                       <View style={styles.songLaunchBadge}>
-                        <Text style={styles.songLaunchBadgeText}>{sharedScript.songs.length}</Text>
+                        <Text style={styles.songLaunchBadgeText}>{songLaunchCount}</Text>
                       </View>
                     ) : null}
                   </TouchableOpacity>
@@ -1325,6 +1371,25 @@ export const HomeScreen = () => {
               >
                 <Text style={styles.btnText}>Cargar PDF</Text>
               </TouchableOpacity>
+
+              <View style={styles.scriptlessCreateSection}>
+                <Text style={styles.libraryTitle}>Obra sin guion</Text>
+                <TextInput
+                  value={scriptlessTitle}
+                  onChangeText={setScriptlessTitle}
+                  placeholder="Nombre de la obra"
+                  style={styles.textInput}
+                />
+                <TouchableOpacity
+                  style={[styles.btnMain, styles.scriptlessCreateButton, effectiveLoading && styles.buttonDisabled]}
+                  onPress={() => void handleCreateScriptlessSharedScript()}
+                  disabled={effectiveLoading}
+                >
+                  <Text style={styles.btnText}>
+                    {isSharingScript ? 'Creando...' : 'Crear obra sin guion'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         )}
@@ -1405,6 +1470,28 @@ const styles = StyleSheet.create({
   discardText: { color: '#c62828', fontWeight: '600' },
   homeContent: { width: '100%', gap: 24 },
   homeActions: { gap: 12, width: '100%' },
+  scriptlessCreateSection: {
+    width: '100%',
+    gap: 12,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderWidth: 1,
+    borderColor: '#dbe9f6',
+  },
+  scriptlessCreateButton: {
+    paddingVertical: 16,
+  },
+  textInput: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#d7e2ee',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    color: '#1d2733',
+  },
   section: { width: '100%' },
   scriptTitlePanel: {
     marginBottom: 20,

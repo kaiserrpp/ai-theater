@@ -180,6 +180,9 @@ const ensureConfigured = (response) => {
   return true;
 };
 
+const isScriptlessManifest = (manifest) =>
+  Array.isArray(manifest?.scriptData?.guion) && manifest.scriptData.guion.length === 0;
+
 module.exports = async (request, response) => {
   if (!['POST', 'PATCH', 'DELETE'].includes(request.method)) {
     response.setHeader('Allow', 'POST, PATCH, DELETE');
@@ -218,6 +221,7 @@ module.exports = async (request, response) => {
     }
 
     const musicalNumberId = musicalNumber.id;
+    const allowEmptyGuideRoles = isScriptlessManifest(manifest);
 
     const now = new Date().toISOString();
 
@@ -238,7 +242,7 @@ module.exports = async (request, response) => {
         return;
       }
 
-      if (guideRoles.length === 0) {
+      if (!allowEmptyGuideRoles && guideRoles.length === 0) {
         response.status(400).json({ error: 'Selecciona al menos un personaje para este audio.' });
         return;
       }
@@ -323,7 +327,7 @@ module.exports = async (request, response) => {
       return;
     }
 
-    if (nextGuideRoles.length === 0) {
+    if (!allowEmptyGuideRoles && nextGuideRoles.length === 0) {
       response.status(400).json({ error: 'Selecciona al menos un personaje para este audio.' });
       return;
     }

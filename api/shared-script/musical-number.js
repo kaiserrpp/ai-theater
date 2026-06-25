@@ -49,6 +49,16 @@ const buildRangeSelection = (sceneTitle, startLineIndex, endLineIndex, songs) =>
   };
 };
 
+const isScriptlessManifest = (manifest) =>
+  Array.isArray(manifest?.scriptData?.guion) && manifest.scriptData.guion.length === 0;
+
+const buildUnlinkedSelection = () => ({
+  sceneTitle: null,
+  startLineIndex: -1,
+  endLineIndex: -1,
+  songIds: [],
+});
+
 module.exports = async (request, response) => {
   if (!['POST', 'PATCH', 'DELETE'].includes(request.method)) {
     response.setHeader('Allow', 'POST, PATCH, DELETE');
@@ -96,12 +106,16 @@ module.exports = async (request, response) => {
         return;
       }
 
-      if (!sceneTitle || startLineIndex < 0 || endLineIndex < 0) {
+      const allowUnlinked = isScriptlessManifest(manifest);
+      if (!allowUnlinked && (!sceneTitle || startLineIndex < 0 || endLineIndex < 0)) {
         response.status(400).json({ error: 'Selecciona la escena y el tramo del numero musical.' });
         return;
       }
 
-      const selection = buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
+      const selection =
+        allowUnlinked && (!sceneTitle || startLineIndex < 0 || endLineIndex < 0)
+          ? buildUnlinkedSelection()
+          : buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
 
       const nextMusicalNumber = {
         id: `musical-number-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
@@ -175,12 +189,16 @@ module.exports = async (request, response) => {
       return;
     }
 
-    if (!sceneTitle || startLineIndex < 0 || endLineIndex < 0) {
+    const allowUnlinked = isScriptlessManifest(manifest);
+    if (!allowUnlinked && (!sceneTitle || startLineIndex < 0 || endLineIndex < 0)) {
       response.status(400).json({ error: 'Selecciona la escena y el tramo del numero musical.' });
       return;
     }
 
-    const selection = buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
+    const selection =
+      allowUnlinked && (!sceneTitle || startLineIndex < 0 || endLineIndex < 0)
+        ? buildUnlinkedSelection()
+        : buildRangeSelection(sceneTitle, startLineIndex, endLineIndex, manifest.songs);
 
     const updatedManifest = await writeManifest({
       ...manifest,

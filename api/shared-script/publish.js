@@ -60,7 +60,9 @@ module.exports = async (request, response) => {
       scriptData: payload.scriptData,
       mergeMap: normalizeMergeMap(payload.mergeMap),
       songs: normalizedSongs,
-      musicalNumbers: normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs),
+      musicalNumbers: normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs, {
+        allowUnlinked: payload.scriptData.guion.length === 0,
+      }),
       createdAt,
       updatedAt: now,
     };
