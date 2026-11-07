@@ -6,7 +6,7 @@
 
 Las operaciones de importación, edición, publicación y cambio de obra están en **⋯ → Materiales y gestión** y **⋯ → Cambiar obra**. Escuchar y ensayar no requieren acceso de gestión. La biblioteca musical separa los audios con voz y karaoke, con reproducción, búsqueda de posición, repetición, velocidad y letra cuando está disponible; al cambiar de pestaña conserva un minirreproductor.
 
-El modo inteligente es la opción inicial en navegadores con reconocimiento. Una elección expresa de manual o silencio se conserva. **⋯ → Micrófono y voz**, también accesible desde el botón del micro durante el ensayo, permite cambiarlo. El inicio del reconocimiento sigue ocurriendo dentro del toque de **Empezar / Continuar ensayo**, comprobando audio real en cada sesión; el modo inteligente no requiere calibrar volumen.
+El modo inteligente es la opción inicial en navegadores con reconocimiento. Una elección expresa de manual o silencio se conserva. **⋯ → Micrófono y voz**, también accesible desde el botón del micro durante el ensayo, permite cambiarlo. Antes de cada ensayo se comprueba el altavoz y, en los modos con micrófono, se miden el ruido de fondo y la voz. La preparación se repite siempre, sin restaurar una calibración guardada. En manual se confirma el altavoz y no se solicita el micrófono.
 
 La transcripción se muestra por defecto. **Mostrar transcripción** recuerda una desactivación expresa en este dispositivo; ocultarla no detiene la escucha ni la comprobación de palabras. Los detalles de coincidencia e informes quedan dentro de las opciones del micro. El ensayo ofrece controles inferiores de anterior, pausa/reanudar y siguiente.
 
@@ -22,7 +22,7 @@ Cada obra compartida puede contener mini-guiones de audición independientes del
 
 Durante la revisión, **Guardar mini-guion** y **Cancelar revisión** permanecen en una barra inferior fuera del contenido que se desplaza. Los errores y la confirmación de descarte también aparecen en esa barra. El texto completo de un mini-guion guardado se abre únicamente al pulsar **Ver texto del mini-guion**.
 
-En el avance inteligente, **Empezar ensayo** inicia el servicio de reconocimiento directamente y espera a que abra la entrada de audio antes de entrar en la escena. No se reutiliza una calibración de volumen como prueba de reconocimiento: esa calibración pertenece al modo por silencio. El permiso, si hace falta, se solicita dentro del inicio normal del ensayo. Si el servicio falla, se conserva la escena y se puede reintentar desde la misma pantalla.
+En el avance inteligente, después de calibrar, **Comprobar escucha** inicia el reconocimiento directamente dentro del toque del usuario. El medidor de calibración libera su captura antes de abrir ese servicio. Todavía no se entra a la escena: se reproduce otra prueba de voz con el reconocimiento abierto y el usuario confirma **Sí, la oigo. Empezar ensayo**. Si falla el audio, la calibración o el reconocimiento, se conserva la escena y se puede reintentar; la app no salta automáticamente a un ensayo sin comprobar.
 
 El panel de tu turno muestra si el micrófono está abierto y permite **Activar micrófono** con un toque, también cuando todavía no hay transcripción. Los errores distinguen la autorización del micrófono de la disponibilidad del servicio y conservan el código y mensaje originales del navegador para diagnosticar un fallo real. No se repiten solicitudes en bucle ni se da por hecho que el usuario debe cambiar sus ajustes.
 

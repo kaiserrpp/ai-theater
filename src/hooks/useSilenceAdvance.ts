@@ -798,7 +798,7 @@ export const useSilenceAdvance = ({
       setListeningStatus('active');
       monitorSignal();
     } catch (error) {
-      releaseListening();
+      await releaseListening();
 
       const errorName =
         error && typeof error === 'object' && 'name' in error ? String(error.name) : '';

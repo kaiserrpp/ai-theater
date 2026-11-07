@@ -187,7 +187,7 @@ test('unsupported browsers remain unsupported without throwing', () => {
   session.dispose();
 });
 
-test('normal Start activates recognition before scene playback is enabled, within the tap', (t) => {
+test('the recognition check activates the service within the tap before scene playback is enabled', (t) => {
   let inTap = false;
   let startedInTap = false;
   const { session, handles } = fixture(t, () => { startedInTap = inTap; });
