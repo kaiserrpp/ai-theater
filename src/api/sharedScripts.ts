@@ -1,4 +1,5 @@
 import type {
+  SharedAuditionSceneInput,
   SharedMusicalNumberAudioDeleteInput,
   SharedMusicalNumberAudioRegistrationInput,
   SharedMusicalNumberAudioUpdateInput,
@@ -135,6 +136,28 @@ export const fetchSharedScriptList = async () => {
   }
 
   return (await response.json()) as SharedScriptListItem[];
+};
+
+export const saveSharedAuditionScene = async (input: SharedAuditionSceneInput) => {
+  const response = await fetch(buildProtectedApiUrl('/audition-scene'), {
+    method: input.sceneId ? 'PATCH' : 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await parseErrorMessage(response));
+  return (await response.json()) as SharedScriptManifest;
+};
+
+export const deleteSharedAuditionScene = async (input: { shareId: string; sceneId: string; revision: number; password: string }) => {
+  const response = await fetch(buildProtectedApiUrl('/audition-scene'), {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await parseErrorMessage(response));
+  return (await response.json()) as SharedScriptManifest;
 };
 
 export const verifySongAdminPassword = async (password: string) => {

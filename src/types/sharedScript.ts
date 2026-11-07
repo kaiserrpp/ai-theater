@@ -53,8 +53,29 @@ export interface SharedScriptManifest {
   mergeMap: CharacterMergeMap;
   songs: SharedSongAsset[];
   musicalNumbers: SharedMusicalNumberAsset[];
+  auditionScenes: SharedAuditionScene[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SharedAuditionScene {
+  id: string;
+  title: string;
+  fileName: string | null;
+  scriptData: ScriptData;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SharedAuditionSceneInput {
+  shareId: string;
+  password: string;
+  sceneId?: string;
+  revision?: number;
+  title: string;
+  fileName: string | null;
+  scriptData: ScriptData;
 }
 
 export interface SharedScriptListItem {
@@ -64,11 +85,13 @@ export interface SharedScriptListItem {
   mergeCount: number;
   songCount: number;
   musicalNumberCount?: number;
+  auditionSceneCount?: number;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface SharedScriptPublishInput {
+  password: string;
   shareId?: string | null;
   fileName: string;
   scriptData: ScriptData;

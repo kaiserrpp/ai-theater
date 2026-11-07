@@ -10,6 +10,10 @@ import {
   replaceSharedScriptIdInUrl,
 } from '../api/sharedScripts';
 import { RehearsalView } from '../components/RehearsalView';
+import { AdminAccessPanel } from '../components/AdminAccessPanel';
+import { AuditionScenesPanel } from '../components/AuditionScenesPanel';
+import { useAdminPassword } from '../store/adminSession';
+import { normalizeAuditionScenes } from '../../shared/auditionScenes';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { SongManagerPanel } from '../components/SongManagerPanel';
 import { VersionBadge } from '../components/VersionBadge';
@@ -54,6 +58,8 @@ const buildSharedScriptSummaryFromManifest = (
   fileName: manifest.fileName,
   mergeCount: Object.keys(manifest.mergeMap).length,
   songCount: manifest.songs.length,
+  musicalNumberCount: manifest.musicalNumbers.length,
+  auditionSceneCount: manifest.auditionScenes.length,
   createdAt: manifest.createdAt,
   updatedAt: manifest.updatedAt,
 });
@@ -77,8 +83,9 @@ const normalizeSharedManifestForClient = (
     ...manifest,
     songs,
     musicalNumbers: syncSharedMusicalNumbersWithScript(songs, manifest.musicalNumbers, {
-      allowUnlinked: manifest.scriptData.guion.length === 0,
+      allowUnlinked: true,
     }),
+    auditionScenes: normalizeAuditionScenes(manifest.auditionScenes),
   };
 };
 
@@ -108,6 +115,8 @@ const cloneSavedScriptConfig = (config: SavedScriptConfig): SavedScriptConfig =>
 });
 
 export const HomeScreen = () => {
+  const adminPassword = useAdminPassword();
+  const [isManagingAuditions, setIsManagingAuditions] = useState(false);
   const {
     analyzeInStages,
     loading,
@@ -436,6 +445,7 @@ export const HomeScreen = () => {
     setIsScenePanelVisible(false);
     setIsMergePanelVisible(false);
     setIsManagingSongs(false);
+    setIsManagingAuditions(false);
     setPendingResumeMode(null);
     setSharedScript(null);
     setSharedStatusText('');
@@ -529,7 +539,7 @@ export const HomeScreen = () => {
   ]);
 
   const handlePublishSharedScript = useCallback(async () => {
-    if (!scriptData) {
+    if (!scriptData || !adminPassword) {
       return;
     }
 
@@ -548,6 +558,7 @@ export const HomeScreen = () => {
       );
 
       const response = await publishSharedScript({
+        password: adminPassword,
         shareId: sharedScript?.shareId ?? null,
         fileName: currentScriptFileName ?? scriptData.obra,
         scriptData,
@@ -556,7 +567,7 @@ export const HomeScreen = () => {
         musicalNumbers: syncSharedMusicalNumbersWithScript(
           baseSharedSongs,
           freshestSharedScript?.musicalNumbers ?? sharedScript?.musicalNumbers,
-          { allowUnlinked: scriptData.guion.length === 0 }
+          { allowUnlinked: true }
         ),
       });
 
@@ -570,6 +581,7 @@ export const HomeScreen = () => {
       setSharedStatusText('Obra compartida lista para enviar.');
       setIsHydratingSharedMergeMap(false);
       replaceSharedScriptIdInUrl(manifest.shareId);
+      return manifest;
     } catch (publishError) {
       const message = publishError instanceof Error ? publishError.message : 'No se pudo publicar la obra.';
       setSharedError(`Error compartiendo: ${message}`);
@@ -577,10 +589,11 @@ export const HomeScreen = () => {
     } finally {
       setIsSharingScript(false);
     }
-  }, [currentScriptFileName, mergeMap, scriptData, sharedScript]);
+  }, [adminPassword, currentScriptFileName, mergeMap, scriptData, sharedScript]);
 
   const handleCreateScriptlessSharedScript = async () => {
-    const title = scriptlessTitle.trim() || 'Nueva obra sin guion';
+    if (!adminPassword) return;
+    const title = scriptlessTitle.trim() || 'Nueva obra';
     const nextScriptData: ScriptData = {
       obra: title,
       personajes: [],
@@ -592,10 +605,11 @@ export const HomeScreen = () => {
     replaceSharedScriptIdInUrl(null);
     setIsSharingScript(true);
     setSharedError(null);
-    setSharedStatusText('Creando obra sin guion...');
+    setSharedStatusText('Creando obra...');
 
     try {
       const response = await publishSharedScript({
+        password: adminPassword,
         shareId: null,
         fileName: title,
         scriptData: nextScriptData,
@@ -610,12 +624,12 @@ export const HomeScreen = () => {
       setSharedScriptsCatalog((previousScripts) =>
         upsertSharedScriptSummary(previousScripts, buildSharedScriptSummaryFromManifest(manifest))
       );
-      setSharedStatusText('Obra sin guion lista para cargar canciones.');
+      setSharedStatusText('Obra lista para añadir materiales de audición.');
       setIsHydratingSharedMergeMap(false);
       replaceSharedScriptIdInUrl(manifest.shareId);
       loadSavedScript(manifest.scriptData);
       setScriptlessTitle('');
-      setIsManagingSongs(true);
+      setIsManagingAuditions(true);
     } catch (createError) {
       const message = createError instanceof Error ? createError.message : 'No se pudo crear la obra.';
       setSharedError(`Error compartiendo: ${message}`);
@@ -720,7 +734,7 @@ export const HomeScreen = () => {
   }, [isHydratingSharedMergeMap, mergeMap, sharedScript]);
 
   useEffect(() => {
-    if (!sharedScript || !scriptData || !areRoleMergesReady || isSharingScript || isHydratingSharedMergeMap) {
+    if (!adminPassword || !sharedScript || !scriptData || !areRoleMergesReady || isSharingScript || isHydratingSharedMergeMap) {
       return;
     }
 
@@ -729,7 +743,7 @@ export const HomeScreen = () => {
     }
 
     void handlePublishSharedScript();
-  }, [areRoleMergesReady, handlePublishSharedScript, isHydratingSharedMergeMap, isSharingScript, mergeMap, scriptData, sharedScript]);
+  }, [adminPassword, areRoleMergesReady, handlePublishSharedScript, isHydratingSharedMergeMap, isSharingScript, mergeMap, scriptData, sharedScript]);
 
   const handleRehearsalProgressChange = useCallback(
     (lineIndex: number, totalLines: number) => {
@@ -841,6 +855,16 @@ export const HomeScreen = () => {
     );
   };
 
+  if (isManagingAuditions && displayScriptData) {
+    return (
+      <ScreenWrapper>
+        <AuditionScenesPanel sharedScript={sharedScript} obraTitle={displayScriptData.obra}
+          onEnsureShared={handlePublishSharedScript} onManifestUpdated={handleSharedScriptManifestUpdate}
+          onExit={() => setIsManagingAuditions(false)} />
+      </ScreenWrapper>
+    );
+  }
+
   if (isRehearsing && displayScriptData) {
     return (
       <ScreenWrapper>
@@ -873,6 +897,8 @@ export const HomeScreen = () => {
             <Text style={styles.errorText}>{effectiveError}</Text>
           </View>
         )}
+
+        {!isManagingSongs ? <AdminAccessPanel /> : null}
 
         {isManagingSongs && displayScriptData ? (
           renderManagingSongsScreen()
@@ -994,6 +1020,15 @@ export const HomeScreen = () => {
 
               <View style={styles.menu}>
                 <View style={styles.menuOption}>
+                  <TouchableOpacity accessibilityRole="button" style={[styles.btnMenu, styles.sceneToggleButton]}
+                    onPress={() => setIsManagingAuditions(true)}>
+                    <View style={styles.menuButtonContent}>
+                      <MaterialCommunityIcons name="drama-masks" size={22} color="#fff" />
+                      <Text style={styles.btnText}>Audiciones · Escenas{sharedScript?.auditionScenes.length ? ` (${sharedScript.auditionScenes.length})` : ''}</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.menuOption}>
                   <TouchableOpacity
                     style={[styles.btnMenu, styles.songLaunchButton, !sharedScript && styles.buttonDisabled]}
                     onPress={() => setIsManagingSongs(true)}
@@ -1051,7 +1086,7 @@ export const HomeScreen = () => {
                 </View>
               </View>
 
-              {!loading && scriptData && (
+              {!loading && scriptData && adminPassword && (
                 <View style={styles.mergeWrapper}>
                   <TouchableOpacity
                     style={[styles.btnMenu, styles.mergeToggleButton]}
@@ -1156,7 +1191,7 @@ export const HomeScreen = () => {
               )}
             </View>
 
-            {!!displayScriptData && !effectiveLoading ? (
+            {!!displayScriptData && !effectiveLoading && adminPassword ? (
               <View style={styles.shareActions}>
                 <TouchableOpacity
                   style={[styles.compactShareButton, sharedScript && styles.compactShareButtonActive]}
@@ -1340,6 +1375,9 @@ export const HomeScreen = () => {
                         <Text style={styles.libraryCardMeta}>
                           {formatSharedScriptTimestamp(selectedSharedScriptSummary.updatedAt)}
                         </Text>
+                        {selectedSharedScriptSummary.auditionSceneCount ? (
+                          <Text style={styles.libraryCardMeta}>{selectedSharedScriptSummary.auditionSceneCount} escenas de audición</Text>
+                        ) : null}
                       </View>
 
                       <View style={styles.libraryActions}>
@@ -1357,6 +1395,7 @@ export const HomeScreen = () => {
             </View>
 
             <View style={styles.homeActions}>
+              {adminPassword ? <>
               <TouchableOpacity
                 style={styles.btnMain}
                 onPress={async () => {
@@ -1373,7 +1412,8 @@ export const HomeScreen = () => {
               </TouchableOpacity>
 
               <View style={styles.scriptlessCreateSection}>
-                <Text style={styles.libraryTitle}>Obra sin guion</Text>
+                <Text style={styles.libraryTitle}>Crear obra</Text>
+                <Text style={styles.selectionPreview}>Añade escenas de audición, canciones o un guion cuando los tengas.</Text>
                 <TextInput
                   value={scriptlessTitle}
                   onChangeText={setScriptlessTitle}
@@ -1386,10 +1426,11 @@ export const HomeScreen = () => {
                   disabled={effectiveLoading}
                 >
                   <Text style={styles.btnText}>
-                    {isSharingScript ? 'Creando...' : 'Crear obra sin guion'}
+                    {isSharingScript ? 'Creando...' : 'Crear obra'}
                   </Text>
                 </TouchableOpacity>
               </View>
+              </> : <Text style={styles.selectionPreview}>Abre una obra compartida para ensayar. Para añadir materiales, entra en gestión.</Text>}
             </View>
           </View>
         )}

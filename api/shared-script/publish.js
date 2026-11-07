@@ -3,6 +3,8 @@ const {
   buildShareUrl,
   createShareId,
   isValidScriptData,
+  hasSongAdminPasswordConfigured,
+  isValidSongAdminPassword,
   normalizeMergeMap,
   normalizeMusicalNumbers,
   normalizeSongs,
@@ -26,6 +28,15 @@ module.exports = async (request, response) => {
   try {
     const payload = parseJsonBody(request);
 
+    if (!hasSongAdminPasswordConfigured()) {
+      response.status(500).json({ error: 'Falta configurar la clave de gestión.' });
+      return;
+    }
+    if (!isValidSongAdminPassword(payload.password)) {
+      response.status(401).json({ error: 'Clave de gestión incorrecta.' });
+      return;
+    }
+
     if (!isValidScriptData(payload.scriptData)) {
       response.status(400).json({ error: 'El guion compartido no es valido.' });
       return;
@@ -38,14 +49,11 @@ module.exports = async (request, response) => {
 
     const now = new Date().toISOString();
     let createdAt = now;
+    let previousManifest = null;
 
     if (payload.shareId) {
-      try {
-        const previousManifest = await readManifest(shareId);
-        createdAt = typeof previousManifest.createdAt === 'string' ? previousManifest.createdAt : now;
-      } catch {
-        createdAt = now;
-      }
+      previousManifest = await readManifest(shareId);
+      createdAt = typeof previousManifest.createdAt === 'string' ? previousManifest.createdAt : now;
     }
 
     const normalizedSongs = normalizeSongs(payload.songs);
@@ -61,8 +69,11 @@ module.exports = async (request, response) => {
       mergeMap: normalizeMergeMap(payload.mergeMap),
       songs: normalizedSongs,
       musicalNumbers: normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs, {
-        allowUnlinked: payload.scriptData.guion.length === 0,
+        allowUnlinked: true,
       }),
+      // Only the dedicated scene endpoint edits this collection. In particular,
+      // publishing from an older client must not erase existing audition scenes.
+      auditionScenes: previousManifest?.auditionScenes || [],
       createdAt,
       updatedAt: now,
     };

@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { extractSharedSongAudioFromVideo, uploadSharedSongAudio } from '../api/sharedSongUploads';
+import { getAdminPassword, setAdminPassword, useAdminPassword } from '../store/adminSession';
 import {
   createSharedMusicalNumber,
   deleteSharedMusicalNumber,
@@ -90,7 +91,6 @@ type PlaylistEntry = {
 type PlaybackSession =
   | { kind: 'single'; audio: SharedSongAudioAsset }
   | { kind: 'playlist'; mode: SongPlaybackMode; entries: PlaylistEntry[]; index: number };
-let cachedSongAdminPassword: string | null = null;
 
 const buildDefaultAudioLabel = (kind: SharedSongAudioKind, guideRoles: string[]) => {
   if (kind === 'vocal_guide') {
@@ -351,9 +351,14 @@ export const SongManagerPanel: React.FC<Props> = ({
       : null;
   const [isVisible, setIsVisible] = useState(false);
   const [viewMode, setViewMode] = useState<SongManagerViewMode>('menu');
-  const [isUnlocked, setIsUnlocked] = useState(Boolean(cachedSongAdminPassword));
-  const [password, setPassword] = useState(cachedSongAdminPassword ?? '');
+  const activeAdminPassword = useAdminPassword();
+  const [isUnlocked, setIsUnlocked] = useState(Boolean(getAdminPassword()));
+  const [password, setPassword] = useState(getAdminPassword() ?? '');
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  useEffect(() => {
+    setIsUnlocked(Boolean(activeAdminPassword));
+    setPassword(activeAdminPassword ?? '');
+  }, [activeAdminPassword]);
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
   const [, setManageSection] = useState<ManageSection>('musical-numbers');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
@@ -1348,8 +1353,8 @@ export const SongManagerPanel: React.FC<Props> = ({
 
     try {
       await verifySongAdminPassword(password.trim());
-      cachedSongAdminPassword = password.trim();
-      setPassword(cachedSongAdminPassword);
+      setAdminPassword(password.trim());
+      setPassword(password.trim());
       setIsUnlocked(true);
       setManagerError(null);
     } catch (error) {

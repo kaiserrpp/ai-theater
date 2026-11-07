@@ -49,6 +49,7 @@ interface Props {
   scriptTitle?: string;
   shareId?: string | null;
   initialIndex?: number;
+  spokenOnly?: boolean;
   onProgressChange?: (lineIndex: number, totalLines: number) => void;
   onExit: () => void;
 }
@@ -513,6 +514,7 @@ export const RehearsalView: React.FC<Props> = ({
   scriptTitle = 'Obra',
   shareId = null,
   initialIndex = 0,
+  spokenOnly = false,
   onProgressChange,
   onExit,
 }) => {
@@ -546,7 +548,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [listenModeSelection, setListenModeSelection] =
     useState<RehearsalListenModeSelection>('pending');
   const [rehearsalAudioModeSelection, setRehearsalAudioModeSelection] =
-    useState<RehearsalAudioModeSelection>('pending');
+    useState<RehearsalAudioModeSelection>(spokenOnly ? 'karaoke' : 'pending');
   const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
@@ -3121,6 +3123,7 @@ export const RehearsalView: React.FC<Props> = ({
                 Este navegador no ofrece reconocimiento de voz web. Puedes usar silencio o modo manual.
               </Text>
             ) : null}
+            {!spokenOnly ? <>
             <Text style={styles.preflightSectionTitle}>Modo musical</Text>
             <Text style={styles.preflightText}>
               Priorizaremos ese tipo de audio en canciones y numeros musicales. Si no existe,
@@ -3165,6 +3168,7 @@ export const RehearsalView: React.FC<Props> = ({
                 </Text>
               </TouchableOpacity>
             </View>
+            </> : null}
             <TouchableOpacity
               style={[
                 styles.btnNext,
@@ -3785,7 +3789,9 @@ export const RehearsalView: React.FC<Props> = ({
               <Text style={styles.myTurnHint}>
                 {listenModeSelection === 'intelligent'
                   ? 'Tu turno: habla con naturalidad. Si la app no entiende, se quedara parada.'
-                  : 'Tu turno: lee y guardaremos silencio para pasar solos, o pulsa siguiente si lo prefieres.'}
+                  : listenModeSelection === 'manual'
+                    ? 'Tu turno: interpreta tu réplica y pulsa siguiente cuando termines.'
+                    : 'Tu turno: lee y guardaremos silencio para pasar solos, o pulsa siguiente si lo prefieres.'}
               </Text>
             )}
             {isMyTurn && listeningStatus === 'error' && listeningError ? (

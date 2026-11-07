@@ -1,4 +1,35 @@
-# Welcome to your Expo app 👋
+# AI-Theatre
+
+## Audiciones de escenas
+
+Cada obra compartida puede contener mini-guiones de audición independientes del guion completo.
+
+1. Abre **Administrar materiales** e introduce la clave de gestión existente.
+2. Abre una obra, o crea una con su nombre; el guion completo es opcional.
+3. Entra en **Audiciones · Escenas** y pulsa **Importar mini-guion PDF**.
+4. Revisa el título, los personajes, el orden, las réplicas y las acotaciones. Puedes corregir un personaje en todo el mini-guion, añadir réplicas o escribir una escena a mano.
+5. Guarda, elige uno o varios personajes y pulsa **Ensayar escena de audición**. El ensayo reutiliza los modos manual, por silencio e inteligente existentes.
+
+Quien abra el enlace de la obra puede leer y ensayar sus escenas sin clave. La creación, modificación, eliminación y publicación de materiales requieren la clave de gestión. Esta se mantiene únicamente en memoria durante la sesión de la app. El servidor utiliza `SONG_ADMIN_PASSWORD` y `BLOB_READ_WRITE_TOKEN`, como el gestor de canciones.
+
+Las elecciones y el progreso de cada mini-guion se recuerdan en el dispositivo. Si cambia el texto, el progreso se reinicia y se conservan los personajes elegidos que sigan participando. Las cuentas y la sincronización entre dispositivos quedan para otra fase.
+
+La importación web/PWA usa el lector de PDF existente y requiere texto extraíble; no hace OCR. En plataformas nativas se reutiliza el analizador de Gemini existente. Las versiones con voz y karaoke de los fragmentos musicales pertenecen a la siguiente fase.
+
+Las obras antiguas se cargan sin migración manual. Republicar la obra conserva sus escenas de audición y los números musicales pendientes de vincular.
+
+## Verificación
+
+```sh
+npm test
+npm run lint
+npx tsc --noEmit
+npx expo export --platform web
+```
+
+Las pruebas usan almacenamiento aislado en memoria y no escriben en Vercel Blob.
+
+## Desarrollo con Expo
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
