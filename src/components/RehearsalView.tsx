@@ -2046,7 +2046,7 @@ export const RehearsalView: React.FC<Props> = ({
     setIsPreparingRehearsalMedia(true); setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false); setIsRehearsalMediaReady(false);
     setRehearsalPreflightPhase('micro-calibration'); setAutoListenEnabled(false);
-    setMicrophoneCalibrated(false); calibrationResultRef.current = null;
+    setSpeakerConfirmed(false); setMicrophoneCalibrated(false); calibrationResultRef.current = null;
     resetMicrophoneCalibration();
     try {
       const result = await runRehearsalMicrophoneCalibration({
@@ -2066,10 +2066,10 @@ export const RehearsalView: React.FC<Props> = ({
       });
       if (!isCurrent()) return;
       calibrationResultRef.current = result; setMicrophoneCalibrated(true);
-      setRehearsalPreflightPhase(listenModeSelection === 'intelligent' ? 'ready-to-listen' : 'ready-to-start');
+      setRehearsalPreflightPhase('audio-check');
       setRehearsalMediaStatus(result.status === 'weak'
         ? 'Micro calibrado. Habla cerca del teléfono para que tu voz destaque sobre el ruido.'
-        : 'Micro calibrado. Ya hemos comprobado el ruido y tu voz.');
+        : 'Micro calibrado. Ahora pulsa Probar voz para comprobar el altavoz.');
     } catch (error) {
       if (!isCurrent()) return;
       setRehearsalMediaStatus(error instanceof Error && error.message === 'voice-not-detected'
@@ -2078,7 +2078,7 @@ export const RehearsalView: React.FC<Props> = ({
     } finally {
       if (isCurrent()) setIsPreparingRehearsalMedia(false);
     }
-  }, [calibrateAmbientNoise, calibrateVoiceLevel, listenModeSelection, playMicroCalibrationBeep,
+  }, [calibrateAmbientNoise, calibrateVoiceLevel, playMicroCalibrationBeep,
     releaseListeningInput, resetMicrophoneCalibration, startListening, stopRecognition, stopStandaloneSongAudio]);
 
   const finishRehearsalPreparation = useCallback((speakerWithRecognitionConfirmed = false) => {
@@ -2490,8 +2490,12 @@ export const RehearsalView: React.FC<Props> = ({
     calibrationResultRef.current = null; setHasCompletedRehearsalPreflight(false);
     setIsRehearsalMediaReady(false); setAutoListenEnabled(false); setCompatibilityMessage(null);
     stopRecognition();
-    prepareRehearsalMedia();
-  }, [listenModeSelection, prepareRehearsalMedia, rehearsalAudioModeSelection, stopRecognition]);
+    if (listenModeSelection === 'manual') prepareRehearsalMedia();
+    else {
+      void primeSongPlayback();
+      void calibrateRehearsalMicrophone();
+    }
+  }, [calibrateRehearsalMicrophone, listenModeSelection, prepareRehearsalMedia, primeSongPlayback, rehearsalAudioModeSelection, stopRecognition]);
 
   if (shouldShowInitialSetup) {
     return <View style={styles.container}>
@@ -2813,11 +2817,11 @@ export const RehearsalView: React.FC<Props> = ({
     return <View style={styles.container}>
       {renderHeader(listenModeSelection === 'manual' ? 'Preparar altavoz' : 'Preparar audio y micrófono')}
       <ScrollView contentContainerStyle={ui.page} keyboardShouldPersistTaps="handled">
-        <View style={ui.wrap}>{[`${speakerConfirmed ? '✓' : '1'} Altavoz`, listenModeSelection === 'manual' ? 'Sin micro' : `${microphoneCalibrated ? '✓' : '2'} Micro`, '3 Ensayo'].map((label) => <View key={label} style={[ui.chip, { backgroundColor: palette.soft }]}><Text style={[ui.chipText, { color: palette.plum }]}>{label}</Text></View>)}</View>
+        <View style={ui.wrap}>{[listenModeSelection === 'manual' ? 'Sin micro' : `${microphoneCalibrated ? '✓' : '1'} Micro`, `${speakerConfirmed ? '✓' : listenModeSelection === 'manual' ? '1' : '2'} Altavoz`, '3 Ensayo'].map((label) => <View key={label} style={[ui.chip, { backgroundColor: palette.soft }]}><Text style={[ui.chipText, { color: palette.plum }]}>{label}</Text></View>)}</View>
         <View style={ui.card}>
           <Icon name={isCalibrating || isReadyToListen ? 'microphone-outline' : 'volume-high'} size={34} />
           <Text style={ui.title}>{isCalibrating ? 'Calibrar micrófono' : isReadyToListen ? 'Activar la escucha' : isReadyToStart ? 'Todo preparado' : isDuplexCheck ? 'Última prueba de voz' : '¿Oyes a la app?'}</Text>
-          <Text style={ui.text}>{isCalibrating ? 'Guarda silencio y después di «prueba de micro» al oír el pitido.' : isReadyToListen ? 'La calibración ya está hecha. Ahora abriremos el reconocimiento de palabras.' : isDuplexCheck ? 'Comprueba que oyes a la app también con el reconocimiento abierto.' : isReadyToStart ? listenModeSelection === 'manual' ? 'El altavoz está preparado. Ensayarás sin activar el micrófono.' : 'El altavoz y el micrófono ya están comprobados.' : 'Sube el volumen y escucha la frase. No entraremos al ensayo hasta que confirmes que la oyes.'}</Text>
+          <Text style={ui.text}>{isCalibrating ? 'Guarda silencio. Cuando aparezca «Habla ahora», di «prueba de micro».' : isReadyToListen ? 'La calibración ya está hecha. Ahora abriremos el reconocimiento de palabras.' : isDuplexCheck ? 'Comprueba que oyes a la app también con el reconocimiento abierto.' : isReadyToStart ? listenModeSelection === 'manual' ? 'El altavoz está preparado. Ensayarás sin activar el micrófono.' : 'El altavoz y el micrófono ya están comprobados.' : 'Sube el volumen y escucha la frase. No entraremos al ensayo hasta que confirmes que la oyes.'}</Text>
           {rehearsalMediaStatus ? <Text accessibilityLiveRegion="polite" style={[ui.text, { color: palette.plum }]}>{rehearsalMediaStatus}</Text> : null}
           {isCalibrating ? <>
             <View style={styles.microCalibrationMeterTrack}><View style={[styles.microCalibrationMeterFill, { width: `${Math.max(4, Math.round(signalLevel * 100))}%`, backgroundColor: palette.plum }]} /></View>
@@ -2828,9 +2832,9 @@ export const RehearsalView: React.FC<Props> = ({
             : isReadyToStart ? <Button label="Empezar ensayo" onPress={() => finishRehearsalPreparation()} />
             : <>
               <Button label={isPreparingRehearsalMedia ? 'Reproduciendo prueba…' : hasPreparedRehearsalMedia ? 'Repetir prueba de voz' : 'Probar voz'} disabled={isPreparingRehearsalMedia} secondary onPress={() => prepareRehearsalMedia(isDuplexCheck)} />
-              {hasPreparedRehearsalMedia ? <Button label={isDuplexCheck ? 'Sí, la oigo. Empezar ensayo' : listenModeSelection === 'manual' ? 'Sí, la oigo. Preparar ensayo' : 'Sí, la oigo. Calibrar micro'} onPress={() => {
+              {hasPreparedRehearsalMedia ? <Button label={isDuplexCheck ? 'Sí, la oigo. Empezar ensayo' : 'Sí, la oigo. Continuar'} onPress={() => {
                 if (isDuplexCheck) finishRehearsalPreparation(true);
-                else { setSpeakerConfirmed(true); if (listenModeSelection === 'manual') { setRehearsalPreflightPhase('ready-to-start'); setRehearsalMediaStatus(null); } else void calibrateRehearsalMicrophone(); }
+                else { setSpeakerConfirmed(true); setRehearsalPreflightPhase(listenModeSelection === 'intelligent' ? 'ready-to-listen' : 'ready-to-start'); setRehearsalMediaStatus(null); }
               }} /> : null}
               {isDuplexCheck ? renderRecognitionError(enableIntelligentListenForDevice, 'Reintentar escucha') : null}
               {isDuplexCheck && !isRecognitionAudioActive && !speechRecognitionError ? <Button label="Reabrir escucha" secondary onPress={enableIntelligentListenForDevice} /> : null}

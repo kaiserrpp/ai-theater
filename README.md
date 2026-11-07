@@ -6,7 +6,7 @@
 
 Las operaciones de importación, edición, publicación y cambio de obra están en **⋯ → Materiales y gestión** y **⋯ → Cambiar obra**. Escuchar y ensayar no requieren acceso de gestión. La biblioteca musical separa los audios con voz y karaoke, con reproducción, búsqueda de posición, repetición, velocidad y letra cuando está disponible; al cambiar de pestaña conserva un minirreproductor.
 
-El modo inteligente es la opción inicial en navegadores con reconocimiento. Una elección expresa de manual o silencio se conserva. **⋯ → Micrófono y voz**, también accesible desde el botón del micro durante el ensayo, permite cambiarlo. Antes de cada ensayo se comprueba el altavoz y, en los modos con micrófono, se miden el ruido de fondo y la voz. La preparación se repite siempre, sin restaurar una calibración guardada. En manual se confirma el altavoz y no se solicita el micrófono.
+El modo inteligente es la opción inicial en navegadores con reconocimiento. Una elección expresa de manual o silencio se conserva. **⋯ → Micrófono y voz**, también accesible desde el botón del micro durante el ensayo, permite cambiarlo. Antes de cada ensayo con micrófono, primero se miden el ruido de fondo y la voz; después se comprueba el altavoz. La preparación se repite siempre, sin restaurar una calibración guardada. En manual se confirma el altavoz y no se solicita el micrófono.
 
 La transcripción se muestra por defecto. **Mostrar transcripción** recuerda una desactivación expresa en este dispositivo; ocultarla no detiene la escucha ni la comprobación de palabras. Los detalles de coincidencia e informes quedan dentro de las opciones del micro. El ensayo ofrece controles inferiores de anterior, pausa/reanudar y siguiente.
 
