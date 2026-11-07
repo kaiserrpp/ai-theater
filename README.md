@@ -16,6 +16,8 @@ Las elecciones y el progreso de cada mini-guion se recuerdan en el dispositivo. 
 
 La importación web/PWA usa el lector de PDF existente y requiere texto extraíble; no hace OCR. En plataformas nativas se reutiliza el analizador de Gemini existente. Las versiones con voz y karaoke de los fragmentos musicales pertenecen a la siguiente fase.
 
+El lector reconoce tanto `PERSONAJE: réplica` como nombres en mayúsculas en una línea propia, con la réplica debajo. También reconoce encabezados de escenas formados por listas de personajes y acotaciones junto al nombre, conservando la continuidad entre páginas.
+
 Las obras antiguas se cargan sin migración manual. Republicar la obra conserva sus escenas de audición y los números musicales pendientes de vincular.
 
 ## Verificación

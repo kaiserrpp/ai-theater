@@ -211,6 +211,50 @@ const parseSpeakerLine = (line: string): ParsedSpeakerLine | null => {
   return null;
 };
 
+const parseStandaloneSpeakerLine = (line: string): ParsedSpeakerLine | null => {
+  const match = line.match(/^([^()[\]:]+?)(?:\s*([\[(].*[\])]))?\s*:?[.]?$/u);
+  if (!match) return null;
+  const rawName = match[1].trim();
+  // A screenplay cue must already be uppercase. Abbreviations inside dialogue
+  // (e.g. Q.H.J) must not become characters merely because they are uppercase.
+  if (!isMostlyUppercase(rawName) || /(?:\p{L}\.){2,}\p{L}/u.test(rawName)) return null;
+  const roles = extractSpeakerRoles(rawName);
+  if (!roles.length) return null;
+  return { speaker: roles.join(' / '), roles, text: '', stageDirection: match[2] ? stripWrappingBrackets(match[2]) : '' };
+};
+
+const parseCastSceneHeading = (line: string, knownRoles: Set<string>) => {
+  if (!isMostlyUppercase(line)) return null;
+  const names = line.split(/,\s*|\.\s+|\s+(?:Y|E|AND|&)\s+/u).map(sanitizeSpeakerRole);
+  if (names.length < 2 || names.some((name) => !knownRoles.has(name))) return null;
+  return normalizeWhitespace(line);
+};
+
+const findStandaloneSpeakerRoles = (lines: string[]) => {
+  const roles = new Set(lines.flatMap((line) => parseSpeakerLine(line)?.roles ?? []));
+  const candidates = lines.map(parseStandaloneSpeakerLine);
+  const possibleRoles = new Set(candidates.flatMap((candidate) => candidate?.roles ?? []));
+  let inExplicitSong = false;
+  lines.forEach((line, index) => {
+    const castHeading = parseCastSceneHeading(line, possibleRoles);
+    if (parseActHeading(line) || isSceneHeading(line) || castHeading || parseSpeakerLine(line)) inExplicitSong = false;
+    if (isSongHeading(line)) { inExplicitSong = true; return; }
+    if (castHeading) {
+      line.split(/,\s*|\.\s+|\s+(?:Y|E|AND|&)\s+/u).map(sanitizeSpeakerRole).forEach((role) => roles.add(role));
+    }
+    const candidate = candidates[index];
+    if (!candidate || inExplicitSong) return;
+    let next = index + 1;
+    while (next < lines.length && isStandaloneStageDirection(lines[next])) next += 1;
+    const text = lines[next];
+    if (text && /\p{Ll}/u.test(text) && !candidates[next] && !parseSpeakerLine(text) &&
+      !parseActHeading(text) && !isSceneHeading(text) && !isSongHeading(text)) {
+      candidate.roles.forEach((role) => roles.add(role));
+    }
+  });
+  return roles;
+};
+
 const sanitizeDocumentTitle = (documentName?: string | null) => {
   if (!documentName) {
     return '';
@@ -294,8 +338,9 @@ const isLikelyLyricLine = (line: string) => {
   return uppercaseLetters.length / letters.length >= 0.9;
 };
 
-const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): ScriptData => {
+export const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): ScriptData => {
   const lines = mergeLogicalLines(rawLines);
+  const standaloneSpeakerRoles = findStandaloneSpeakerRoles(lines);
   const obra = detectTitle(lines, fallbackTitle);
   const personajes = new Set<string>();
   const guion: ParsedDialogueLine[] = [];
@@ -303,6 +348,8 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
   let currentAct = '';
   let currentScene = '';
   let currentDialogue: ParsedDialogueLine | null = null;
+  let currentDialogueUsesStandaloneCue = false;
+  const spokenRoles = new Set<string>();
   let currentSong: ParsedDialogueLine | null = null;
   let pendingStageDirection = '';
   let pendingSongTitle = '';
@@ -320,6 +367,7 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
     }
 
     currentDialogue = null;
+    currentDialogueUsesStandaloneCue = false;
   };
 
   const flushCurrentSong = () => {
@@ -350,7 +398,7 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
     pendingSongTitle = '';
   };
 
-  const startDialogue = (speaker: string, roles: string[], text: string, stageDirection = '') => {
+  const startDialogue = (speaker: string, roles: string[], text: string, stageDirection = '', standalone = false) => {
     flushCurrentSong();
     flushCurrentDialogue();
     currentDialogue = {
@@ -361,6 +409,8 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
     };
     pendingStageDirection = '';
     pendingSongTitle = '';
+    currentDialogueUsesStandaloneCue = standalone;
+    roles.forEach((role) => spokenRoles.add(role));
   };
 
   const startSong = (text: string) => {
@@ -384,7 +434,9 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
       continue;
     }
 
-    const sceneHeading = parseSceneHeading(line, currentAct);
+    const castHeading = parseCastSceneHeading(line, standaloneSpeakerRoles);
+    const sceneHeading = parseSceneHeading(line, currentAct) ??
+      (castHeading ? (currentAct ? `${currentAct} - ${castHeading}` : castHeading) : null);
     if (sceneHeading) {
       ensureScene(sceneHeading);
       continue;
@@ -397,7 +449,11 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
       continue;
     }
 
-    const parsedSpeakerLine = parseSpeakerLine(line);
+    const standalone = parseStandaloneSpeakerLine(line);
+    const canUseStandalone = standalone && standalone.roles.every((role) => standaloneSpeakerRoles.has(role)) &&
+      (!(currentSong || pendingSongTitle) || standalone.roles.some((role) => spokenRoles.has(role)));
+    const inline = parseSpeakerLine(line);
+    const parsedSpeakerLine = inline ?? (canUseStandalone ? standalone : null);
     if (parsedSpeakerLine) {
       if (!currentScene) {
         ensureScene(currentAct ? `${currentAct} - ${DEFAULT_SCENE_TITLE}` : DEFAULT_SCENE_TITLE);
@@ -407,7 +463,8 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
         parsedSpeakerLine.speaker,
         parsedSpeakerLine.roles,
         parsedSpeakerLine.text,
-        parsedSpeakerLine.stageDirection
+        parsedSpeakerLine.stageDirection,
+        !inline
       );
       parsedSpeakerLine.roles.forEach((role) => personajes.add(role));
       continue;
@@ -430,7 +487,7 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
       continue;
     }
 
-    if (isLikelyLyricLine(line)) {
+    if (!currentDialogueUsesStandaloneCue && isLikelyLyricLine(line)) {
       if (!currentAct && !currentScene) {
         continue;
       }
@@ -459,7 +516,9 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
     }
 
     const activeDialogue = currentDialogue as ParsedDialogueLine;
-    activeDialogue.t = joinSegments(activeDialogue.t, line);
+    const leading = !activeDialogue.t ? extractLeadingStageDirection(line) : { stageDirection: '', remainder: line };
+    activeDialogue.a = mergeNotes(activeDialogue.a, leading.stageDirection);
+    activeDialogue.t = joinSegments(activeDialogue.t, leading.remainder);
   }
 
   flushCurrentSong();
@@ -471,7 +530,7 @@ const buildScriptDataFromLines = (rawLines: string[], fallbackTitle: string): Sc
 
   if (!guion.some((line) => line.p !== SCENE_SYSTEM_SPEAKER && line.t)) {
     throw new Error(
-      'No he podido reconstruir dialogos validos. El PDF puede ser una imagen escaneada o tener un formato poco estructurado.'
+      'He leído el texto del PDF, pero no he podido identificar personajes y réplicas. Revisa que los nombres aparezcan antes de sus intervenciones.'
     );
   }
 

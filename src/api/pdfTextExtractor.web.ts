@@ -1,12 +1,12 @@
 import type { ExtractedPdfLine, PdfExtractionCallbacks } from './pdfTextExtractor';
 import packageInfo from '../../package.json';
+import { filterPdfPageLines } from '../utils/pdfTextLines';
 
 const PDFJS_LOADER_MODULE_URL = '/pdfjs/loader.mjs';
 const PDFJS_WORKER_URL = '/pdfjs/pdf.worker.min.mjs';
 const PDFJS_STANDARD_FONT_URL = '/pdfjs/standard_fonts/';
 const PDFJS_ASSET_VERSION = packageInfo.version;
 const LINE_VERTICAL_TOLERANCE = 4;
-const PAGE_EDGE_LINE_COUNT = 2;
 const PDFJS_LOADER_SCRIPT_ID = 'teatro-pdfjs-loader';
 const PDFJS_LOAD_TIMEOUT_MS = 15000;
 
@@ -118,11 +118,6 @@ const buildStageError = (stage: string, error: unknown) => {
 
 const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
 
-const normalizeLineForComparison = (value: string) =>
-  normalizeWhitespace(value)
-    .toUpperCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ');
-
 const joinItemsIntoLine = (items: PositionedTextItem[]) => {
   const sortedItems = [...items].sort((left, right) => left.x - right.x);
   let result = '';
@@ -145,12 +140,6 @@ const joinItemsIntoLine = (items: PositionedTextItem[]) => {
       .replace(/([\u00BF\u00A1(\[])\s+/g, '$1')
   );
 };
-
-const shouldRemoveRepeatedEdgeLine = (
-  normalizedLine: string,
-  edgeLineCounts: Map<string, number>,
-  totalPages: number
-) => normalizedLine.length > 0 && totalPages > 1 && (edgeLineCounts.get(normalizedLine) ?? 0) >= 2;
 
 const groupItemsIntoLines = (items: PositionedTextItem[]) => {
   const groupedLines: { y: number; items: PositionedTextItem[] }[] = [];
@@ -452,40 +441,5 @@ export const extractPdfLines = async (
     linesByPage.push(groupItemsIntoLines(textItems));
   }
 
-  const edgeLineCounts = new Map<string, number>();
-
-  for (const lines of linesByPage) {
-    const edgeLines = [...lines.slice(0, PAGE_EDGE_LINE_COUNT), ...lines.slice(-PAGE_EDGE_LINE_COUNT)];
-    for (const edgeLine of edgeLines) {
-      const normalizedLine = normalizeLineForComparison(edgeLine);
-      if (!normalizedLine) {
-        continue;
-      }
-
-      edgeLineCounts.set(normalizedLine, (edgeLineCounts.get(normalizedLine) ?? 0) + 1);
-    }
-  }
-
-  return linesByPage.flatMap((lines, pageIndex) =>
-    lines
-      .filter((line, lineIndex) => {
-        const normalizedLine = normalizeLineForComparison(line);
-        const isStandalonePageNumber = /^[\-\u2013\u2014]?\s*\d+\s*[\-\u2013\u2014]?$/.test(line);
-        const isEdgeLine = lineIndex < PAGE_EDGE_LINE_COUNT || lineIndex >= lines.length - PAGE_EDGE_LINE_COUNT;
-
-        if (isStandalonePageNumber) {
-          return false;
-        }
-
-        if (isEdgeLine && shouldRemoveRepeatedEdgeLine(normalizedLine, edgeLineCounts, totalPages)) {
-          return false;
-        }
-
-        return true;
-      })
-      .map((text) => ({
-        pageNumber: pageIndex + 1,
-        text,
-      }))
-  );
+  return filterPdfPageLines(linesByPage);
 };
