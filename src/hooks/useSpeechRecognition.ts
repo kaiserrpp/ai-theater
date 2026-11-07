@@ -24,7 +24,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey }: UseSpeechRecogn
   const Constructor = useMemo(getSpeechRecognitionConstructor, []);
   const [snapshot, setSnapshot] = useState<SpeechRecognitionSnapshot>({
     status: Constructor ? 'idle' : 'unsupported', transcript: '', finalTranscript: '',
-    interimTranscript: '', isAudioActive: false, error: null,
+    interimTranscript: '', isAudioActive: false, error: null, errorCode: null, errorDetail: null,
   });
   const session = useMemo(() => createSpeechRecognitionSession(Constructor, setSnapshot), [Constructor]);
 
@@ -38,6 +38,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey }: UseSpeechRecogn
     ...snapshot,
     isSupported: Boolean(Constructor),
     resetTranscript: session.resetTranscript,
+    activateRecognition: session.activate,
     restartRecognition: session.restart,
     stopRecognition: session.stop,
   };

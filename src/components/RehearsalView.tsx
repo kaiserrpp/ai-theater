@@ -59,6 +59,7 @@ type RehearsalPreflightPhase =
   | 'manual-check'
   | 'auto-final'
   | 'micro-calibration'
+  | 'intelligent-check'
   | null;
 type RehearsalListenModeSelection = 'pending' | 'auto' | 'manual' | 'intelligent';
 type ConfirmedRehearsalListenMode = Exclude<RehearsalListenModeSelection, 'pending'>;
@@ -837,6 +838,8 @@ export const RehearsalView: React.FC<Props> = ({
     return inferSpeechRecognitionLanguage(isMyTurn ? speakableLineText : nextActorLine?.t ?? speakableLineText);
   }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText]);
   const isIntelligentListenMode = listenModeSelection === 'intelligent';
+  const isCheckingIntelligentRecognition = isIntelligentListenMode && rehearsalPreflightPhase === 'intelligent-check';
+  const recognitionPreparationKey = `prepare:${resolvedScriptId}`;
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
   const canRunRehearsalLinePlayback =
     hasConfirmedRehearsalSetup &&
@@ -863,6 +866,7 @@ export const RehearsalView: React.FC<Props> = ({
     isMyTurn &&
     speakableLineText.length > 0;
   const shouldKeepIntelligentRecognitionWarm =
+    isCheckingIntelligentRecognition ||
     shouldUseIntelligentRecognition ||
     (
       isMobileSpeechDevice &&
@@ -878,7 +882,8 @@ export const RehearsalView: React.FC<Props> = ({
     Boolean(currentLine) &&
     isCurrentMusicalSongBlock;
   const recognitionLineKey =
-    currentLineVariantKey ?? (shouldKeepIntelligentRecognitionWarm ? `warm:${currentIndex}` : null);
+    isCheckingIntelligentRecognition ? recognitionPreparationKey :
+      currentLineVariantKey ?? (shouldKeepIntelligentRecognitionWarm ? `warm:${currentIndex}` : null);
 
   const isAutoplayBlockedError = useCallback((error: unknown) => {
     const errorName =
@@ -938,7 +943,10 @@ export const RehearsalView: React.FC<Props> = ({
     interimTranscript: speechRecognitionInterimTranscript,
     isAudioActive: isRecognitionAudioActive,
     error: speechRecognitionError,
+    errorCode: speechRecognitionErrorCode,
+    errorDetail: speechRecognitionErrorDetail,
     resetTranscript: resetSpeechRecognitionTranscript,
+    activateRecognition,
     restartRecognition,
     stopRecognition,
   } = useSpeechRecognition({
@@ -1439,22 +1447,38 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, []);
 
-  const enableIntelligentListenForDevice = useCallback(async () => {
+  const enableIntelligentListenForDevice = useCallback(() => {
+    stopRehearsalSpeech();
     setListenModeSelection('intelligent');
-    setAutoListenEnabled(true);
+    setHasConfirmedRehearsalSetup(true);
+    setAutoListenEnabled(false);
     setTemporarilySuspendingAutoListen(false);
     setIsRehearsalMediaReady(false);
     setIsPreparingRehearsalMedia(false);
     setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false);
-    setRehearsalPreflightPhase('auto-initial');
-    setRehearsalMediaStatus('Antes de empezar, vamos a preparar audio y micro.');
+    setRehearsalPreflightPhase('intelligent-check');
+    setRehearsalMediaStatus(null);
     setCompatibilityMessage(null);
     setShowCompatibilityInfo(false);
-  }, []);
+    activateRecognition({ lang: intelligentRecognitionLanguage, lineKey: recognitionPreparationKey });
+  }, [activateRecognition, intelligentRecognitionLanguage, recognitionPreparationKey]);
 
   useEffect(() => {
-    if (!isListeningSupported && listenModeSelection !== 'intelligent') {
+    if (!isCheckingIntelligentRecognition || !isRecognitionAudioActive) return;
+    // The actual recognition service has opened audio, not just the independent
+    // volume detector used by silence advance. Keep this session for the scene.
+    resetSpeechRecognitionTranscript();
+    markSessionPreparationReady('intelligent');
+    setIsRehearsalMediaReady(true);
+    setHasCompletedRehearsalPreflight(true);
+    setRehearsalPreflightPhase(null);
+    setAutoListenEnabled(false);
+  }, [isCheckingIntelligentRecognition, isRecognitionAudioActive, markSessionPreparationReady, resetSpeechRecognitionTranscript]);
+
+  useEffect(() => {
+    if (listenModeSelection === 'intelligent') return;
+    if (!isListeningSupported) {
       setListenModeSelection('manual');
       setIsRehearsalMediaReady(true);
       setIsPreparingRehearsalMedia(false);
@@ -2954,8 +2978,10 @@ export const RehearsalView: React.FC<Props> = ({
   const canReusePreparedSession =
     hasSessionPreparedRehearsalMedia &&
     hasSelectedRehearsalModes &&
-    listenModeSelection !== 'manual';
-  const startConfiguredLabel = canReusePreparedSession
+    listenModeSelection === 'auto';
+  const startConfiguredLabel = listenModeSelection === 'intelligent'
+    ? 'Empezar ensayo'
+    : canReusePreparedSession
     ? 'Iniciar sin calibrar'
     : hasSelectedRehearsalModes
       ? 'Continuar con esta seleccion'
@@ -2963,6 +2989,14 @@ export const RehearsalView: React.FC<Props> = ({
 
   const handleStartConfiguredRehearsal = useCallback((options?: { forceCalibration?: boolean }) => {
     if (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') {
+      return;
+    }
+
+    if (listenModeSelection === 'intelligent') {
+      // This runs in the ordinary Start tap. Never restore a volume calibration
+      // as proof of a live recognition service, or delay start until the scene.
+      if (!spokenOnly) void primeSongPlayback();
+      enableIntelligentListenForDevice();
       return;
     }
 
@@ -2984,11 +3018,6 @@ export const RehearsalView: React.FC<Props> = ({
 
     if (listenModeSelection === 'auto') {
       void enableAutoListenForDevice();
-      return;
-    }
-
-    if (listenModeSelection === 'intelligent') {
-      void enableIntelligentListenForDevice();
       return;
     }
 
@@ -3018,6 +3047,7 @@ export const RehearsalView: React.FC<Props> = ({
     releaseListening,
     rehearsalAudioModeSelection,
     restorePreparedRehearsalSession,
+    spokenOnly,
     stopRecognition,
   ]);
 
@@ -3191,6 +3221,49 @@ export const RehearsalView: React.FC<Props> = ({
     );
   }
 
+  const renderRecognitionError = () => speechRecognitionError ? (
+    <View style={styles.intelligentTranscriptBlock}>
+      <Text style={styles.listenError}>{speechRecognitionError}</Text>
+      {speechRecognitionErrorCode || speechRecognitionErrorDetail ? (
+        <Text style={styles.intelligentMetaText} selectable>
+          Detalle del navegador: {[speechRecognitionErrorCode, speechRecognitionErrorDetail].filter(Boolean).join(' · ')}
+        </Text>
+      ) : null}
+    </View>
+  ) : null;
+
+  if (isCheckingIntelligentRecognition) {
+    return <View style={styles.container}>
+      {renderHeader('Preparando reconocimiento de voz')}
+      <ScrollView contentContainerStyle={styles.preflightScrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.preflightCard}>
+          <Text style={styles.preflightTitle}>
+            {speechRecognitionStatus === 'error' ? 'No se ha podido iniciar la escucha' : 'Abriendo la escucha…'}
+          </Text>
+          <Text style={styles.preflightText}>
+            {speechRecognitionStatus === 'error'
+              ? 'El ensayo conserva tu escena y tu personaje. Puedes volver a intentarlo aquí.'
+              : 'Si aparece una solicitud del navegador para reconocer tu voz, pulsa Permitir. Entraremos en la escena cuando la escucha esté lista.'}
+          </Text>
+          {renderRecognitionError()}
+          {speechRecognitionStatus === 'error' ? <TouchableOpacity
+            accessibilityRole="button" style={styles.btnNext} onPress={enableIntelligentListenForDevice}>
+            <Text style={styles.btnText}>Reintentar inicio</Text>
+          </TouchableOpacity> : null}
+          <TouchableOpacity accessibilityRole="button"
+            style={[styles.preflightActionButton, styles.preflightFallbackButton]}
+            onPress={() => {
+              stopRecognition();
+              setHasConfirmedRehearsalSetup(false);
+              setRehearsalPreflightPhase(null);
+            }}>
+            <Text style={styles.preflightFallbackText}>Cambiar modo de ensayo</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </View>;
+  }
+
   const renderCurrentAudioPanel = () => {
     if (!currentLine || !shouldShowCurrentAudioOptions) {
       return null;
@@ -3327,9 +3400,7 @@ export const RehearsalView: React.FC<Props> = ({
                 ? 'Abriendo el micrófono…'
                 : 'Esperando la entrada del micrófono'}
         </Text>
-        {speechRecognitionError ? (
-          <Text style={styles.listenError}>{speechRecognitionError}</Text>
-        ) : null}
+        {renderRecognitionError()}
         <TouchableOpacity
           style={[styles.intelligentButton, styles.intelligentRetryButton]}
           onPress={handleRetryIntelligentLine}

@@ -46,7 +46,8 @@ test('permission errors survive end events and subsequent scene changes without 
   t.mock.timers.tick(20000);
   assert.equal(handles.length, 1);
   assert.equal(session.getSnapshot().status, 'error');
-  assert.match(session.getSnapshot().error, /Permite el micrófono/);
+  assert.equal(session.getSnapshot().errorCode, 'not-allowed');
+  assert.match(session.getSnapshot().error, /no ha autorizado/);
 });
 
 test('explicit activation calls start synchronously in the tap handler and clears the block', (t) => {
@@ -129,7 +130,7 @@ test('a constructor/start exception produces a recoverable error without backgro
   t.mock.timers.tick(20000);
   assert.equal(handles.length, 1);
   assert.equal(session.getSnapshot().status, 'error');
-  assert.match(session.getSnapshot().error, /bloqueado/);
+  assert.match(session.getSnapshot().error, /no ha autorizado/);
 });
 
 test('disabling the mode or leaving cancels pending restarts and ignores stale callbacks', (t) => {
@@ -183,4 +184,62 @@ test('unsupported browsers remain unsupported without throwing', () => {
   session.restart();
   assert.equal(session.getSnapshot().status, 'unsupported');
   session.dispose();
+});
+
+test('normal Start activates recognition before scene playback is enabled, within the tap', (t) => {
+  let inTap = false;
+  let startedInTap = false;
+  const { session, handles } = fixture(t, () => { startedInTap = inTap; });
+  session.configure(options({ enabled: false }));
+  assert.equal(handles.length, 0);
+  inTap = true;
+  session.activate({ lang: 'es-ES', lineKey: 'prepare:audition' });
+  inTap = false;
+  assert.equal(handles.length, 1);
+  assert.equal(startedInTap, true);
+  session.configure(options({ lineKey: 'prepare:audition' }));
+  assert.equal(session.getSnapshot().isAudioActive, false);
+  handles[0].onstart();
+  assert.equal(session.getSnapshot().isAudioActive, false);
+  handles[0].onaudiostart();
+  assert.equal(session.getSnapshot().isAudioActive, true);
+  session.configure(options());
+  assert.equal(handles.length, 1);
+  assert.notEqual(handles[0].aborted, true);
+  handles[0].onresult({ results: [result('Ey, sonny')] });
+  assert.equal(session.getSnapshot().transcript, 'Ey, sonny');
+});
+
+test('service availability, service authorization and microphone permission keep distinct causes', (t) => {
+  const { session, handles } = fixture(t);
+  session.activate({ lang: 'es-ES', lineKey: 'prepare' });
+  handles[0].onerror({ error: 'service-not-allowed', message: 'Speech recognition service is not available' });
+  assert.match(session.getSnapshot().error, /no está disponible/);
+  assert.doesNotMatch(session.getSnapshot().error, /Permite|bloqueado/);
+  assert.equal(session.getSnapshot().errorDetail, 'Speech recognition service is not available');
+  session.activate({ lang: 'es-ES', lineKey: 'prepare' });
+  handles[1].onerror({ error: 'service-not-allowed', message: 'Speech recognition service permission check has failed' });
+  assert.match(session.getSnapshot().error, /acceder al servicio/);
+  assert.doesNotMatch(session.getSnapshot().error, /Permite el micrófono/);
+  session.activate({ lang: 'es-ES', lineKey: 'prepare' });
+  handles[2].onerror({ error: 'not-allowed', message: 'Microphone permission check has failed' });
+  assert.match(session.getSnapshot().error, /no tiene acceso al micrófono/);
+  assert.equal(session.getSnapshot().errorCode, 'not-allowed');
+});
+
+test('recognition preparation retries in place and preserves the exact native error across renders', (t) => {
+  const { session, handles } = fixture(t);
+  session.activate({ lang: 'es-ES', lineKey: 'prepare' });
+  const message = 'Page is not visible to user';
+  handles[0].onerror({ error: 'not-allowed', message });
+  session.configure(options({ lineKey: 'prepare' }));
+  session.resetTranscript();
+  assert.equal(session.getSnapshot().errorDetail, message);
+  assert.match(session.getSnapshot().error, /página no estaba visible/);
+  session.activate({ lang: 'es-ES', lineKey: 'prepare' });
+  assert.equal(handles.length, 2);
+  assert.equal(session.getSnapshot().errorCode, null);
+  assert.equal(session.getSnapshot().errorDetail, null);
+  handles[1].onaudiostart();
+  assert.equal(session.getSnapshot().isAudioActive, true);
 });

@@ -28,13 +28,24 @@ export type SpeechRecognitionSnapshot = {
   interimTranscript: string;
   isAudioActive: boolean;
   error: string | null;
+  errorCode: string | null;
+  errorDetail: string | null;
 };
 
-const recognitionErrorMessage = (code?: string) => {
+const recognitionErrorMessage = (code?: string, detail = '') => {
   switch (code) {
     case 'not-allowed':
+      if (detail.includes('Page is not visible')) {
+        return 'La escucha se interrumpió porque la página no estaba visible. Vuelve a esta pestaña e inicia de nuevo el ensayo.';
+      }
+      if (detail.includes('Microphone permission check has failed')) {
+        return 'Safari no tiene acceso al micrófono. Permite su uso para esta web y vuelve a iniciar el ensayo.';
+      }
+      return 'El navegador no ha autorizado el inicio del reconocimiento de voz. Puedes reintentarlo desde aquí.';
     case 'service-not-allowed':
-      return 'El navegador ha bloqueado el reconocimiento de voz. Permite el micrófono en los ajustes de este sitio y pulsa Activar micrófono.';
+      return detail.includes('not available')
+        ? 'El servicio de reconocimiento de voz no está disponible en este momento. Puedes volver a intentarlo o ensayar sin reconocimiento.'
+        : 'No se ha podido acceder al servicio de reconocimiento de voz. Puedes volver a intentarlo o ensayar sin reconocimiento.';
     case 'audio-capture':
       return 'No se puede usar el micrófono. Comprueba que esté disponible y pulsa Activar micrófono.';
     case 'network':
@@ -54,7 +65,7 @@ export const createSpeechRecognitionSession = (
 ) => {
   let snapshot: SpeechRecognitionSnapshot = {
     status: Constructor ? 'idle' : 'unsupported', transcript: '', finalTranscript: '',
-    interimTranscript: '', isAudioActive: false, error: null,
+    interimTranscript: '', isAudioActive: false, error: null, errorCode: null, errorDetail: null,
   };
   let recognition: SpeechRecognitionHandle | null = null;
   let enabled = false;
@@ -86,10 +97,10 @@ export const createSpeechRecognitionSession = (
     previous.onerror = previous.onresult = null;
     try { previous.abort(); } catch { /* Already stopped. */ }
   };
-  const fail = (message: string) => {
+  const fail = (message: string, code: string | null = null, detail: string | null = null) => {
     blocked = true;
     detach();
-    update({ status: 'error', isAudioActive: false, error: message });
+    update({ status: 'error', isAudioActive: false, error: message, errorCode: code, errorDetail: detail });
   };
   const resetTranscript = () => {
     committedTranscript = '';
@@ -110,7 +121,7 @@ export const createSpeechRecognitionSession = (
       current.lang = language;
       current.maxAlternatives = 1;
       let hadAudioInput = false;
-      update({ status: 'starting', isAudioActive: false, error: null });
+      update({ status: 'starting', isAudioActive: false, error: null, errorCode: null, errorDetail: null });
       current.onstart = () => {
         if (recognition === current) update({ status: 'listening' });
       };
@@ -126,7 +137,7 @@ export const createSpeechRecognitionSession = (
       };
       current.onerror = (event) => {
         if (recognition !== current || event.error === 'no-speech') return;
-        fail(recognitionErrorMessage(event.error));
+        fail(recognitionErrorMessage(event.error, event.message), event.error ?? null, event.message?.trim() || null);
       };
       current.onresult = (event) => {
         if (recognition !== current) return;
@@ -171,7 +182,8 @@ export const createSpeechRecognitionSession = (
       current.start();
     } catch (error) {
       const code = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-      fail(recognitionErrorMessage(code === 'NotAllowedError' ? 'not-allowed' : undefined));
+      const detail = error instanceof Error ? error.message : '';
+      fail(recognitionErrorMessage(code === 'NotAllowedError' ? 'not-allowed' : undefined, detail), code || null, detail || null);
     }
   };
   const stop = () => {
@@ -181,6 +193,18 @@ export const createSpeechRecognitionSession = (
   };
   return {
     getSnapshot: () => snapshot,
+    // The ordinary Start button can open the real recognizer immediately.
+    // Volume calibration is not evidence that this separate service works.
+    activate: (next: { lang: string; lineKey: string }) => {
+      detach();
+      enabled = true;
+      blocked = false;
+      language = next.lang;
+      lineKey = next.lineKey;
+      latestResults = { length: 0 };
+      resetTranscript();
+      start();
+    },
     configure: (next: { enabled: boolean; lang: string; lineKey: string | null }) => {
       const languageChanged = language !== next.lang;
       const lineChanged = lineKey !== next.lineKey;

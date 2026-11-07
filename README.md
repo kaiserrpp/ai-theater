@@ -12,7 +12,9 @@ Cada obra compartida puede contener mini-guiones de audición independientes del
 
 Durante la revisión, **Guardar mini-guion** y **Cancelar revisión** permanecen en una barra inferior fuera del contenido que se desplaza. Los errores y la confirmación de descarte también aparecen en esa barra. El texto completo de un mini-guion guardado se abre únicamente al pulsar **Ver texto del mini-guion**.
 
-En el avance inteligente, el panel de tu turno muestra si el micrófono está abierto y permite **Activar micrófono** con un toque, también cuando todavía no hay transcripción. Si el navegador bloquea el reconocimiento o no abre la entrada de audio, el error permanece visible hasta reintentarlo; no se repite la solicitud en bucle. La calibración de volumen y el servicio de reconocimiento son comprobaciones diferentes.
+En el avance inteligente, **Empezar ensayo** inicia el servicio de reconocimiento directamente y espera a que abra la entrada de audio antes de entrar en la escena. No se reutiliza una calibración de volumen como prueba de reconocimiento: esa calibración pertenece al modo por silencio. El permiso, si hace falta, se solicita dentro del inicio normal del ensayo. Si el servicio falla, se conserva la escena y se puede reintentar desde la misma pantalla.
+
+El panel de tu turno muestra si el micrófono está abierto y permite **Activar micrófono** con un toque, también cuando todavía no hay transcripción. Los errores distinguen la autorización del micrófono de la disponibilidad del servicio y conservan el código y mensaje originales del navegador para diagnosticar un fallo real. No se repiten solicitudes en bucle ni se da por hecho que el usuario debe cambiar sus ajustes.
 
 Quien abra el enlace de la obra puede leer y ensayar sus escenas sin clave. La creación, modificación, eliminación y publicación de materiales requieren la clave de gestión. Esta se mantiene únicamente en memoria durante la sesión de la app. El servidor utiliza `SONG_ADMIN_PASSWORD` y `BLOB_READ_WRITE_TOKEN`, como el gestor de canciones.
 
