@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import {
   getAuditionLineRoles, normalizeAuditionScript, resolveAuditionPreferences, validateAuditionScript,
   type AuditionPreferences,
@@ -14,6 +14,7 @@ import { AUDITION_PREFERENCES_STORAGE_PREFIX } from '../store/storageKeys';
 import { Dialogue, SCENE_SYSTEM_SPEAKER, SONG_SYSTEM_SPEAKER, ScriptData } from '../types/script';
 import { SharedAuditionScene, SharedScriptManifest } from '../types/sharedScript';
 import { getSceneTitles } from '../utils/scriptScenes';
+import { getAuditionRehearsalPlan, recordAuditionRehearsalProgress, type AuditionRehearsalMode } from '../utils/auditionRehearsal';
 import { AdminAccessPanel } from './AdminAccessPanel';
 import { RehearsalView } from './RehearsalView';
 
@@ -57,7 +58,12 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<AuditionPreferences | null>(null);
-  const [rehearsal, setRehearsal] = useState<{ scene: SharedAuditionScene; roles: string[]; start: number } | null>(null);
+  const [rehearsal, setRehearsal] = useState<{
+    scene: SharedAuditionScene; roles: string[]; start: number; mode: AuditionRehearsalMode; sceneFilter: string[];
+  } | null>(null);
+  const [pendingResumeMode, setPendingResumeMode] = useState<AuditionRehearsalMode | null>(null);
+  const [transcriptVisible, setTranscriptVisible] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [status, setStatus] = useState('');
@@ -74,12 +80,32 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   const selectedRevision = selectedScene?.revision;
   const [loadedPreferencesKey, setLoadedPreferencesKey] = useState<string | null>(null);
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
+  const isEditing = Boolean(draft);
 
   const draftRoles = useMemo(() => [...new Set(draft?.guion.flatMap(getAuditionLineRoles) ?? [])], [draft]);
-  const rehearsalScenes = useMemo(() => rehearsal ? getSceneTitles(rehearsal.scene.scriptData.guion) : [], [rehearsal]);
+  const selectedPlans = useMemo(() => selectedScene && preferences && loadedPreferencesKey === preferencesKey && loadedRevision === selectedRevision ? {
+    ALL: getAuditionRehearsalPlan(selectedScene, preferences, 'ALL'),
+    MINE: getAuditionRehearsalPlan(selectedScene, preferences, 'MINE'),
+  } : null, [selectedScene, preferences, loadedPreferencesKey, preferencesKey, loadedRevision, selectedRevision]);
   const handleProgress = useCallback((lineIndex: number) => setPreferences((previous) =>
-    previous && previous.lineIndex !== lineIndex ? { ...previous, lineIndex } : previous), []);
+    previous && rehearsal && previous.revision === rehearsal.scene.revision
+      ? recordAuditionRehearsalProgress(previous, rehearsal.mode, rehearsal.sceneFilter, rehearsal.roles, lineIndex) : previous), [rehearsal]);
   const exitRehearsal = useCallback(() => setRehearsal(null), []);
+
+  useEffect(() => {
+    setKeyboardInset(0);
+    if (!isEditing || Platform.OS !== 'web' || !window.visualViewport) return;
+    const viewport = window.visualViewport;
+    const update = () => setKeyboardInset(viewport.scale === 1
+      ? Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop)) : 0);
+    viewport.addEventListener('resize', update);
+    viewport.addEventListener('scroll', update);
+    update();
+    return () => {
+      viewport.removeEventListener('resize', update);
+      viewport.removeEventListener('scroll', update);
+    };
+  }, [isEditing]);
 
   // The scene snapshot also guards against writing one scene's progress under another key.
   useEffect(() => {
@@ -87,6 +113,8 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
     setPreferences(null);
     setLoadedPreferencesKey(null);
     setLoadedRevision(null);
+    setPendingResumeMode(null);
+    setTranscriptVisible(false);
     if (preferencesKey && selectedScene) {
       const scene = selectedScene;
       void AsyncStorage.getItem(preferencesKey).then((stored) => {
@@ -191,6 +219,8 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
       onManifestUpdated(next);
       setSelectedId(sceneId ?? null);
       setDraft(null);
+      setTranscriptVisible(false);
+      setPendingResumeMode(null);
       setDiscardRequested(false);
       setNotice('Mini-guion guardado. Ya puedes elegir personaje y ensayar.');
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo guardar el mini-guion.'); }
@@ -210,10 +240,24 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
     finally { setBusy(false); }
   };
 
+  const launchRehearsal = (scene: SharedAuditionScene, mode: AuditionRehearsalMode, resume = false) => {
+    if (!preferences || !selectedPlans || !preferences.roles.length) return;
+    const plan = selectedPlans[mode];
+    if (!plan.lineCount) return;
+    setPendingResumeMode(null);
+    setRehearsal({ scene, mode, roles: [...preferences.roles], sceneFilter: [...plan.sceneFilter],
+      start: resume && plan.canResume ? plan.lineIndex : 0 });
+  };
+
+  const requestRehearsal = (scene: SharedAuditionScene, mode: AuditionRehearsalMode) => {
+    if (selectedPlans?.[mode].canResume) setPendingResumeMode(mode);
+    else launchRehearsal(scene, mode);
+  };
+
   if (rehearsal) {
     return <RehearsalView key={`${rehearsal.scene.id}:${rehearsal.scene.revision}`}
       guion={rehearsal.scene.scriptData.guion} myRoles={rehearsal.roles}
-      filterScenes={rehearsalScenes} spokenOnly
+      filterScenes={rehearsal.sceneFilter} spokenOnly
       scriptId={`audition:${sharedScript?.shareId}:${rehearsal.scene.id}:${rehearsal.scene.revision}`}
       scriptTitle={`${obraTitle} · ${rehearsal.scene.title}`} shareId={sharedScript?.shareId}
       initialIndex={rehearsal.start}
@@ -222,7 +266,9 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView style={[styles.root, Platform.OS === 'web' && { paddingBottom: keyboardInset }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <View style={styles.heading}>
         <Text style={styles.eyebrow}>AUDICIONES · ESCENAS</Text>
         <Text style={styles.title}>{obraTitle}</Text>
@@ -232,9 +278,9 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
         if (draft) setDiscardRequested(true); else onExit();
       }} />
       {!draft ? <AdminAccessPanel /> : null}
-      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+      {error && !draft ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
-      {busy && status ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{status}</Text> : null}
+      {busy && status && !draft ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{status}</Text> : null}
 
       {!sharedScript ? (
         <View style={styles.card}>
@@ -292,13 +338,6 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
             <Action label={`Añadir réplica después del elemento ${index + 1}`} secondary disabled={busy} onPress={() => addLine(index)} />
           </View>)}
           {!draft.guion.length ? <Action label="Añadir primera réplica" secondary disabled={busy} onPress={() => addLine(-1)} /> : null}
-          <Action label={busy ? 'Procesando…' : 'Guardar mini-guion'} disabled={busy || !password} onPress={() => void save()} />
-          <Action label="Cancelar revisión" secondary disabled={busy} onPress={() => setDiscardRequested(true)} />
-          {discardRequested ? <View style={styles.confirmation}>
-            <Text style={styles.hint}>Los cambios de esta revisión todavía no están guardados.</Text>
-            <Action label="Descartar cambios y cerrar revisión" danger onPress={() => { setDraft(null); setDiscardRequested(false); setError(null); }} />
-            <Action label="Seguir revisando" secondary onPress={() => setDiscardRequested(false)} />
-          </View> : null}
         </View>
       ) : (
         <>
@@ -320,35 +359,50 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
           {scenes.map((scene) => <View key={scene.id} style={[styles.card, selectedId === scene.id && styles.selectedCard]}>
             <Text style={styles.subtitle}>{scene.title}</Text>
             <Text style={styles.hint}>{scene.scriptData.personajes.join(' · ')}</Text>
-            <Text style={styles.hint}>{scene.scriptData.guion.filter((line) => getAuditionLineRoles(line).length).length} réplicas</Text>
+            <Text style={styles.hint}>{getSceneTitles(scene.scriptData.guion).length} escenas · {scene.scriptData.guion.filter((line) => getAuditionLineRoles(line).length).length} réplicas</Text>
             <Action label={selectedId === scene.id ? 'Cerrar escena' : `Preparar ${scene.title}`} secondary disabled={busy || refreshing}
               onPress={() => { setSelectedId(selectedId === scene.id ? null : scene.id); setError(null); setDeleteRequested(null); }} />
             {selectedId === scene.id ? (
-              preferences ? <>
+              preferences && selectedPlans ? <>
                 <Text style={styles.label}>¿Qué personaje quieres ensayar?</Text>
                 <View style={styles.tags}>
                   {scene.scriptData.personajes.map((role) => <TouchableOpacity accessibilityRole="checkbox"
                     accessibilityState={{ checked: preferences.roles.includes(role) }} aria-checked={preferences.roles.includes(role)} key={role}
-                    style={[styles.tag, preferences.roles.includes(role) && styles.selectedTag]} onPress={() => setPreferences({ ...preferences,
-                      roles: preferences.roles.includes(role) ? preferences.roles.filter((candidate) => candidate !== role) : [...preferences.roles, role],
-                    })}>
+                    style={[styles.tag, preferences.roles.includes(role) && styles.selectedTag]} onPress={() => {
+                      setPendingResumeMode(null);
+                      setPreferences({ ...preferences,
+                        roles: preferences.roles.includes(role) ? preferences.roles.filter((candidate) => candidate !== role) : [...preferences.roles, role],
+                      });
+                    }}>
                     <Text style={[styles.tagText, preferences.roles.includes(role) && styles.selectedTagText]}>{role}</Text>
                   </TouchableOpacity>)}
                 </View>
                 <Text style={styles.hint}>La app leerá las réplicas de los demás personajes. Tu elección se recuerda en este dispositivo.</Text>
-                <Action label={preferences.lineIndex > 0 && preferences.lineIndex < scene.scriptData.guion.length ? 'Continuar ensayo de audición' : 'Ensayar escena de audición'}
-                  disabled={!preferences.roles.length || busy || refreshing} onPress={() => setRehearsal({ scene, roles: [...preferences.roles],
-                    start: preferences.lineIndex < scene.scriptData.guion.length ? preferences.lineIndex : 0 })} />
-                {preferences.lineIndex > 0 && preferences.lineIndex < scene.scriptData.guion.length ? <Action label="Ensayar desde el principio" secondary
-                  disabled={!preferences.roles.length || busy || refreshing} onPress={() => setRehearsal({ scene, roles: [...preferences.roles], start: 0 })} /> : null}
-                <View style={styles.transcript}>
+                {preferences.roles.length ? <Text style={styles.hint}>
+                  Tus personajes participan en {selectedPlans.MINE.sceneFilter.length} de {selectedPlans.ALL.sceneFilter.length} escenas.
+                  {' '}Ensayaremos las escenas completas, con las réplicas de los demás.
+                </Text> : null}
+                <Action label={`Ensayar mis escenas (${selectedPlans.MINE.sceneFilter.length})`}
+                  disabled={!selectedPlans.MINE.lineCount || busy || refreshing} onPress={() => requestRehearsal(scene, 'MINE')} />
+                <Action label={`Ensayar todas las escenas (${selectedPlans.ALL.sceneFilter.length})`} secondary
+                  disabled={!preferences.roles.length || !selectedPlans.ALL.lineCount || busy || refreshing} onPress={() => requestRehearsal(scene, 'ALL')} />
+                {pendingResumeMode ? <View style={styles.confirmation}>
+                  <Text style={styles.label}>Tienes un ensayo a medias en «{pendingResumeMode === 'MINE' ? 'Mis escenas' : 'Todas las escenas'}».</Text>
+                  <View style={styles.row}>
+                    <Action label="Continuar donde lo dejé" disabled={busy || refreshing} onPress={() => launchRehearsal(scene, pendingResumeMode, true)} />
+                    <Action label="Empezar desde el principio" secondary disabled={busy || refreshing} onPress={() => launchRehearsal(scene, pendingResumeMode)} />
+                  </View>
+                </View> : null}
+                <Action label={transcriptVisible ? 'Ocultar texto del mini-guion' : 'Ver texto del mini-guion'} secondary
+                  onPress={() => setTranscriptVisible(!transcriptVisible)} />
+                {transcriptVisible ? <View style={styles.transcript}>
                   <Text style={styles.label}>Texto del mini-guion</Text>
                   {scene.scriptData.guion.map((line, index) => <View key={index} style={styles.transcriptLine}>
                     <Text style={styles.speaker}>{line.p === SCENE_SYSTEM_SPEAKER ? line.t : getAuditionLineRoles(line).join(' / ') || 'Canción'}</Text>
                     {line.a ? <Text style={styles.stageDirection}>{line.a}</Text> : null}
                     {line.p !== SCENE_SYSTEM_SPEAKER ? <Text style={styles.dialogue}>{line.t}</Text> : null}
                   </View>)}
-                </View>
+                </View> : null}
               </> : <Text style={styles.hint}>Recuperando tu ensayo…</Text>
             ) : null}
             {password ? <View style={styles.row}>
@@ -368,10 +422,36 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
         </>
       )}
     </ScrollView>
+    {draft ? (
+      <View testID="audition-editor-actions" style={styles.editorDock}>
+        {error ? <Text accessibilityRole="alert" style={styles.dockError}>{error}</Text> : null}
+        {busy && status ? <Text accessibilityLiveRegion="polite" style={styles.hint}>{status}</Text> : null}
+        {discardRequested ? <>
+          <Text style={styles.label}>¿Descartar los cambios de esta revisión?</Text>
+          <View style={styles.dockRow}>
+            <View style={styles.dockAction}><Action label="Descartar cambios" danger disabled={busy}
+              onPress={() => { setDraft(null); setDiscardRequested(false); setError(null); }} /></View>
+            <View style={styles.dockAction}><Action label="Seguir revisando" secondary disabled={busy} onPress={() => setDiscardRequested(false)} /></View>
+          </View>
+        </> : <View style={styles.dockRow}>
+          <View style={styles.dockAction}><Action label={busy ? 'Procesando…' : 'Guardar mini-guion'} disabled={busy || !password} onPress={() => void save()} /></View>
+          <View style={styles.dockAction}><Action label="Cancelar revisión" secondary disabled={busy} onPress={() => setDiscardRequested(true)} /></View>
+        </View>}
+      </View>
+    ) : null}
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
+  scroll: { flex: 1 },
+  editorDock: { marginHorizontal: 12, marginBottom: 12, marginTop: 8, padding: 12, gap: 10,
+    backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#c8b6d4',
+    boxShadow: '0px 4px 18px rgba(40, 20, 60, 0.18)', elevation: 8 },
+  dockRow: { flexDirection: 'row', gap: 10 },
+  dockAction: { flex: 1 },
+  dockError: { color: '#a32330', lineHeight: 22 },
   page: { padding: 12, paddingBottom: 48, gap: 16 },
   heading: { padding: 18, alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.97)',
     borderRadius: 18, borderWidth: 1, borderColor: '#dfd5e7' },

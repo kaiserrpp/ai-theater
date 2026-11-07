@@ -67,11 +67,25 @@ const normalizeAuditionScenes = (value) => {
   });
 };
 
-const resolveAuditionPreferences = (scene, saved) => ({
-  roles: Array.isArray(saved?.roles) ? unique(saved.roles.filter((role) => scene.scriptData.personajes.includes(role))) : [],
-  lineIndex: saved?.revision === scene.revision && Number.isInteger(saved?.lineIndex)
-    ? Math.max(0, Math.min(saved.lineIndex, scene.scriptData.guion.length)) : 0,
-  revision: scene.revision,
-});
+const resolveAuditionPreferences = (scene, saved) => {
+  const checkpoint = saved?.mineCheckpoint;
+  const sceneTitles = new Set(scene.scriptData.guion.filter((line) => line.p === SCENE).map((line) => line.t));
+  const validCheckpoint = saved?.revision === scene.revision && isObject(checkpoint) &&
+    Number.isInteger(checkpoint.lineIndex) && checkpoint.lineIndex >= 0 &&
+    Array.isArray(checkpoint.roles) && checkpoint.roles.length > 0 &&
+    checkpoint.roles.every((role) => scene.scriptData.personajes.includes(role)) &&
+    Array.isArray(checkpoint.sceneFilter) && checkpoint.sceneFilter.length > 0 &&
+    checkpoint.sceneFilter.every((title) => sceneTitles.has(title));
+  return {
+    roles: Array.isArray(saved?.roles) ? unique(saved.roles.filter((role) => scene.scriptData.personajes.includes(role))) : [],
+    lineIndex: saved?.revision === scene.revision && Number.isInteger(saved?.lineIndex)
+      ? Math.max(0, Math.min(saved.lineIndex, scene.scriptData.guion.length)) : 0,
+    revision: scene.revision,
+    ...(validCheckpoint ? { mineCheckpoint: {
+      roles: unique(checkpoint.roles), sceneFilter: [...checkpoint.sceneFilter],
+      lineIndex: Math.min(checkpoint.lineIndex, scene.scriptData.guion.length),
+    } } : {}),
+  };
+};
 
 module.exports = { getAuditionLineRoles, validateAuditionScript, normalizeAuditionScript, normalizeAuditionScenes, resolveAuditionPreferences };

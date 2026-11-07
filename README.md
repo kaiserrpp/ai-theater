@@ -8,7 +8,9 @@ Cada obra compartida puede contener mini-guiones de audición independientes del
 2. Abre una obra, o crea una con su nombre; el guion completo es opcional.
 3. Entra en **Audiciones · Escenas** y pulsa **Importar mini-guion PDF**.
 4. Revisa el título, los personajes, el orden, las réplicas y las acotaciones. Puedes corregir un personaje en todo el mini-guion, añadir réplicas o escribir una escena a mano.
-5. Guarda, elige uno o varios personajes y pulsa **Ensayar escena de audición**. El ensayo reutiliza los modos manual, por silencio e inteligente existentes.
+5. Guarda, elige uno o varios personajes y pulsa **Ensayar mis escenas** o **Ensayar todas las escenas**. El ensayo reutiliza los modos manual, por silencio e inteligente existentes y guarda el progreso de cada opción por separado.
+
+Durante la revisión, **Guardar mini-guion** y **Cancelar revisión** permanecen en una barra inferior fuera del contenido que se desplaza. Los errores y la confirmación de descarte también aparecen en esa barra. El texto completo de un mini-guion guardado se abre únicamente al pulsar **Ver texto del mini-guion**.
 
 Quien abra el enlace de la obra puede leer y ensayar sus escenas sin clave. La creación, modificación, eliminación y publicación de materiales requieren la clave de gestión. Esta se mantiene únicamente en memoria durante la sesión de la app. El servidor utiliza `SONG_ADMIN_PASSWORD` y `BLOB_READ_WRITE_TOKEN`, como el gestor de canciones.
 
