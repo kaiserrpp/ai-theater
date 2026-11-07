@@ -1,14 +1,24 @@
 # AI-Theatre
 
+## Inicio y ensayo
+
+**Inicio** da acceso a **Ensayar escenas**, **Escuchar y practicar** y al último ensayo pendiente. La navegación inferior mantiene **Inicio / Ensayar / Canciones**. En Ensayar puedes alternar **Audiciones / Obra**, elegir tus personajes y practicar tus escenas o todas.
+
+Las operaciones de importación, edición, publicación y cambio de obra están en **⋯ → Materiales y gestión** y **⋯ → Cambiar obra**. Escuchar y ensayar no requieren acceso de gestión. La biblioteca musical separa los audios con voz y karaoke, con reproducción, búsqueda de posición, repetición, velocidad y letra cuando está disponible; al cambiar de pestaña conserva un minirreproductor.
+
+El modo inteligente es la opción inicial en navegadores con reconocimiento. Una elección expresa de manual o silencio se conserva. **⋯ → Micrófono y voz**, también accesible desde el botón del micro durante el ensayo, permite cambiarlo. El inicio del reconocimiento sigue ocurriendo dentro del toque de **Empezar / Continuar ensayo**, comprobando audio real en cada sesión; el modo inteligente no requiere calibrar volumen.
+
+La transcripción se muestra por defecto. **Mostrar transcripción** recuerda una desactivación expresa en este dispositivo; ocultarla no detiene la escucha ni la comprobación de palabras. Los detalles de coincidencia e informes quedan dentro de las opciones del micro. El ensayo ofrece controles inferiores de anterior, pausa/reanudar y siguiente.
+
 ## Audiciones de escenas
 
 Cada obra compartida puede contener mini-guiones de audición independientes del guion completo.
 
-1. Abre **Administrar materiales** e introduce la clave de gestión existente.
-2. Abre una obra, o crea una con su nombre; el guion completo es opcional.
-3. Entra en **Audiciones · Escenas** y pulsa **Importar mini-guion PDF**.
+1. Abre una obra en **⋯ → Cambiar obra**. Para crearla sin guion usa **Crear o importar una obra**; el guion completo es opcional.
+2. Entra en **⋯ → Materiales y gestión → Mini-guiones de audición** y activa **Administrar materiales** con la clave existente.
+3. Pulsa **Importar mini-guion PDF**.
 4. Revisa el título, los personajes, el orden, las réplicas y las acotaciones. Puedes corregir un personaje en todo el mini-guion, añadir réplicas o escribir una escena a mano.
-5. Guarda, elige uno o varios personajes y pulsa **Ensayar mis escenas** o **Ensayar todas las escenas**. El ensayo reutiliza los modos manual, por silencio e inteligente existentes y guarda el progreso de cada opción por separado.
+5. Guarda. Para practicar vuelve a Inicio y entra en **Ensayar → Audiciones**, elige el mini-guion y tus personajes. **Mis escenas** y **Todas** conservan el progreso por separado.
 
 Durante la revisión, **Guardar mini-guion** y **Cancelar revisión** permanecen en una barra inferior fuera del contenido que se desplaza. Los errores y la confirmación de descarte también aparecen en esa barra. El texto completo de un mini-guion guardado se abre únicamente al pulsar **Ver texto del mini-guion**.
 

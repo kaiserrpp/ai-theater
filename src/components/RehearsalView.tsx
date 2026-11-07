@@ -6,6 +6,9 @@ import { submitIntelligentLineFeedback } from '../api/sharedScripts';
 import { useSilenceAdvance, type MicrophoneCalibrationSnapshot } from '../hooks/useSilenceAdvance';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { SpeechRecognitionErrorPanel } from './SpeechRecognitionErrorPanel';
+import { MicrophoneSettings } from './MicrophoneSettings';
+import { Button, Chip, Icon, palette, Sheet, ui } from './PracticeUI';
+import { resolveListenPreference, resolveTranscriptPreference, supportsRecognition } from '../utils/rehearsalPreferences';
 import {
   INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX,
   LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
@@ -13,6 +16,7 @@ import {
   REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
   REHEARSAL_AUDIO_MODE_STORAGE_KEY,
   REHEARSAL_LISTEN_MODE_STORAGE_KEY,
+  REHEARSAL_TRANSCRIPT_STORAGE_KEY,
 } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
 import {
@@ -548,13 +552,18 @@ export const RehearsalView: React.FC<Props> = ({
   const [audioError, setAudioError] = useState<string | null>(null);
   const [autoListenEnabled, setAutoListenEnabled] = useState(true);
   const [listenModeSelection, setListenModeSelection] =
-    useState<RehearsalListenModeSelection>('pending');
+    useState<RehearsalListenModeSelection>(() => resolveListenPreference(null, supportsRecognition()));
   const [rehearsalAudioModeSelection, setRehearsalAudioModeSelection] =
-    useState<RehearsalAudioModeSelection>(spokenOnly ? 'karaoke' : 'pending');
+    useState<RehearsalAudioModeSelection>('karaoke');
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(true);
+  const [showMicrophoneMenu, setShowMicrophoneMenu] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [preferenceNotice, setPreferenceNotice] = useState('');
   const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
-  const [showCompatibilityInfo, setShowCompatibilityInfo] = useState(false);
   const [isRehearsalMediaReady, setIsRehearsalMediaReady] = useState(false);
   const [isPreparingRehearsalMedia, setIsPreparingRehearsalMedia] = useState(false);
   const [rehearsalMediaStatus, setRehearsalMediaStatus] = useState<string | null>(null);
@@ -759,6 +768,7 @@ export const RehearsalView: React.FC<Props> = ({
     ]
   );
   const canStartRehearsalAudio =
+    !isPaused &&
     hasConfirmedRehearsalSetup &&
     isRehearsalMediaReady &&
     hasCompletedRehearsalPreflight &&
@@ -843,6 +853,7 @@ export const RehearsalView: React.FC<Props> = ({
   const recognitionPreparationKey = `prepare:${resolvedScriptId}`;
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
   const canRunRehearsalLinePlayback =
+    !isPaused &&
     hasConfirmedRehearsalSetup &&
     isRehearsalMediaReady &&
     hasCompletedRehearsalPreflight &&
@@ -906,6 +917,12 @@ export const RehearsalView: React.FC<Props> = ({
       previousIndex < filteredGuion.length ? previousIndex + 1 : previousIndex
     );
   }, [filteredGuion.length]);
+
+  useEffect(() => {
+    if (!canRunRehearsalLinePlayback || !isSceneMarker(currentLine)) return;
+    const timer = setTimeout(advanceLine, 600);
+    return () => clearTimeout(timer);
+  }, [advanceLine, canRunRehearsalLinePlayback, currentLine]);
 
   const {
     listeningStatus,
@@ -1413,7 +1430,6 @@ export const RehearsalView: React.FC<Props> = ({
       setRehearsalPreflightPhase(null);
       setRehearsalMediaStatus(null);
       setCompatibilityMessage(reasonMessage);
-      setShowCompatibilityInfo(false);
       await releaseListening();
 
       try {
@@ -1436,7 +1452,6 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalPreflightPhase('auto-initial');
     setRehearsalMediaStatus('Antes de empezar, vamos a preparar micro y voz.');
     setCompatibilityMessage(null);
-    setShowCompatibilityInfo(false);
 
     try {
       await Promise.all([
@@ -1461,7 +1476,6 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalPreflightPhase('intelligent-check');
     setRehearsalMediaStatus(null);
     setCompatibilityMessage(null);
-    setShowCompatibilityInfo(false);
     activateRecognition({ lang: intelligentRecognitionLanguage, lineKey: recognitionPreparationKey });
   }, [activateRecognition, intelligentRecognitionLanguage, recognitionPreparationKey]);
 
@@ -1761,7 +1775,6 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalPreflightPhase(null);
     setRehearsalMediaStatus(null);
     setCompatibilityMessage(null);
-    setShowCompatibilityInfo(false);
     setHasSessionPreparedRehearsalMedia(true);
 
     if (listenModeSelection !== 'auto') {
@@ -1842,27 +1855,26 @@ export const RehearsalView: React.FC<Props> = ({
 
     const loadRehearsalPreferences = async () => {
       try {
-        const [storedListenMode, storedAudioMode] = await Promise.all([
+        const [storedListenMode, storedAudioMode, storedTranscript] = await Promise.all([
           AsyncStorage.getItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY),
           AsyncStorage.getItem(REHEARSAL_AUDIO_MODE_STORAGE_KEY),
+          AsyncStorage.getItem(REHEARSAL_TRANSCRIPT_STORAGE_KEY),
         ]);
 
         if (!isMounted) {
           return;
         }
 
-        if (
-          isConfirmedListenMode(storedListenMode) &&
-          (storedListenMode !== 'intelligent' || isSpeechRecognitionSupported)
-        ) {
-          setListenModeSelection(storedListenMode);
-        }
+        setListenModeSelection(resolveListenPreference(storedListenMode, isSpeechRecognitionSupported));
+        setShowTranscript(resolveTranscriptPreference(storedTranscript));
 
         if (isSharedSongAudioKind(storedAudioMode)) {
           setRehearsalAudioModeSelection(storedAudioMode);
         }
       } catch (error) {
         console.error('Error cargando preferencias de ensayo', error);
+      } finally {
+        if (isMounted) setPreferencesLoaded(true);
       }
     };
 
@@ -2870,70 +2882,34 @@ export const RehearsalView: React.FC<Props> = ({
     shouldAskForRehearsalAudioChoice,
   ]);
 
-  const renderHeader = (title: string) => (
-    <View style={styles.header}>
-      <View style={styles.headerActions}>
-        <TouchableOpacity onPress={handleExit}>
-          <Text style={styles.blue}>Cerrar ensayo</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={goBackLine} disabled={!canGoBack}>
-          <Text style={[styles.backLink, !canGoBack && styles.backLinkDisabled]}>{'<'} Linea anterior</Text>
-        </TouchableOpacity>
-        {isListeningSupported && listenModeSelection === 'auto' ? (
-          <TouchableOpacity
-            onPress={() => {
-              if (!autoListenEnabled) {
-                void enableAutoListenForDevice();
-              }
-            }}
-            disabled={autoListenEnabled}
-          >
-            <Text
-              style={[
-                styles.listenLink,
-                autoListenEnabled && styles.listenLinkActive,
-                !autoListenEnabled && styles.listenLinkResettable,
-              ]}
-            >
-              {listeningStatus === 'requesting'
-                ? 'Pidiendo micro...'
-                : isListeningActive
-                  ? 'Escucha activa'
-                  : autoListenEnabled
-                    ? 'Escucha automatica'
-                    : 'Escucha manual'}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      <View style={styles.headerStatus}>
-        <View style={styles.headerStatusTopRow}>
-          <Text style={styles.sceneName}>{title}</Text>
-          {compatibilityMessage ? (
-            <TouchableOpacity
-              style={styles.compatibilityDot}
-              onPress={() => setShowCompatibilityInfo((previous) => !previous)}
-            >
-              <Text style={styles.compatibilityDotText}>!</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        {listenModeSelection === 'auto' && autoListenEnabled ? (
-          <Text style={styles.listenStatus}>
-            {isListeningActive ? 'Micro escuchando tu replica' : 'Escucha lista para tu proxima replica'}
-          </Text>
-        ) : null}
-        {listenModeSelection === 'intelligent' ? (
-          <Text style={styles.listenStatus}>Autoavance inteligente beta</Text>
-        ) : null}
-        {compatibilityMessage && showCompatibilityInfo ? (
-          <View style={styles.compatibilityPopover}>
-            <Text style={styles.compatibilityPopoverText}>{compatibilityMessage}</Text>
-          </View>
-        ) : null}
-      </View>
+  const renderHeader = (title: string) => <>
+    <View style={[ui.header, { paddingVertical: 10 }]}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar ensayo" onPress={handleExit} style={ui.icon}><Icon name="arrow-left" /></TouchableOpacity>
+      <View style={{ flex: 1, gap: 3 }}><Text numberOfLines={1} style={[ui.text, { fontSize: 12 }]}>{title}</Text><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{scriptTitle || 'Ensayo'}</Text></View>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Micrófono y voz" onPress={() => setShowMicrophoneMenu(true)} style={[ui.row, { gap: 4, minHeight: 46 }]}>
+        <Icon name={listenModeSelection === 'manual' ? 'microphone-off' : 'microphone-outline'} size={20} />
+        <Text style={{ color: palette.plum, fontSize: 12, fontWeight: '700' }}>{listenModeSelection === 'intelligent' ? 'Inteligente' : listenModeSelection === 'auto' ? 'Silencio' : 'Manual'} ⌄</Text>
+      </TouchableOpacity>
     </View>
-  );
+    <Sheet title="Micrófono y voz" visible={showMicrophoneMenu} onClose={() => setShowMicrophoneMenu(false)}>
+      <MicrophoneSettings mode={listenModeSelection === 'pending' ? 'intelligent' : listenModeSelection} supported={isSpeechRecognitionSupported}
+        onModeChange={(mode) => {
+          if (mode === listenModeSelection) return;
+          stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition(); void releaseListening();
+          setIsPaused(false); setHasConfirmedRehearsalSetup(false); setRehearsalPreflightPhase(null);
+          handleSelectListenMode(mode);
+        }} showTranscript={showTranscript} onTranscriptChange={(visible) => {
+          setShowTranscript(visible);
+          void AsyncStorage.setItem(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)).catch(() => setPreferenceNotice('No se pudo recordar este ajuste. Sigue activo durante este ensayo.'));
+        }} />
+      {!spokenOnly ? <><Text style={ui.label}>AUDIO DE LAS CANCIONES</Text><View style={ui.wrap}><Chip label="Karaoke" selected={rehearsalAudioModeSelection === 'karaoke'} onPress={() => handleSelectRehearsalAudioMode('karaoke')} /><Chip label="Con voz" selected={rehearsalAudioModeSelection === 'vocal_guide'} onPress={() => handleSelectRehearsalAudioMode('vocal_guide')} /></View></> : null}
+      <Button label={showDiagnostics ? 'Ocultar detalles de reconocimiento' : 'Ver detalles de reconocimiento'} secondary onPress={() => { setShowDiagnostics(!showDiagnostics); setShowMicrophoneMenu(false); }} />
+      {renderIntelligentFeedbackBar()}
+      {compatibilityMessage ? <Text style={ui.text}>{compatibilityMessage}</Text> : null}
+      {preferenceNotice ? <Text style={ui.error}>{preferenceNotice}</Text> : null}
+      <Button label="Listo" onPress={() => setShowMicrophoneMenu(false)} />
+    </Sheet>
+  </>;
 
   const renderIntelligentFeedbackBar = () => {
     if (
@@ -2974,20 +2950,6 @@ export const RehearsalView: React.FC<Props> = ({
     !hasConfirmedRehearsalSetup ||
     listenModeSelection === 'pending' ||
     rehearsalAudioModeSelection === 'pending';
-  const hasSelectedRehearsalModes =
-    listenModeSelection !== 'pending' && rehearsalAudioModeSelection !== 'pending';
-  const canReusePreparedSession =
-    hasSessionPreparedRehearsalMedia &&
-    hasSelectedRehearsalModes &&
-    listenModeSelection === 'auto';
-  const startConfiguredLabel = listenModeSelection === 'intelligent'
-    ? 'Empezar ensayo'
-    : canReusePreparedSession
-    ? 'Iniciar sin calibrar'
-    : hasSelectedRehearsalModes
-      ? 'Continuar con esta seleccion'
-      : 'Empezar ensayo';
-
   const handleStartConfiguredRehearsal = useCallback((options?: { forceCalibration?: boolean }) => {
     if (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') {
       return;
@@ -3033,7 +2995,6 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalPreflightPhase(null);
     setRehearsalMediaStatus(null);
     setCompatibilityMessage(null);
-    setShowCompatibilityInfo(false);
     markSessionPreparationReady('manual');
     void releaseListening();
     void stopRecognition();
@@ -3053,173 +3014,17 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   if (shouldShowInitialSetup) {
-    return (
-      <View style={styles.container}>
-        {renderHeader('Configurar ensayo')}
-        <ScrollView
-          contentContainerStyle={styles.preflightScrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.preflightCard}>
-            <Text style={styles.preflightTitle}>Como quieres ensayar?</Text>
-            <Text style={styles.preflightText}>
-              Puedes ensayar manualmente, con silencio automatico o probar el modo inteligente
-              experimental.
-            </Text>
-            <Text style={styles.preflightStatus}>
-              Selecciona Ensayar sin micro si todavia no estas confiado con tus frases y necesitas
-              leerlas con calma.
-            </Text>
-            {hasSelectedRehearsalModes ? (
-              <Text style={styles.preflightStatusSecondary}>
-                Hemos dejado seleccionados tus ultimos modos. Puedes continuar con ellos o cambiarlos
-                aqui mismo.
-              </Text>
-            ) : null}
-            {canReusePreparedSession ? (
-              <Text style={styles.preflightStatus}>
-                Audio y micro ya preparados en esta sesion.
-              </Text>
-            ) : null}
-            {canReusePreparedSession ? (
-              <TouchableOpacity
-                style={[styles.preflightActionButton, styles.preflightFallbackButton]}
-                onPress={() => handleStartConfiguredRehearsal({ forceCalibration: true })}
-              >
-                <Text style={styles.preflightFallbackText}>Recalibrar antes de empezar</Text>
-              </TouchableOpacity>
-            ) : null}
-            <Text style={styles.preflightSectionTitle}>Modo de dialogo</Text>
-            <View style={styles.preflightActions}>
-              <TouchableOpacity
-                style={[
-                  styles.preflightActionButton,
-                  listenModeSelection === 'auto'
-                    ? styles.preflightConfirmButton
-                    : styles.preflightUnselectedButton,
-                ]}
-                onPress={() => handleSelectListenMode('auto')}
-              >
-                <Text
-                  style={[
-                    styles.preflightConfirmText,
-                    listenModeSelection !== 'auto' && styles.preflightUnselectedButtonText,
-                  ]}
-                >
-                  Micro por silencio
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.preflightActionButton,
-                  listenModeSelection === 'intelligent'
-                    ? styles.preflightIntelligentButton
-                    : styles.preflightUnselectedButton,
-                  !isSpeechRecognitionSupported && styles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  if (isSpeechRecognitionSupported) {
-                    handleSelectListenMode('intelligent');
-                  }
-                }}
-                disabled={!isSpeechRecognitionSupported}
-              >
-                <Text
-                  style={[
-                    styles.preflightConfirmText,
-                    listenModeSelection !== 'intelligent' && styles.preflightUnselectedButtonText,
-                  ]}
-                >
-                  Autoavance inteligente beta
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.preflightActionButton,
-                  listenModeSelection === 'manual'
-                    ? styles.preflightManualButton
-                    : styles.preflightUnselectedButton,
-                ]}
-                onPress={() => handleSelectListenMode('manual')}
-              >
-                <Text
-                  style={[
-                    styles.preflightManualText,
-                    listenModeSelection !== 'manual' && styles.preflightUnselectedButtonText,
-                  ]}
-                >
-                  Ensayar sin micro
-                </Text>
-              </TouchableOpacity>
-            </View>
-            {!isSpeechRecognitionSupported ? (
-              <Text style={styles.preflightStatusSecondary}>
-                Este navegador no ofrece reconocimiento de voz web. Puedes usar silencio o modo manual.
-              </Text>
-            ) : null}
-            {!spokenOnly ? <>
-            <Text style={styles.preflightSectionTitle}>Modo musical</Text>
-            <Text style={styles.preflightText}>
-              Priorizaremos ese tipo de audio en canciones y numeros musicales. Si no existe,
-              usaremos automaticamente el otro.
-            </Text>
-            <View style={styles.preflightActions}>
-              <TouchableOpacity
-                style={[
-                  styles.preflightActionButton,
-                  rehearsalAudioModeSelection === 'karaoke'
-                    ? styles.preflightMusicKaraokeButton
-                    : styles.preflightUnselectedButton,
-                ]}
-                onPress={() => handleSelectRehearsalAudioMode('karaoke')}
-              >
-                <Text
-                  style={[
-                    styles.preflightConfirmText,
-                    rehearsalAudioModeSelection !== 'karaoke' && styles.preflightUnselectedButtonText,
-                  ]}
-                >
-                  Karaoke
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.preflightActionButton,
-                  rehearsalAudioModeSelection === 'vocal_guide'
-                    ? styles.preflightMusicGuideButton
-                    : styles.preflightUnselectedButton,
-                ]}
-                onPress={() => handleSelectRehearsalAudioMode('vocal_guide')}
-              >
-                <Text
-                  style={[
-                    styles.preflightConfirmText,
-                    rehearsalAudioModeSelection !== 'vocal_guide' &&
-                      styles.preflightUnselectedButtonText,
-                  ]}
-                >
-                  Vocal guide
-                </Text>
-              </TouchableOpacity>
-            </View>
-            </> : null}
-            <TouchableOpacity
-              style={[
-                styles.btnNext,
-                (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') &&
-                  styles.buttonDisabled,
-              ]}
-              onPress={() => handleStartConfiguredRehearsal()}
-              disabled={
-                listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending'
-              }
-            >
-              <Text style={styles.btnText}>{startConfiguredLabel}</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </View>
-    );
+    return <View style={styles.container}>
+      {renderHeader('Listo para ensayar')}
+      <ScrollView contentContainerStyle={[ui.page, { paddingTop: 40 }]}>
+        <Text style={ui.label}>TU ENSAYO</Text>
+        <Text style={ui.title}>{initialIndex > 0 ? 'Seguimos donde lo dejaste' : 'Vamos a escena'}</Text>
+        <Text style={ui.text}>{myRoles.join(', ')} · {filterScenes.length} {filterScenes.length === 1 ? 'escena' : 'escenas'}</Text>
+        <View style={ui.card}><Icon name={listenModeSelection === 'manual' ? 'gesture-tap' : 'microphone-outline'} size={32} /><Text style={ui.subtitle}>{listenModeSelection === 'intelligent' ? 'Modo inteligente' : listenModeSelection === 'auto' ? 'Avance al terminar de hablar' : 'Modo manual'}</Text><Text style={ui.text}>{listenModeSelection === 'intelligent' ? 'La app interpreta los demás personajes y comprueba tus palabras cuando llega tu turno.' : listenModeSelection === 'auto' ? 'Prepararemos el micro para avanzar cuando termines tu réplica y guardes silencio.' : 'La app interpreta los demás personajes. Pulsa siguiente al terminar tu réplica.'}</Text></View>
+        <Button label={preferencesLoaded ? (initialIndex > 0 ? 'Continuar ensayo' : 'Empezar ensayo') : 'Recuperando preferencias…'} disabled={!preferencesLoaded} onPress={() => { setIsPaused(false); handleStartConfiguredRehearsal(); }} />
+        <Button label="Micrófono y voz" secondary onPress={() => setShowMicrophoneMenu(true)} />
+      </ScrollView>
+    </View>;
   }
 
   const renderRecognitionError = (onRetry: () => void, retryLabel: string) => speechRecognitionError ? (
@@ -3382,7 +3187,7 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.intelligentPanel}>
         <Text style={styles.intelligentLabel}>
-          {speechRecognitionStatus === 'error'
+          {isPaused ? 'Ensayo en pausa' : speechRecognitionStatus === 'error'
             ? 'La escucha necesita tu atención'
             : isRecognitionAudioActive
               ? 'Micrófono abierto. Puedes hablar.'
@@ -3391,7 +3196,8 @@ export const RehearsalView: React.FC<Props> = ({
                 : 'Esperando la entrada del micrófono'}
         </Text>
         {renderRecognitionError(handleRetryIntelligentLine, 'Activar micrófono')}
-        {!speechRecognitionError ? <TouchableOpacity
+        {!isPaused && !speechRecognitionError && !isRecognitionAudioActive ? <TouchableOpacity
+          accessibilityRole="button"
           style={[styles.intelligentButton, styles.intelligentRetryButton]}
           onPress={handleRetryIntelligentLine}
           accessibilityLabel={hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
@@ -3400,27 +3206,17 @@ export const RehearsalView: React.FC<Props> = ({
             {hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
           </Text>
         </TouchableOpacity> : null}
+        {showTranscript ? <View testID="rehearsal-transcript" style={{ gap: 6, marginTop: 10 }}>
+          <Text style={ui.label}>HE OÍDO</Text>
+          <Text style={[ui.text, { color: palette.ink }]}>{speechRecognitionTranscript || 'Tu transcripción aparecerá aquí…'}</Text>
+        </View> : null}
+        {showDiagnostics ? <>
         <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>
         <Text style={styles.intelligentHint}>
           Avanzamos si la coincidencia supera {Math.round(INTELLIGENT_AUTO_ADVANCE_THRESHOLD * 100)}% o si el cierre
           de la replica encaja bien. El detalle queda guardado para repasar despues.
           Tambien puedes decir Linea buena para aceptar la replica por voz.
         </Text>
-        <View style={styles.intelligentTranscriptBlock}>
-          <Text style={styles.intelligentLabel}>Debias decir</Text>
-          <Text style={styles.intelligentExpectedText}>{currentLine?.t}</Text>
-        </View>
-        <View style={styles.intelligentTranscriptBlock}>
-          <Text style={styles.intelligentLabel}>He oido</Text>
-          <Text style={styles.intelligentHeardText}>
-            {speechRecognitionTranscript || 'Aun no hay transcripcion...'}
-          </Text>
-          {speechRecognitionInterimTranscript ? (
-            <Text style={styles.intelligentInterimText}>
-              Parcial: {speechRecognitionInterimTranscript}
-            </Text>
-          ) : null}
-        </View>
         <View style={styles.intelligentScoreRow}>
           <Text style={styles.intelligentLabel}>Coincidencia</Text>
           <Text style={[styles.intelligentScore, scoreToneStyle]}>{scorePercent}%</Text>
@@ -3523,6 +3319,7 @@ export const RehearsalView: React.FC<Props> = ({
             </Text>
           </TouchableOpacity>
         ) : null}
+        </> : null}
       </View>
     );
   };
@@ -3718,12 +3515,9 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.container}>
         {renderHeader('Cambio de escena')}
-        {renderIntelligentFeedbackBar()}
         <View style={styles.intro}>
           <Text style={styles.introTitle}>Escena: {currentLine.t}</Text>
-          <TouchableOpacity style={styles.btnNext} onPress={advanceLine}>
-            <Text style={styles.btnText}>Empezar esta escena</Text>
-          </TouchableOpacity>
+          <Button label="Empezar esta escena" onPress={advanceLine} />
         </View>
       </View>
     );
@@ -3733,7 +3527,6 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.container}>
         {renderHeader('Cancion dentro de la escena')}
-        {renderIntelligentFeedbackBar()}
 
         <ScrollView contentContainerStyle={styles.center}>
           <View style={styles.songBox}>
@@ -3822,8 +3615,7 @@ export const RehearsalView: React.FC<Props> = ({
 
   return (
     <View style={styles.container}>
-      {renderHeader(`Ensayando ${filterScenes.length} escenas`)}
-      {renderIntelligentFeedbackBar()}
+      {renderHeader(`${Math.min(currentIndex + 1, filteredGuion.length)} / ${filteredGuion.length} · Ensayo`)}
 
       <ScrollView contentContainerStyle={styles.center}>
         {isFinished ? (
@@ -3851,13 +3643,15 @@ export const RehearsalView: React.FC<Props> = ({
           </View>
         ) : (
           <View style={[styles.box, isMyTurn && styles.myBox]}>
+            {currentIndex > 0 && !isSceneMarker(filteredGuion[currentIndex - 1]) ? <View style={{ gap: 5, marginBottom: 24, alignSelf: 'stretch' }}><Text style={[ui.label, { color: palette.sub }]}>{filteredGuion[currentIndex - 1].p} · ANTES</Text><Text numberOfLines={3} style={ui.text}>{filteredGuion[currentIndex - 1].t}</Text></View> : null}
+            <Text style={ui.label}>{isMyTurn ? 'TU TURNO' : 'ESCUCHA'}</Text>
             <Text style={[styles.name, isMyTurn && styles.myName]}>{currentLine?.p}</Text>
             {currentLine?.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
             <Text style={[styles.text, isMyTurn && styles.myText]}>{currentLine?.t}</Text>
             {isMyTurn && (
               <Text style={styles.myTurnHint}>
                 {listenModeSelection === 'intelligent'
-                  ? 'Tu turno: habla con naturalidad. Si la app no entiende, se quedara parada.'
+                  ? 'Habla con naturalidad. Avanzaremos al completar tu réplica.'
                   : listenModeSelection === 'manual'
                     ? 'Tu turno: interpreta tu réplica y pulsa siguiente cuando termines.'
                     : 'Tu turno: lee y guardaremos silencio para pasar solos, o pulsa siguiente si lo prefieres.'}
@@ -3866,7 +3660,7 @@ export const RehearsalView: React.FC<Props> = ({
             {isMyTurn && listeningStatus === 'error' && listeningError ? (
               <Text style={styles.listenError}>{listeningError}</Text>
             ) : null}
-            {isMyTurn && autoListenEnabled ? (
+            {isMyTurn && autoListenEnabled && showDiagnostics ? (
               <View style={styles.listenMonitor}>
                 <Text style={styles.listenHint}>
                   {isListeningActive
@@ -3901,7 +3695,7 @@ export const RehearsalView: React.FC<Props> = ({
               </View>
             ) : null}
             {renderIntelligentLinePanel()}
-            {!isMyTurn && speechStatusMessage ? (
+            {!isMyTurn && speechStatusMessage && showDiagnostics ? (
               <View style={styles.speechMonitor}>
                 <Text style={styles.speechMonitorText}>{speechStatusMessage}</Text>
                 {autoListenEnabled ? (
@@ -3926,17 +3720,24 @@ export const RehearsalView: React.FC<Props> = ({
         )}
       </ScrollView>
 
-      {!isFinished && (
-        <TouchableOpacity style={[styles.footer, isMyTurn && styles.footerActive]} onPress={advanceLine}>
-          <Text style={styles.btnText}>{isMyTurn ? 'Hecho (siguiente)' : 'Saltar linea'}</Text>
-        </TouchableOpacity>
-      )}
+      {!isFinished ? <View style={[ui.header, { justifyContent: 'space-between', borderTopWidth: 1, borderBottomWidth: 0, backgroundColor: palette.surface }]}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Línea anterior" disabled={!canGoBack} onPress={goBackLine} style={[ui.icon, !canGoBack && { opacity: 0.3 }]}><Icon name="skip-previous" size={28} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={isPaused ? 'Reanudar ensayo' : 'Pausar ensayo'} onPress={() => {
+          if (isPaused) {
+            if (listenModeSelection === 'intelligent') activateRecognition({ lang: intelligentRecognitionLanguage, lineKey: recognitionLineKey || recognitionPreparationKey });
+            setIsPaused(false);
+          } else {
+            setIsPaused(true); stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition(); void releaseListening();
+          }
+        }} style={[ui.button, ui.row, { minWidth: 140 }]}><Icon name={isPaused ? 'play' : 'pause'} color="#fff" /><Text style={ui.buttonText}>{isPaused ? 'Reanudar' : 'Pausa'}</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Siguiente línea" onPress={advanceLine} style={ui.icon}><Icon name="skip-next" size={28} /></TouchableOpacity>
+      </View> : null}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: palette.bg },
   header: {
     paddingTop: 60,
     padding: 20,
@@ -4006,7 +3807,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#eefcff',
     borderWidth: 1,
-    borderColor: '#bde4ec',
+    borderColor: palette.rule,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -4036,7 +3837,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '800',
   },
-  center: { flexGrow: 1, justifyContent: 'center', padding: 25 },
+  center: { flexGrow: 1, justifyContent: 'center', padding: 22 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
   preflightScrollContent: {
@@ -4050,7 +3851,7 @@ const styles = StyleSheet.create({
     maxWidth: 540,
     padding: 24,
     borderRadius: 20,
-    backgroundColor: '#f8fbff',
+    backgroundColor: palette.surface,
     borderWidth: 1,
     borderColor: '#d7e6f5',
     gap: 16,
@@ -4225,7 +4026,7 @@ const styles = StyleSheet.create({
   },
   finishedBox: { alignItems: 'center' },
   finishedTitle: { fontSize: 20, fontWeight: 'bold' },
-  box: { padding: 30, borderRadius: 20, backgroundColor: '#f8f9fa', alignItems: 'center' },
+  box: { paddingVertical: 24, gap: 8, alignItems: 'flex-start' },
   songBox: {
     padding: 28,
     borderRadius: 20,
@@ -4374,13 +4175,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  myBox: { backgroundColor: '#fff0f0', borderWidth: 2, borderColor: 'red' },
-  name: { fontSize: 22, fontWeight: '900', marginBottom: 10 },
-  myName: { color: 'red' },
+  myBox: { backgroundColor: 'transparent' },
+  name: { fontSize: 16, fontWeight: '700', marginTop: 12, marginBottom: 8, color: palette.sub },
+  myName: { color: palette.plum },
   acot: { fontStyle: 'italic', color: '#666', marginBottom: 15 },
-  text: { fontSize: 26, textAlign: 'center', lineHeight: 38 },
-  myText: { color: '#d32f2f', fontWeight: '500' },
-  myTurnHint: { marginTop: 20, fontSize: 14, color: '#d32f2f', fontWeight: 'bold' },
+  text: { fontSize: 30, textAlign: 'left', lineHeight: 41, color: palette.ink },
+  myText: { color: palette.ink, fontWeight: '600' },
+  myTurnHint: { marginTop: 14, fontSize: 14, lineHeight: 22, color: palette.sub },
   listenHint: {
     marginTop: 12,
     fontSize: 14,
@@ -4429,9 +4230,9 @@ const styles = StyleSheet.create({
     width: '100%',
     padding: 14,
     borderRadius: 16,
-    backgroundColor: 'rgba(238, 252, 255, 0.94)',
+    backgroundColor: palette.surface,
     borderWidth: 1,
-    borderColor: '#bde4ec',
+    borderColor: palette.rule,
     gap: 10,
   },
   intelligentTitle: {

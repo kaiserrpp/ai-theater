@@ -17,8 +17,14 @@ import { getSceneTitles } from '../utils/scriptScenes';
 import { getAuditionRehearsalPlan, recordAuditionRehearsalProgress, type AuditionRehearsalMode } from '../utils/auditionRehearsal';
 import { AdminAccessPanel } from './AdminAccessPanel';
 import { RehearsalView } from './RehearsalView';
+import { Button, Chip, Icon, palette, ui } from './PracticeUI';
 
 interface Props {
+  practiceOnly?: boolean;
+  initialSceneId?: string | null;
+  initialMode?: AuditionRehearsalMode;
+  onRehearsalActiveChange?: (active: boolean) => void;
+  onPracticeSelected?: (id: string, mode: AuditionRehearsalMode) => void;
   sharedScript: SharedScriptManifest | null;
   obraTitle: string;
   onEnsureShared: () => Promise<SharedScriptManifest | undefined>;
@@ -53,7 +59,7 @@ const Field = ({ label, value, onChangeText, multiline = false, editable = true 
   </View>
 );
 
-export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, onManifestUpdated, onExit }: Props) => {
+export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, onManifestUpdated, onExit, practiceOnly = false, initialSceneId, initialMode, onRehearsalActiveChange, onPracticeSelected }: Props) => {
   const password = useAdminPassword();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -73,6 +79,8 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   const [deleteRequested, setDeleteRequested] = useState<string | null>(null);
   const [renamingRole, setRenamingRole] = useState<string | null>(null);
   const [roleName, setRoleName] = useState('');
+  const [practiceMine, setPracticeMine] = useState(true);
+  const [showPracticeRoles, setShowPracticeRoles] = useState(false);
   const scenes = sharedScript?.auditionScenes ?? [];
   const selectedScene = scenes.find((scene) => scene.id === selectedId) ?? null;
   const preferencesKey = sharedScript && selectedScene
@@ -91,6 +99,9 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
     previous && rehearsal && previous.revision === rehearsal.scene.revision
       ? recordAuditionRehearsalProgress(previous, rehearsal.mode, rehearsal.sceneFilter, rehearsal.roles, lineIndex) : previous), [rehearsal]);
   const exitRehearsal = useCallback(() => setRehearsal(null), []);
+  useEffect(() => { if (initialSceneId) setSelectedId(initialSceneId); }, [initialSceneId]);
+  useEffect(() => { if (initialMode) setPracticeMine(initialMode === 'MINE'); }, [initialMode]);
+  useEffect(() => { onRehearsalActiveChange?.(Boolean(rehearsal)); }, [rehearsal, onRehearsalActiveChange]);
 
   useEffect(() => {
     setKeyboardInset(0);
@@ -245,6 +256,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
     const plan = selectedPlans[mode];
     if (!plan.lineCount) return;
     setPendingResumeMode(null);
+    onPracticeSelected?.(scene.id, mode);
     setRehearsal({ scene, mode, roles: [...preferences.roles], sceneFilter: [...plan.sceneFilter],
       start: resume && plan.canResume ? plan.lineIndex : 0 });
   };
@@ -263,6 +275,32 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
       initialIndex={rehearsal.start}
       onProgressChange={handleProgress}
       onExit={exitRehearsal} />;
+  }
+
+  if (practiceOnly) {
+    return <ScrollView contentContainerStyle={ui.page}>
+      {selectedScene ? <>
+        <TouchableOpacity accessibilityRole="button" onPress={() => setSelectedId(null)} style={ui.row}><Icon name="arrow-left" /><Text style={[ui.text, { color: palette.plum }]}>Todas las audiciones</Text></TouchableOpacity>
+        <Text style={ui.subtitle}>{selectedScene.title}</Text>
+        {preferences && selectedPlans ? <>
+          <TouchableOpacity accessibilityRole="button" onPress={() => setShowPracticeRoles(!showPracticeRoles)} style={[ui.card, ui.row, { padding: 15 }]}><Icon name="account-outline" /><View style={{ flex: 1 }}><Text style={ui.text}>Mis personajes</Text><Text style={{ color: palette.ink, fontWeight: '600' }}>{preferences.roles.join(', ') || 'Elegir personaje'}</Text></View><Icon name="chevron-down" /></TouchableOpacity>
+          {showPracticeRoles || !preferences.roles.length ? <View style={ui.wrap}>{selectedScene.scriptData.personajes.map((role) => <Chip key={role} label={role} selected={preferences.roles.includes(role)} onPress={() => { setPendingResumeMode(null); setPreferences({ ...preferences, roles: preferences.roles.includes(role) ? preferences.roles.filter((candidate) => candidate !== role) : [...preferences.roles, role] }); }} />)}</View> : null}
+          <View style={ui.wrap}><Chip label={`Mis escenas · ${selectedPlans.MINE.sceneFilter.length}`} selected={practiceMine} onPress={() => setPracticeMine(true)} /><Chip label={`Todas · ${selectedPlans.ALL.sceneFilter.length}`} selected={!practiceMine} onPress={() => setPracticeMine(false)} /></View>
+          <Text style={ui.text}>La app interpreta los demás personajes y espera tu réplica.</Text>
+          <Button label={selectedPlans[practiceMine ? 'MINE' : 'ALL'].canResume ? 'Continuar ensayo' : 'Empezar ensayo'} disabled={!preferences.roles.length || !selectedPlans[practiceMine ? 'MINE' : 'ALL'].lineCount} onPress={() => launchRehearsal(selectedScene, practiceMine ? 'MINE' : 'ALL', true)} />
+          {selectedPlans[practiceMine ? 'MINE' : 'ALL'].canResume ? <Button label="Empezar desde el principio" secondary onPress={() => launchRehearsal(selectedScene, practiceMine ? 'MINE' : 'ALL')} /> : null}
+          <Button label={transcriptVisible ? 'Ocultar mini-guion' : 'Leer mini-guion'} secondary onPress={() => setTranscriptVisible(!transcriptVisible)} />
+          {transcriptVisible ? selectedScene.scriptData.guion.map((line, index) => <View key={index} style={{ gap: 6 }}><Text style={ui.label}>{line.p === SCENE_SYSTEM_SPEAKER ? line.t : line.p}</Text>{line.a ? <Text style={ui.text}>{line.a}</Text> : null}{line.p !== SCENE_SYSTEM_SPEAKER ? <Text style={[ui.text, { color: palette.ink }]}>{line.t}</Text> : null}</View>) : null}
+        </> : <Text style={ui.text}>Recuperando tu ensayo…</Text>}
+      </> : <>
+        <Text style={ui.text}>Elige un mini-guion para preparar tu personaje.</Text>
+        {scenes.map((scene) => <TouchableOpacity accessibilityRole="button" key={scene.id} onPress={() => { setSelectedId(scene.id); setShowPracticeRoles(false); }} style={[ui.card, ui.row, { padding: 18 }]}><Icon name="script-text-outline" /><View style={{ flex: 1, gap: 5 }}><Text style={[ui.subtitle, { fontSize: 18 }]}>{scene.title}</Text><Text style={ui.text}>{scene.scriptData.personajes.join(' · ')}</Text><Text style={ui.text}>{getSceneTitles(scene.scriptData.guion).length} escenas</Text></View><Icon name="chevron-right" /></TouchableOpacity>)}
+        {!scenes.length ? <View style={ui.card}><Text style={ui.subtitle}>Todavía no hay mini-guiones</Text><Text style={ui.text}>Cuando se añadan a la obra, aparecerán aquí.</Text></View> : null}
+        <Button label={refreshing ? 'Actualizando…' : 'Actualizar escenas'} secondary disabled={refreshing || !sharedScript} onPress={() => void refresh()} />
+      </>}
+      {error ? <Text accessibilityRole="alert" style={ui.error}>{error}</Text> : null}
+      {notice ? <Text style={ui.text}>{notice}</Text> : null}
+    </ScrollView>;
   }
 
   return (

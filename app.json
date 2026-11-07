@@ -2,7 +2,7 @@
   "expo": {
     "name": "AI-Theatre",
     "slug": "teatro-ia",
-    "version": "2026.11.185",
+    "version": "2026.11.186",
     "orientation": "portrait",
     "icon": "./assets/images/caras-teatro.png",
     "userInterfaceStyle": "light",
@@ -29,7 +29,7 @@
       "pwa": {
         "display": "standalone",
         "orientation": "portrait",
-        "themeColor": "#5f0c14",
+        "themeColor": "#faf9f7",
         "manifest": {
           "short_name": "AI-Theatre",
           "start_url": "/"

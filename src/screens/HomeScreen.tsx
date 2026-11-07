@@ -17,6 +17,8 @@ import { normalizeAuditionScenes } from '../../shared/auditionScenes';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { SongManagerPanel } from '../components/SongManagerPanel';
 import { VersionBadge } from '../components/VersionBadge';
+import { PracticeHome } from '../components/PracticeHome';
+import { Button, ui } from '../components/PracticeUI';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
@@ -115,6 +117,7 @@ const cloneSavedScriptConfig = (config: SavedScriptConfig): SavedScriptConfig =>
 });
 
 export const HomeScreen = () => {
+  const [isManagingWorkspace, setIsManagingWorkspace] = useState(false);
   const adminPassword = useAdminPassword();
   const [isManagingAuditions, setIsManagingAuditions] = useState(false);
   const {
@@ -885,8 +888,29 @@ export const HomeScreen = () => {
     );
   }
 
+  if (!isManagingWorkspace && !isManagingSongs) {
+    return <ScreenWrapper><PracticeHome script={displayScriptData} manifest={sharedScript}
+      myRoles={myRoles} onRolesChange={setMyRoles} sceneTitles={currentSceneTitles}
+      onStart={requestRehearsalStart} onStartScene={(scene) => {
+        setActiveRehearsalMode('SELECTED'); setSelectedScenes([scene]); setActiveRehearsalScenes([scene]);
+        const checkpoint = getApplicableCheckpoint('SELECTED', [scene]);
+        setRehearsalStartIndex(checkpoint?.lineIndex ?? 0); setLastRehearsalMode('SELECTED'); setIsRehearsing(true);
+      }}
+      resumeMode={lastRehearsalMode && rehearsalCheckpoints[lastRehearsalMode] ? lastRehearsalMode : null}
+      onResume={() => { if (lastRehearsalMode) launchRehearsal(lastRehearsalMode, rehearsalCheckpoints[lastRehearsalMode]?.lineIndex ?? 0); }}
+      resumeChoice={pendingResumeMode ? renderResumeChoiceForMode(pendingResumeMode) : null}
+      sharedWorks={sharedScriptsCatalog} savedWorks={savedScripts}
+      onOpenShared={loadRemoteSharedScript} onOpenSaved={handleOpenSavedScript}
+      onMaterials={() => { setIsManagingWorkspace(true); setIsSharedScriptsPanelVisible(true); setIsSavedScriptsPanelVisible(true); }}
+      onAuditionMaterials={() => setIsManagingAuditions(true)} onSongMaterials={() => setIsManagingSongs(true)}
+      onEnsureShared={handlePublishSharedScript} onManifestUpdated={handleSharedScriptManifestUpdate}
+      loading={effectiveLoading || isLoadingSharedScriptsCatalog} status={progressText} error={effectiveError || sharedScriptsCatalogError}
+      onRefresh={() => void refreshSharedScriptsCatalog()} /></ScreenWrapper>;
+  }
+
   return (
     <ScreenWrapper>
+      <View style={[ui.header, { justifyContent: 'space-between' }]}><Text style={ui.subtitle}>Materiales y gestión</Text><Button label="Volver" secondary onPress={() => { setIsManagingWorkspace(false); setIsManagingSongs(false); }} /></View>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.titlePanel}>
           <Text style={styles.title}>AI-Theatre</Text>
