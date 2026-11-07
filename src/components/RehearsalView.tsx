@@ -606,7 +606,6 @@ export const RehearsalView: React.FC<Props> = ({
   const processedCommandLineKeyRef = useRef<string | null>(null);
   const processedGoodLineCommandKeyRef = useRef<string | null>(null);
   const processedAutoAdvanceLineKeyRef = useRef<string | null>(null);
-  const activeIntelligentRecognitionLanguageRef = useRef('es-ES');
   const lastIntelligentAutoAdvanceRef = useRef<LastIntelligentAutoAdvance | null>(null);
   const rehearsalSessionPreparationKey = useMemo(
     () => buildRehearsalSessionPreparationKey(resolvedScriptId),
@@ -831,7 +830,12 @@ export const RehearsalView: React.FC<Props> = ({
     () => (currentLineVariantKey ? lineVariants[currentLineVariantKey] ?? [] : []),
     [currentLineVariantKey, lineVariants]
   );
-  const intelligentRecognitionLanguage = inferSpeechRecognitionLanguage(speakableLineText);
+  const intelligentRecognitionLanguage = useMemo(() => {
+    const nextActorLine = filteredGuion.slice(currentIndex).find((line) =>
+      !isSceneMarker(line) && !isSongCue(line) && lineMatchesRoles(line, myRoles)
+    );
+    return inferSpeechRecognitionLanguage(isMyTurn ? speakableLineText : nextActorLine?.t ?? speakableLineText);
+  }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText]);
   const isIntelligentListenMode = listenModeSelection === 'intelligent';
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
   const canRunRehearsalLinePlayback =
@@ -868,9 +872,6 @@ export const RehearsalView: React.FC<Props> = ({
       Boolean(currentLine) &&
       !isCurrentMusicalSongBlock
     );
-  if (shouldUseIntelligentRecognition) {
-    activeIntelligentRecognitionLanguageRef.current = intelligentRecognitionLanguage;
-  }
   const shouldSuspendListeningDuringSong =
     canRunRehearsalLinePlayback &&
     effectiveAutoListenEnabled &&
@@ -935,13 +936,14 @@ export const RehearsalView: React.FC<Props> = ({
     status: speechRecognitionStatus,
     transcript: speechRecognitionTranscript,
     interimTranscript: speechRecognitionInterimTranscript,
+    isAudioActive: isRecognitionAudioActive,
     error: speechRecognitionError,
     resetTranscript: resetSpeechRecognitionTranscript,
     restartRecognition,
     stopRecognition,
   } = useSpeechRecognition({
     enabled: shouldKeepIntelligentRecognitionWarm,
-    lang: activeIntelligentRecognitionLanguageRef.current,
+    lang: intelligentRecognitionLanguage,
     lineKey: recognitionLineKey,
   });
 
@@ -1164,6 +1166,7 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   const handleRetryIntelligentLine = useCallback(() => {
+    stopRehearsalSpeech();
     if (speechRecognitionTranscript.trim()) {
       recordIntelligentFeedback('reintentar');
       setFeedbackStatusMessage('Resultado guardado. Reintentamos esta linea.');
@@ -3297,8 +3300,6 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     const hasTranscript = speechRecognitionTranscript.trim().length > 0;
-    const canRetryLine =
-      hasTranscript || speechRecognitionStatus === 'error' || speechRecognitionStatus === 'idle';
     const canRejectAutoAdvance =
       pendingInvalidAutoAdvance?.lineIndex === currentLineIndexInScript;
     const scorePercent = Math.round(intelligentLineMatch.score * 100);
@@ -3317,6 +3318,27 @@ export const RehearsalView: React.FC<Props> = ({
 
     return (
       <View style={styles.intelligentPanel}>
+        <Text style={styles.intelligentLabel}>
+          {speechRecognitionStatus === 'error'
+            ? 'La escucha necesita tu atención'
+            : isRecognitionAudioActive
+              ? 'Micrófono abierto. Puedes hablar.'
+              : speechRecognitionStatus === 'starting'
+                ? 'Abriendo el micrófono…'
+                : 'Esperando la entrada del micrófono'}
+        </Text>
+        {speechRecognitionError ? (
+          <Text style={styles.listenError}>{speechRecognitionError}</Text>
+        ) : null}
+        <TouchableOpacity
+          style={[styles.intelligentButton, styles.intelligentRetryButton]}
+          onPress={handleRetryIntelligentLine}
+          accessibilityLabel={hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
+        >
+          <Text style={styles.intelligentRetryText}>
+            {hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
+          </Text>
+        </TouchableOpacity>
         <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>
         <Text style={styles.intelligentHint}>
           Avanzamos si la coincidencia supera {Math.round(INTELLIGENT_AUTO_ADVANCE_THRESHOLD * 100)}% o si el cierre
@@ -3353,9 +3375,6 @@ export const RehearsalView: React.FC<Props> = ({
             Cierre de replica: {finalPhrasePercent}%
             {automaticReason ? ` - Avance: ${automaticReason.replace(/_/g, ' ')}` : ''}
           </Text>
-        ) : null}
-        {speechRecognitionError ? (
-          <Text style={styles.listenError}>{speechRecognitionError}</Text>
         ) : null}
         {feedbackStatusMessage ? (
           <Text style={styles.intelligentFeedbackStatus}>{feedbackStatusMessage}</Text>
@@ -3422,17 +3441,6 @@ export const RehearsalView: React.FC<Props> = ({
             disabled={!hasTranscript}
           >
             <Text style={styles.intelligentButtonText}>Linea buena</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.intelligentButton,
-              styles.intelligentRetryButton,
-              !canRetryLine && styles.buttonDisabled,
-            ]}
-            onPress={handleRetryIntelligentLine}
-            disabled={!canRetryLine}
-          >
-            <Text style={styles.intelligentRetryText}>Reintentar</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.intelligentButton, styles.intelligentSkipButton]}
