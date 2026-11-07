@@ -7,6 +7,7 @@ require.extensions['.ts'] = (loadedModule, filename) => loadedModule._compile(ts
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, filename);
 const { createSpeechRecognitionSession } = require('../src/utils/speechRecognitionSession.ts');
+const { getSpeechRecognitionPermissionHelp, IOS_SPEECH_RECOGNITION_SETTINGS_PATH } = require('../src/utils/speechRecognitionPermissionHelp.ts');
 if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
 
@@ -242,4 +243,61 @@ test('recognition preparation retries in place and preserves the exact native er
   assert.equal(session.getSnapshot().errorDetail, null);
   handles[1].onaudiostart();
   assert.equal(session.getSnapshot().isAudioActive, true);
+});
+
+const servicePermissionError = 'Speech recognition service permission check has failed';
+const iphoneSafari = { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1' };
+
+test('the observed iPhone service permission error shows the exact settings path and correct Safari entry', () => {
+  const help = getSpeechRecognitionPermissionHelp('service-not-allowed', servicePermissionError, iphoneSafari);
+  assert.equal(help.browserName, 'Safari');
+  assert.equal(help.settingsPath, 'Ajustes → Privacidad y seguridad → Reconocimiento de voz');
+  assert.ok(help.steps.some((step) => step.includes('icono azul de la brújula')));
+  assert.equal(help.settingsPath, IOS_SPEECH_RECOGNITION_SETTINGS_PATH);
+});
+
+test('iOS settings guidance never misclassifies service unavailability or an unrelated microphone error', () => {
+  for (const [code, detail] of [
+    ['service-not-allowed', 'Speech recognition service is not available'],
+    ['service-not-allowed', null],
+    ['not-allowed', 'Microphone permission check has failed'],
+    ['not-allowed', 'User permission check has failed'],
+    ['network', servicePermissionError],
+  ]) assert.equal(getSpeechRecognitionPermissionHelp(code, detail, iphoneSafari), null);
+});
+
+test('desktop iPad mode gets iOS help while a Mac or Android does not', () => {
+  const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Version/18.0 Safari/605.1.15';
+  assert.ok(getSpeechRecognitionPermissionHelp('service-not-allowed', servicePermissionError, {userAgent: ua, platform:'MacIntel', maxTouchPoints:5}));
+  assert.equal(getSpeechRecognitionPermissionHelp('service-not-allowed', servicePermissionError, {userAgent: ua, platform:'MacIntel', maxTouchPoints:0}), null);
+  assert.equal(getSpeechRecognitionPermissionHelp('service-not-allowed', servicePermissionError, {userAgent:'Mozilla/5.0 (Linux; Android 15) Chrome/130 Mobile Safari/537.36'}), null);
+});
+
+test('iOS browsers receive the name of their own app rather than being told to enable Safari', () => {
+  for (const [marker, name] of [['CriOS/130','Chrome'], ['FxiOS/130','Firefox'], ['EdgiOS/130','Edge'], ['OPiOS/10','Opera']]) {
+    const help = getSpeechRecognitionPermissionHelp('service-not-allowed', servicePermissionError, {userAgent: iphoneSafari.userAgent + ' ' + marker});
+    assert.equal(help.browserName, name);
+    assert.ok(help.steps.includes(`Activa ${name} en la lista.`));
+  }
+});
+
+test('checking again actually reopens the service and removes permission help only after success', (t) => {
+  let allowed = false;
+  const { session, handles } = fixture(t, (handle) => setTimeout(() => {
+    if (allowed) handle.onaudiostart();
+    else handle.onerror({error:'service-not-allowed', message:servicePermissionError});
+  }, 0));
+  const help = () => getSpeechRecognitionPermissionHelp(session.getSnapshot().errorCode, session.getSnapshot().errorDetail, iphoneSafari);
+  session.activate({lang:'es-ES',lineKey:'prepare:my-scene'});
+  t.mock.timers.tick(0);
+  assert.ok(help());
+  session.activate({lang:'es-ES',lineKey:'prepare:my-scene'});
+  t.mock.timers.tick(0);
+  assert.ok(help());
+  allowed = true;
+  session.activate({lang:'es-ES',lineKey:'prepare:my-scene'});
+  t.mock.timers.tick(0);
+  assert.equal(handles.length, 3);
+  assert.equal(session.getSnapshot().isAudioActive, true);
+  assert.equal(help(), null);
 });

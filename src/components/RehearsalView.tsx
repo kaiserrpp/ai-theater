@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 
 import { submitIntelligentLineFeedback } from '../api/sharedScripts';
 import { useSilenceAdvance, type MicrophoneCalibrationSnapshot } from '../hooks/useSilenceAdvance';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { SpeechRecognitionErrorPanel } from './SpeechRecognitionErrorPanel';
 import {
   INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX,
   LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
@@ -3221,15 +3222,10 @@ export const RehearsalView: React.FC<Props> = ({
     );
   }
 
-  const renderRecognitionError = () => speechRecognitionError ? (
-    <View style={styles.intelligentTranscriptBlock}>
-      <Text style={styles.listenError}>{speechRecognitionError}</Text>
-      {speechRecognitionErrorCode || speechRecognitionErrorDetail ? (
-        <Text style={styles.intelligentMetaText} selectable>
-          Detalle del navegador: {[speechRecognitionErrorCode, speechRecognitionErrorDetail].filter(Boolean).join(' · ')}
-        </Text>
-      ) : null}
-    </View>
+  const renderRecognitionError = (onRetry: () => void, retryLabel: string) => speechRecognitionError ? (
+    <SpeechRecognitionErrorPanel error={speechRecognitionError}
+      errorCode={speechRecognitionErrorCode} errorDetail={speechRecognitionErrorDetail}
+      onRetry={onRetry} retryLabel={retryLabel} />
   ) : null;
 
   if (isCheckingIntelligentRecognition) {
@@ -3237,19 +3233,13 @@ export const RehearsalView: React.FC<Props> = ({
       {renderHeader('Preparando reconocimiento de voz')}
       <ScrollView contentContainerStyle={styles.preflightScrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.preflightCard}>
-          <Text style={styles.preflightTitle}>
-            {speechRecognitionStatus === 'error' ? 'No se ha podido iniciar la escucha' : 'Abriendo la escucha…'}
-          </Text>
-          <Text style={styles.preflightText}>
-            {speechRecognitionStatus === 'error'
-              ? 'El ensayo conserva tu escena y tu personaje. Puedes volver a intentarlo aquí.'
-              : 'Si aparece una solicitud del navegador para reconocer tu voz, pulsa Permitir. Entraremos en la escena cuando la escucha esté lista.'}
-          </Text>
-          {renderRecognitionError()}
-          {speechRecognitionStatus === 'error' ? <TouchableOpacity
-            accessibilityRole="button" style={styles.btnNext} onPress={enableIntelligentListenForDevice}>
-            <Text style={styles.btnText}>Reintentar inicio</Text>
-          </TouchableOpacity> : null}
+          {speechRecognitionStatus !== 'error' ? <>
+            <Text style={styles.preflightTitle}>Abriendo la escucha…</Text>
+            <Text style={styles.preflightText}>
+              Si aparece una solicitud del navegador para reconocer tu voz, pulsa Permitir. Entraremos en la escena cuando la escucha esté lista.
+            </Text>
+          </> : null}
+          {renderRecognitionError(enableIntelligentListenForDevice, 'Reintentar inicio')}
           <TouchableOpacity accessibilityRole="button"
             style={[styles.preflightActionButton, styles.preflightFallbackButton]}
             onPress={() => {
@@ -3400,8 +3390,8 @@ export const RehearsalView: React.FC<Props> = ({
                 ? 'Abriendo el micrófono…'
                 : 'Esperando la entrada del micrófono'}
         </Text>
-        {renderRecognitionError()}
-        <TouchableOpacity
+        {renderRecognitionError(handleRetryIntelligentLine, 'Activar micrófono')}
+        {!speechRecognitionError ? <TouchableOpacity
           style={[styles.intelligentButton, styles.intelligentRetryButton]}
           onPress={handleRetryIntelligentLine}
           accessibilityLabel={hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
@@ -3409,7 +3399,7 @@ export const RehearsalView: React.FC<Props> = ({
           <Text style={styles.intelligentRetryText}>
             {hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
           </Text>
-        </TouchableOpacity>
+        </TouchableOpacity> : null}
         <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>
         <Text style={styles.intelligentHint}>
           Avanzamos si la coincidencia supera {Math.round(INTELLIGENT_AUTO_ADVANCE_THRESHOLD * 100)}% o si el cierre
