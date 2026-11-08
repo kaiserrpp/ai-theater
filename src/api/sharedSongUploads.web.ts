@@ -46,7 +46,7 @@ export interface SharedSongUploadResult {
 interface ExtractSharedSongVideoAudioInput {
   shareId: string;
   targetId: string;
-  targetType?: 'song' | 'musical-number';
+  targetType?: 'song' | 'musical-number' | 'musical-audition';
   password: string;
   sourceUrl: string;
   sourcePathname?: string | null;
@@ -57,7 +57,7 @@ interface ExtractSharedSongVideoAudioInput {
 interface UploadSharedSongAudioInput {
   shareId: string;
   targetId: string;
-  targetType?: 'song' | 'musical-number';
+  targetType?: 'song' | 'musical-number' | 'musical-audition';
   file: Blob;
   password: string;
   onUploadProgress?: (percentage: number) => void;
@@ -134,7 +134,7 @@ const fetchClientToken = async ({
   password: string;
   shareId: string;
   targetId: string;
-  targetType: 'song' | 'musical-number';
+  targetType: 'song' | 'musical-number' | 'musical-audition';
 }) => {
   const response = await fetch(buildProtectedApiUrl('/api/shared-script/song-upload'), {
     method: 'POST',
@@ -210,8 +210,9 @@ const uploadBlobWithClientToken = ({
       );
     xhr.onload = () => {
       if (xhr.status < 200 || xhr.status >= 300) {
-        const responseText = typeof xhr.responseText === 'string' ? xhr.responseText : '';
-        reject(new Error(responseText || `Error ${xhr.status} al subir el audio.`));
+        const payload = xhr.response as { error?: string | { message?: string } } | null;
+        const detail = typeof payload?.error === 'string' ? payload.error : payload?.error?.message;
+        reject(new Error(detail || `Error ${xhr.status} al subir el audio.`));
         return;
       }
 
@@ -242,7 +243,7 @@ export const uploadSharedSongAudio = async ({
       ? namedFile.name
       : `audio-${Date.now()}.mp3`;
   const safeFileName = sanitizeFileName(originalFileName) || `audio-${Date.now()}.mp3`;
-  const targetFolder = targetType === 'musical-number' ? 'musical-numbers' : 'songs';
+  const targetFolder = targetType === 'musical-audition' ? 'musical-auditions' : targetType === 'musical-number' ? 'musical-numbers' : 'songs';
   const storageNamespace = await fetchSharedStorageNamespace();
   const pathname = `shared-scripts/${storageNamespace}/${shareId}/${targetFolder}/${targetId}/${Date.now()}-${safeFileName}`;
   const contentType =

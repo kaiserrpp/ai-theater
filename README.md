@@ -1,5 +1,20 @@
 # AI-Theatre
 
+## Canciones de audición
+
+En **Canciones → Audiciones**, **+ Subir canción de audición** abre directamente la carga. Si no hay una sesión de gestión activa, solicita la clave existente una sola vez durante esa sesión. También está disponible en **⋯ → Materiales y gestión → Subir canción de audición**.
+
+1. Elige un número musical o escribe el nombre de uno nuevo. Se puede crear sin vincularlo al guion, aunque la obra ya tenga texto.
+2. Pon nombre al fragmento y selecciona los personajes que cantan. Puedes añadir personajes que aún no estén en el guion.
+3. Elige los archivos ya recortados de **Con voz** y/o **Karaoke**; puedes guardar primero los datos o una sola versión y completarlos después. La letra del fragmento es opcional.
+4. Pulsa **Guardar audición** en la barra inferior, que permanece visible mientras revisas el formulario. La subida muestra el progreso y conserva los archivos ya guardados si falla una versión; se puede reintentar desde el mismo formulario.
+
+Cada tarjeta representa un fragmento y ofrece sus versiones Con voz y Karaoke. Un número admite varios fragmentos con personajes, audios y letras independientes. El reproductor conserva repetición, velocidad, posición y letra; la pestaña **Obra** mantiene los audios completos. **Mis personajes** filtra los fragmentos y recuerda la selección por obra en el dispositivo.
+
+Con gestión activa, el lápiz de cada fragmento permite cambiar personajes, letra, número o archivos y eliminar el fragmento. Los cambios y audios usan una revisión para rechazar ediciones antiguas. Se conservan la canción completa y los demás fragmentos. Los números que aún tengan fragmentos asociados no se pueden eliminar hasta mover o quitar esos fragmentos.
+
+El manifiesto compartido pasa a versión 6 con una colección `musicalAuditions`; las obras antiguas reciben una colección vacía. Republicar desde un cliente anterior conserva los fragmentos y los números a los que pertenecen. La carga usa la infraestructura de audio existente y requiere acceso de gestión; la escucha sigue siendo pública para quien abra la obra.
+
 ## Inicio y ensayo
 
 **Inicio** da acceso a **Ensayar escenas**, **Escuchar y practicar** y al último ensayo pendiente. La navegación inferior mantiene **Inicio / Ensayar / Canciones**. En Ensayar puedes alternar **Audiciones / Obra**, elegir tus personajes y practicar tus escenas o todas.
@@ -32,7 +47,7 @@ Quien abra el enlace de la obra puede leer y ensayar sus escenas sin clave. La c
 
 Las elecciones y el progreso de cada mini-guion se recuerdan en el dispositivo. Si cambia el texto, el progreso se reinicia y se conservan los personajes elegidos que sigan participando. Las cuentas y la sincronización entre dispositivos quedan para otra fase.
 
-La importación web/PWA usa el lector de PDF existente y requiere texto extraíble; no hace OCR. En plataformas nativas se reutiliza el analizador de Gemini existente. Las versiones con voz y karaoke de los fragmentos musicales pertenecen a la siguiente fase.
+La importación web/PWA usa el lector de PDF existente y requiere texto extraíble; no hace OCR. En plataformas nativas se reutiliza el analizador de Gemini existente. Los fragmentos musicales con voz y karaoke se gestionan desde Canciones → Audiciones.
 
 El lector reconoce tanto `PERSONAJE: réplica` como nombres en mayúsculas en una línea propia, con la réplica debajo. También reconoce encabezados de escenas formados por listas de personajes y acotaciones junto al nombre, conservando la continuidad entre páginas.
 

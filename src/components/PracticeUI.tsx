@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export const palette = { bg: '#faf9f7', surface: '#fff', ink: '#20232c', sub: '#606572', rule: '#e4e3e7', plum: '#713d59', soft: '#f2eaf0', green: '#2d6a50' };
 export const ui = StyleSheet.create({
@@ -36,16 +36,25 @@ export const Chip = ({ label, selected, onPress }: { label: string; selected?: b
     <Text style={[ui.chipText, selected && ui.chipActiveText]}>{label}</Text>
   </TouchableOpacity>
 );
-export const Sheet = ({ title, visible, onClose, children }: { title: string; visible: boolean; onClose: () => void; children: React.ReactNode }) => (
-  <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-    <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(25,20,28,0.32)' }}>
-      <Pressable accessibilityLabel="Cerrar menú" onPress={onClose} style={StyleSheet.absoluteFillObject} />
+export const Sheet = ({ title, visible, onClose, children, footer, closeDisabled = false }: { title: string; visible: boolean; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; closeDisabled?: boolean }) => {
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  useEffect(() => {
+    if (!visible || Platform.OS !== 'web' || !window.visualViewport) { setKeyboardInset(0); return; }
+    const viewport = window.visualViewport;
+    const update = () => setKeyboardInset(viewport.scale === 1 ? Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop)) : 0);
+    viewport.addEventListener('resize', update); viewport.addEventListener('scroll', update); update();
+    return () => { viewport.removeEventListener('resize', update); viewport.removeEventListener('scroll', update); };
+  }, [visible]);
+  return <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (!closeDisabled) onClose(); }}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(25,20,28,0.32)', paddingBottom: keyboardInset }}>
+      <Pressable accessibilityLabel="Cerrar menú" disabled={closeDisabled} onPress={onClose} style={StyleSheet.absoluteFillObject} />
       <View style={{ backgroundColor: palette.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%', width: '100%', maxWidth: 760, alignSelf: 'center', paddingBottom: 20 }}>
         <View style={ui.header}><Text accessibilityRole="header" style={[ui.subtitle, { flex: 1 }]}>{title}</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar menú" onPress={onClose} style={ui.icon}><Icon name="close" /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar menú" disabled={closeDisabled} onPress={onClose} style={[ui.icon, closeDisabled && { opacity: 0.4 }]}><Icon name="close" /></TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={ui.page} keyboardShouldPersistTaps="handled">{children}</ScrollView>
+        {footer ? <View style={{ paddingHorizontal: 20, paddingTop: 12, gap: 10, borderTopWidth: 1, borderColor: palette.rule }}>{footer}</View> : null}
       </View>
-    </View>
-  </Modal>
-);
+    </KeyboardAvoidingView>
+  </Modal>;
+};

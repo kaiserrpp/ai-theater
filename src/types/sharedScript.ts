@@ -54,8 +54,27 @@ export interface SharedScriptManifest {
   songs: SharedSongAsset[];
   musicalNumbers: SharedMusicalNumberAsset[];
   auditionScenes: SharedAuditionScene[];
+  musicalAuditions: SharedMusicalAudition[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SharedMusicalAudition {
+  id: string;
+  musicalNumberId: string;
+  title: string;
+  roles: string[];
+  lyrics: string;
+  audios: SharedSongAudioAsset[];
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MusicalAuditionDetailsInput {
+  shareId: string; password: string; auditionId: string; revision?: number;
+  musicalNumberId?: string; musicalNumberTitle?: string;
+  title: string; roles: string[]; lyrics: string;
 }
 
 export interface SharedAuditionScene {
@@ -86,6 +105,7 @@ export interface SharedScriptListItem {
   songCount: number;
   musicalNumberCount?: number;
   auditionSceneCount?: number;
+  musicalAuditionCount?: number;
   createdAt: string;
   updatedAt: string;
 }

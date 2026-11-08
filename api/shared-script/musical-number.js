@@ -155,6 +155,9 @@ module.exports = async (request, response) => {
     }
 
     if (request.method === 'DELETE') {
+      if ((manifest.musicalAuditions || []).some((cut) => cut.musicalNumberId === musicalNumberId)) {
+        return response.status(409).json({ error: 'Este número tiene fragmentos de audición. Elimina o mueve esos fragmentos antes de borrar el número.' });
+      }
       const updatedManifest = await writeManifest({
         ...manifest,
         musicalNumbers: (manifest.musicalNumbers || []).filter(

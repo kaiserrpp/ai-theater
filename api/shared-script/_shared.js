@@ -1,7 +1,8 @@
 const { head, list, put } = require('@vercel/blob');
 const { normalizeAuditionScenes } = require('../../shared/auditionScenes');
+const { normalizeMusicalAuditions } = require('../../shared/musicalAuditions');
 
-const MANIFEST_VERSION = 5;
+const MANIFEST_VERSION = 6;
 const EMPTY_SONGS = [];
 const EMPTY_MUSICAL_NUMBERS = [];
 const SONG_AUDIO_KINDS = new Set(['karaoke', 'vocal_guide']);
@@ -339,6 +340,7 @@ const normalizeManifest = (value) => {
       allowUnlinked: true,
     }),
     auditionScenes: normalizeAuditionScenes(value?.auditionScenes),
+    musicalAuditions: normalizeMusicalAuditions(value?.musicalAuditions),
     createdAt:
       typeof value?.createdAt === 'string' && value.createdAt.trim()
         ? value.createdAt
@@ -440,6 +442,7 @@ const buildManifestSummary = (manifest) => ({
     }
   ).length,
   auditionSceneCount: normalizeAuditionScenes(manifest.auditionScenes).length,
+  musicalAuditionCount: normalizeMusicalAuditions(manifest.musicalAuditions).length,
   createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : new Date().toISOString(),
   updatedAt: typeof manifest.updatedAt === 'string' ? manifest.updatedAt : new Date().toISOString(),
 });

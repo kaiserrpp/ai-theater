@@ -57,6 +57,10 @@ module.exports = async (request, response) => {
     }
 
     const normalizedSongs = normalizeSongs(payload.songs);
+    const normalizedNumbers = normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs, { allowUnlinked: true });
+    const auditionNumberIds = new Set((previousManifest?.musicalAuditions || []).map((cut) => cut.musicalNumberId));
+    const missingAuditionNumbers = (previousManifest?.musicalNumbers || []).filter((number) =>
+      auditionNumberIds.has(number.id) && !normalizedNumbers.some((candidate) => candidate.id === number.id));
 
     const manifest = {
       version: MANIFEST_VERSION,
@@ -68,12 +72,11 @@ module.exports = async (request, response) => {
       scriptData: payload.scriptData,
       mergeMap: normalizeMergeMap(payload.mergeMap),
       songs: normalizedSongs,
-      musicalNumbers: normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs, {
-        allowUnlinked: true,
-      }),
+      musicalNumbers: [...normalizedNumbers, ...missingAuditionNumbers],
       // Only the dedicated scene endpoint edits this collection. In particular,
       // publishing from an older client must not erase existing audition scenes.
       auditionScenes: previousManifest?.auditionScenes || [],
+      musicalAuditions: previousManifest?.musicalAuditions || [],
       createdAt,
       updatedAt: now,
     };

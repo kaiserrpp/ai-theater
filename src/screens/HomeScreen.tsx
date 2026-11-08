@@ -14,6 +14,7 @@ import { AdminAccessPanel } from '../components/AdminAccessPanel';
 import { AuditionScenesPanel } from '../components/AuditionScenesPanel';
 import { useAdminPassword } from '../store/adminSession';
 import { normalizeAuditionScenes } from '../../shared/auditionScenes';
+import { normalizeMusicalAuditions } from '../../shared/musicalAuditions';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { SongManagerPanel } from '../components/SongManagerPanel';
 import { VersionBadge } from '../components/VersionBadge';
@@ -62,6 +63,7 @@ const buildSharedScriptSummaryFromManifest = (
   songCount: manifest.songs.length,
   musicalNumberCount: manifest.musicalNumbers.length,
   auditionSceneCount: manifest.auditionScenes.length,
+  musicalAuditionCount: manifest.musicalAuditions?.length || 0,
   createdAt: manifest.createdAt,
   updatedAt: manifest.updatedAt,
 });
@@ -88,6 +90,7 @@ const normalizeSharedManifestForClient = (
       allowUnlinked: true,
     }),
     auditionScenes: normalizeAuditionScenes(manifest.auditionScenes),
+    musicalAuditions: normalizeMusicalAuditions(manifest.musicalAuditions),
   };
 };
 

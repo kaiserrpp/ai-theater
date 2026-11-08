@@ -40,6 +40,7 @@ export const PracticeHome = (props: Props) => {
   const [mode, setMode] = useState<ListenPreference>(() => resolveListenPreference(null, supportsRecognition()));
   const [showTranscript, setShowTranscript] = useState(true);
   const [storageNotice, setStorageNotice] = useState('');
+  const [auditionUploadRequest, setAuditionUploadRequest] = useState(0);
   const shareId = props.manifest?.shareId;
 
   useEffect(() => {
@@ -112,7 +113,8 @@ export const PracticeHome = (props: Props) => {
       </ScrollView>}
     </View> : null}
 
-    {!inRehearsal ? <SongPracticeLibrary manifest={props.manifest} active={tab === 'songs'} /> : null}
+    {!inRehearsal ? <SongPracticeLibrary manifest={props.manifest} active={tab === 'songs'} defaultRoles={props.myRoles}
+      onUpdated={props.onManifestUpdated} onManageWork={props.onSongMaterials} openEditorRequest={auditionUploadRequest} /> : null}
     {!inRehearsal ? <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: palette.rule, backgroundColor: palette.surface, paddingTop: 6, paddingBottom: 10 }}>
       {([['home', 'Inicio', 'home-outline'], ['scenes', 'Ensayar', 'drama-masks'], ['songs', 'Canciones', 'music-note-outline']] as const).map(([value, label, icon]) => <TouchableOpacity key={value} accessibilityRole="tab" aria-selected={tab === value} accessibilityState={{ selected: tab === value }} onPress={() => chooseTab(value)} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 4 }}><Icon name={icon} color={tab === value ? palette.plum : palette.sub} /><Text style={{ fontSize: 12, fontWeight: tab === value ? '700' : '500', color: tab === value ? palette.plum : palette.sub }}>{label}</Text></TouchableOpacity>)}
     </View> : null}
@@ -128,6 +130,7 @@ export const PracticeHome = (props: Props) => {
       {storageNotice ? <Text style={ui.error}>{storageNotice}</Text> : null}
     </Sheet>
     <Sheet title="Materiales y gestión" visible={sheet === 'materials'} onClose={() => setSheet(null)}>
+      <Button label="Subir canción de audición" secondary disabled={!props.manifest} onPress={() => { setSheet(null); setTab('songs'); setAuditionUploadRequest((previous) => previous + 1); }} />
       <Button label="Mini-guiones de audición" secondary disabled={!props.script} onPress={() => openMaterials(props.onAuditionMaterials)} />
       <Button label="Canciones y números musicales" secondary disabled={!props.script} onPress={() => openMaterials(props.onSongMaterials)} />
       <Button label="Gestionar obra e importar PDF" secondary onPress={() => openMaterials(props.onMaterials)} />

@@ -3,9 +3,9 @@ import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-nativ
 import { verifySongAdminPassword } from '../api/sharedScripts';
 import { setAdminPassword, useAdminPassword } from '../store/adminSession';
 
-export const AdminAccessPanel = () => {
+export const AdminAccessPanel = ({ initiallyExpanded = false }: { initiallyExpanded?: boolean }) => {
   const activePassword = useAdminPassword();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -1,4 +1,5 @@
 import type {
+  MusicalAuditionDetailsInput,
   SharedAuditionSceneInput,
   SharedMusicalNumberAudioDeleteInput,
   SharedMusicalNumberAudioRegistrationInput,
@@ -177,6 +178,24 @@ export const verifySongAdminPassword = async (password: string) => {
 
   return (await response.json()) as { ok: true };
 };
+
+const mutateMusicalAudition = async (method: string, input: object) => {
+  const response = await fetch(buildProtectedApiUrl('/musical-audition'), {
+    method, credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await parseErrorMessage(response));
+  return (await response.json()) as SharedScriptManifest;
+};
+export const saveMusicalAudition = (input: MusicalAuditionDetailsInput) =>
+  mutateMusicalAudition(input.revision == null ? 'POST' : 'PATCH', input);
+export const saveMusicalAuditionAudio = (input: { shareId: string; password: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke'; audio: {
+  audioUrl: string; audioFileName: string | null; contentType: string | null; size: number | null;
+} }) => mutateMusicalAudition('PATCH', { ...input, operation: 'audio' });
+export const removeMusicalAuditionAudio = (input: { shareId: string; password: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke' }) =>
+  mutateMusicalAudition('PATCH', { ...input, operation: 'remove-audio' });
+export const deleteMusicalAudition = (input: { shareId: string; password: string; auditionId: string; revision: number }) =>
+  mutateMusicalAudition('DELETE', input);
 
 export const registerSharedSongAudio = async (input: SharedSongAudioRegistrationInput) => {
   const response = await fetch(buildProtectedApiUrl('/song-audio'), {
