@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { extractSharedSongAudioFromVideo, uploadSharedSongAudio } from '../api/sharedSongUploads';
 import { getAdminPassword, setAdminPassword, useAdminPassword } from '../store/adminSession';
+import { UploadActivity } from './UploadActivity';
 import {
   createSharedMusicalNumber,
   deleteSharedMusicalNumber,
@@ -3100,10 +3101,7 @@ export const SongManagerPanel: React.FC<Props> = ({
               </>
             ) : null}
             {uploadStatusMessage || musicalNumberUploadProgress !== null ? (
-              <Text style={styles.progressText}>
-                {uploadStatusMessage ?? 'Subiendo audio...'}
-                {musicalNumberUploadProgress !== null ? ` ${musicalNumberUploadProgress}%` : ''}
-              </Text>
+              <UploadActivity stage={musicalNumberUploadProgress !== null ? 'uploading' : uploadStatusMessage?.includes('Extrayendo') ? 'extracting' : 'saving'} percentage={musicalNumberUploadProgress ?? undefined} />
             ) : null}
             {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
             {editingMusicalNumberAudio ? (
@@ -4080,10 +4078,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                         </View>
 
                         {uploadStatusMessage || uploadProgress !== null ? (
-                          <Text style={styles.progressText}>
-                            {uploadStatusMessage ?? 'Subiendo audio...'}
-                            {uploadProgress !== null ? ` ${uploadProgress}%` : ''}
-                          </Text>
+                          <UploadActivity stage={uploadProgress !== null ? 'uploading' : uploadStatusMessage?.includes('Extrayendo') ? 'extracting' : 'saving'} percentage={uploadProgress ?? undefined} />
                         ) : null}
                         {managerError ? <Text style={styles.errorText}>{managerError}</Text> : null}
 

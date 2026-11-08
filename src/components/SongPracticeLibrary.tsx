@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SharedMusicalAudition, SharedScriptManifest, SharedSongAudioAsset } from '../types/sharedScript';
 import { useAdminPassword } from '../store/adminSession';
+import { createSongPlayback, type SongRepeatMode } from '../utils/songPlayback';
 import { MusicalAuditionEditor } from './MusicalAuditionEditor';
 import { Button, Chip, Icon, palette, Sheet, ui } from './PracticeUI';
 
@@ -82,49 +83,43 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [loop, setLoop] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<SongRepeatMode>('queue');
+  const [queueInfo, setQueueInfo] = useState({ index: -1, total: 0 });
   const [rate, setRate] = useState(1);
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [error, setError] = useState('');
-  const player = useRef<HTMLAudioElement | null>(null);
+  const player = useRef<ReturnType<typeof createSongPlayback<Track>> | null>(null);
   const selected = tracks.find((track) => track.key === selectedKey) ?? null;
   const visibleTracks = tracks.filter((track) => !track.auditionId && (kind === 'all' || track.audio.kind === kind));
 
-  useEffect(() => () => { player.current?.pause(); player.current = null; }, []);
-  useEffect(() => { if (player.current) { player.current.loop = loop; player.current.playbackRate = rate; } }, [loop, rate]);
+  useEffect(() => () => { player.current?.destroy(); player.current = null; }, []);
+  useEffect(() => { player.current?.setRepeat(repeatMode); player.current?.setRate(rate); }, [repeatMode, rate]);
   useEffect(() => {
-    player.current?.pause(); setSelectedKey(null); setPlaying(false); setPosition(0); setDuration(0); setError('');
+    player.current?.stop(); setSelectedKey(null); setPlaying(false); setPosition(0); setDuration(0); setError('');
   }, [manifest?.shareId]);
   useEffect(() => {
-    if (selectedKey && !tracks.some((track) => track.key === selectedKey)) {
-      player.current?.pause(); player.current = null; setSelectedKey(null); setPlaying(false);
-    }
-  }, [selectedKey, tracks]);
+    player.current?.updateTracks(tracks);
+  }, [tracks]);
 
   const play = (track: Track) => {
     setError('');
     if (Platform.OS !== 'web') { void Linking.openURL(track.audio.audioUrl); return; }
-    let audio = player.current;
-    if (selectedKey !== track.key || !audio || audio.src !== track.audio.audioUrl) {
-      audio?.pause();
-      audio = new Audio(track.audio.audioUrl);
-      player.current = audio;
-      setSelectedKey(track.key); setPosition(0); setDuration(0);
-      audio.ontimeupdate = () => { if (player.current === audio) setPosition(audio?.currentTime ?? 0); };
-      audio.onloadedmetadata = audio.ondurationchange = () => { if (player.current === audio) setDuration(Number.isFinite(audio?.duration) ? audio!.duration : 0); };
-      audio.onplay = () => { if (player.current === audio) setPlaying(true); };
-      audio.onpause = audio.onended = () => { if (player.current === audio) setPlaying(false); };
-      audio.onerror = () => { if (player.current === audio) { setPlaying(false); setError('No se pudo cargar este audio. Vuelve a intentarlo.'); } };
+    if (!player.current) {
+      player.current = createSongPlayback<Track>({ createAudio: () => new Audio(), onTrack: setSelectedKey, onPlaying: setPlaying,
+        onPosition: setPosition, onDuration: setDuration, onQueue: setQueueInfo, onError: setError });
+      player.current.setRepeat(repeatMode); player.current.setRate(rate);
     }
-    audio.loop = loop; audio.playbackRate = rate;
-    void audio.play().catch(() => { setPlaying(false); setError('Pulsa reproducir para volver a iniciar el audio.'); });
+    const queue = track.auditionId
+      ? visibleCuts.flatMap((cut) => tracks.filter((candidate) => candidate.auditionId === cut.id && candidate.audio.kind === track.audio.kind))
+      : visibleTracks;
+    player.current.play(track, queue);
   };
-  const toggle = () => { if (playing) player.current?.pause(); else if (selected) play(selected); };
+  const toggle = () => { if (playing) player.current?.pause(); else player.current?.resume(); };
 
   if (!active) return selected ? <View style={[ui.header, { backgroundColor: palette.soft }]}>
     <Icon name="music-note" /><View style={{ flex: 1 }}><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text><Text numberOfLines={1} style={ui.text}>{selected.audio.label}</Text></View>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={ui.icon}><Icon name={playing ? 'pause' : 'play'} /></TouchableOpacity>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => { player.current?.pause(); setSelectedKey(null); }} style={ui.icon}><Icon name="close" /></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" /></TouchableOpacity>
   </View> : null;
 
   return <>
@@ -140,19 +135,20 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     </> : <><View style={ui.wrap}>{([['all', 'Todas'], ['vocal_guide', 'Con voz'], ['karaoke', 'Karaoke']] as const).map(([value, label]) => <Chip key={value} label={label} selected={kind === value} onPress={() => setKind(value)} />)}</View><Button label="Gestionar audios de la obra" secondary disabled={!manifest} onPress={onManageWork} /></>}
 
     {selected ? <View style={[ui.card, { backgroundColor: palette.soft, borderColor: palette.soft }]}>
-      <View style={ui.row}><Text style={[ui.label, { flex: 1 }]}>REPRODUCTOR</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => { player.current?.pause(); setSelectedKey(null); }} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.subtitle}>{selected.title}</Text><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{selected.audio.label}</Text>
+      <View style={ui.row}><Text style={[ui.label, { flex: 1 }]}>REPRODUCTOR</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.subtitle}>{selected.title}</Text><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{selected.audio.label}</Text>
+      <Text testID="song-queue-status" accessibilityLiveRegion="polite" style={ui.text}>{queueInfo.index + 1} de {queueInfo.total} · {repeatMode === 'queue' ? 'Cola en bucle' : repeatMode === 'track' ? 'Una canción en bucle' : 'La cola termina al llegar al final'}</Text>
       {selected.auditionId ? <View style={ui.row}>{([['vocal_guide','Con voz'],['karaoke','Karaoke']] as const).map(([audioKind,label]) => {
         const track = tracks.find((candidate) => candidate.auditionId === selected.auditionId && candidate.audio.kind === audioKind);
         return <View key={audioKind} style={{flex:1}}><Button label={label} secondary={selected.audio.kind !== audioKind} disabled={!track} onPress={() => { if (track) play(track); }} /></View>;
       })}</View> : null}
       <View style={[ui.row, { justifyContent: 'center' }]}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retroceder diez segundos" style={ui.icon} onPress={() => { if (player.current) player.current.currentTime = Math.max(0, player.current.currentTime - 10); }}><Icon name="rewind-10" size={30} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retroceder diez segundos" style={ui.icon} onPress={() => player.current?.seek(position - 10)}><Icon name="rewind-10" size={30} /></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={[ui.icon, { width: 64, height: 64, backgroundColor: palette.plum }]}><Icon name={playing ? 'pause' : 'play'} color="#fff" size={32} /></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Avanzar diez segundos" style={ui.icon} onPress={() => { if (player.current) player.current.currentTime = Math.min(duration, player.current.currentTime + 10); }}><Icon name="fast-forward-10" size={30} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Avanzar diez segundos" style={ui.icon} onPress={() => player.current?.seek(position + 10)}><Icon name="fast-forward-10" size={30} /></TouchableOpacity>
       </View>
-      {Platform.OS === 'web' ? <input aria-label="Posición de la canción" type="range" min={0} max={duration || 1} step={0.1} value={position} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={(event) => { if (player.current) { player.current.currentTime = Number(event.target.value); setPosition(Number(event.target.value)); } }} /> : null}
+      {Platform.OS === 'web' ? <input aria-label="Posición de la canción" type="range" min={0} max={duration || 1} step={0.1} value={position} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={(event) => player.current?.seek(Number(event.target.value))} /> : null}
       <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={ui.text}>{clock(position)}</Text><Text style={ui.text}>{clock(duration)}</Text></View>
-      <View style={ui.wrap}><Chip label="Repetir" selected={loop} onPress={() => setLoop(!loop)} /><Chip label={`${rate}×`} onPress={() => setRate(rate === 1 ? 0.8 : rate === 0.8 ? 1.2 : 1)} />{selected.lyrics ? <Chip label={lyricsOpen ? 'Ocultar letra' : 'Ver letra'} selected={lyricsOpen} onPress={() => setLyricsOpen(!lyricsOpen)} /> : null}</View>
+      <View style={ui.wrap}><Chip label="Repetir cola" selected={repeatMode === 'queue'} onPress={() => setRepeatMode(repeatMode === 'queue' ? 'off' : 'queue')} /><Chip label="Repetir canción" selected={repeatMode === 'track'} onPress={() => setRepeatMode(repeatMode === 'track' ? 'queue' : 'track')} /><Chip label={`${rate}×`} onPress={() => setRate(rate === 1 ? 0.8 : rate === 0.8 ? 1.2 : 1)} />{selected.lyrics ? <Chip label={lyricsOpen ? 'Ocultar letra' : 'Ver letra'} selected={lyricsOpen} onPress={() => setLyricsOpen(!lyricsOpen)} /> : null}</View>
       {lyricsOpen && selected.lyrics ? <Text selectable style={[ui.text, { color: palette.ink }]}>{selected.lyrics}</Text> : null}
       {error ? <Text accessibilityRole="alert" style={ui.error}>{error}</Text> : null}
     </View> : null}

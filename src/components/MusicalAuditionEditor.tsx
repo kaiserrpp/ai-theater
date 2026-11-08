@@ -9,6 +9,7 @@ import type { SharedMusicalAudition, SharedScriptManifest, SharedSongAudioKind }
 import { AUDITION_MEDIA_PICKER_TYPES, performMusicalAuditionSave, prepareAuditionMedia, resolveAuditionMediaMimeType } from '../utils/saveMusicalAudition';
 import { AdminAccessPanel } from './AdminAccessPanel';
 import { Button, Chip, palette, Sheet, ui } from './PracticeUI';
+import { UploadActivity, type UploadActivityState } from './UploadActivity';
 
 interface Props { manifest: SharedScriptManifest; initial?: SharedMusicalAudition | null; onUpdated: (manifest: SharedScriptManifest) => void; onClose: () => void; onSaved: () => void; }
 const kinds = [['vocal_guide', 'Con voz'], ['karaoke', 'Karaoke']] as const;
@@ -26,7 +27,7 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
   const sourceUploads = useRef(new Map<File, SharedSongUploadResult>());
   const [newRole, setNewRole] = useState('');
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('');
+  const [activity, setActivity] = useState<UploadActivityState | null>(null);
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState<'close' | 'delete' | null>(null);
   const availableRoles = normalizeRoles([...manifest.scriptData.personajes, ...manifest.auditionScenes.flatMap((scene) => scene.scriptData.personajes),
@@ -67,7 +68,7 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
     const invalid = validateMusicalAudition(draft);
     if (invalid) { setError(invalid); return; }
     if (!draft.musicalNumberId && !draft.musicalNumberTitle.trim()) { setError('Elige el número musical o escribe su nombre.'); return; }
-    setBusy(true); setError(''); setStatus('Guardando fragmento…');
+    setBusy(true); setError(''); setActivity({ stage: 'preparing' });
     try {
       await performMusicalAuditionSave({ ...draft, auditionId: draft.id, shareId: manifest.shareId, password },
         kinds.flatMap(([kind]) => files[kind] ? [{ kind, file: files[kind]! }] : []), removeKinds, {
@@ -82,17 +83,17 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
             return prepareAuditionMedia(file, {
               sourceUploads: sourceUploads.current,
               upload: (source) => {
-                setStatus(`Subiendo ${label}…`);
+                setActivity({ stage: 'uploading', label, percentage: 0 });
                 return uploadSharedSongAudio({ shareId: manifest.shareId, targetId: draft.id, targetType: 'musical-audition', file: source, password,
-                  onUploadProgress: (progress) => setStatus(`Subiendo ${label} · ${progress}%`) });
+                  onUploadProgress: (percentage) => setActivity({ stage: 'uploading', label, percentage }) });
               },
-              onExtracting: () => setStatus(`Extrayendo el audio del vídeo · ${label}…`),
+              onExtracting: () => setActivity({ stage: 'extracting', label }),
               extract: (source) => extractSharedSongAudioFromVideo({ shareId: manifest.shareId, targetId: draft.id, targetType: 'musical-audition', password,
                 sourceUrl: source.url, sourcePathname: source.pathname, sourceFileName: source.fileName, sourceContentType: source.contentType }),
             });
           },
           saveAudio: (cut, kind, upload) => {
-            setStatus(`Guardando ${kind === 'karaoke' ? 'karaoke' : 'audio con voz'}…`);
+            setActivity({ stage: 'saving', label: kind === 'karaoke' ? 'Karaoke' : 'Con voz' });
             return saveMusicalAuditionAudio({ shareId: manifest.shareId, password, auditionId: cut.id, revision: cut.revision,
               kind, audio: { audioUrl: upload.url, audioFileName: upload.fileName, contentType: upload.contentType, size: upload.size } });
           },
@@ -116,7 +117,7 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
         }
       } catch { /* The form and selected files remain available for retry. */ }
       setError(`${failure instanceof Error ? failure.message : 'No se pudo completar la subida.'} Los datos y audios ya guardados se conservan. Puedes volver a guardar para completar lo pendiente.`);
-    } finally { setBusy(false); setStatus(''); }
+    } finally { setBusy(false); setActivity(null); }
   };
 
   const remove = async () => {
@@ -129,7 +130,7 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
 
   return <Sheet visible closeDisabled={busy} title={saved ? 'Editar audición musical' : 'Subir canción de audición'} onClose={requestClose} footer={password && Platform.OS === 'web' ? <View testID="audition-music-editor-actions" style={{ gap: 10 }}>
     {error ? <Text accessibilityRole="alert" style={ui.error}>{error}</Text> : null}
-    {status ? <Text accessibilityLiveRegion="polite" style={ui.text}>{status}</Text> : null}
+    {activity ? <UploadActivity {...activity} /> : null}
     {confirm ? <><Text style={ui.text}>{confirm === 'delete' ? 'Se eliminará este fragmento y sus referencias a los audios. El número musical se conserva.' : '¿Cerrar la edición? Se conservará lo que ya hayas guardado; los archivos pendientes deberán elegirse otra vez.'}</Text><Button label={confirm === 'delete' ? 'Eliminar fragmento' : 'Cerrar sin guardar lo pendiente'} disabled={busy} onPress={confirm === 'delete' ? () => void remove() : onClose} /><Button label="Seguir editando" secondary disabled={busy} onPress={() => setConfirm(null)} /></> : <View style={ui.row}><View style={{ flex: 1 }}><Button label={busy ? 'Guardando…' : 'Guardar audición'} disabled={busy} onPress={() => void save()} /></View><Button label="Cancelar" secondary disabled={busy} onPress={requestClose} /></View>}
   </View> : undefined}>
     {!password ? <><Text style={ui.text}>Para subir o modificar canciones, entra con la clave de gestión. Escuchar no requiere clave.</Text><AdminAccessPanel initiallyExpanded /></>
