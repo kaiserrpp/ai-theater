@@ -18,14 +18,15 @@ const setup = (manifest = base()) => {
     readManifest: async () => structuredClone(current),
     writeManifest: async (value) => { writes++; current = shared.normalizeManifest(value); return structuredClone(current); },
   }};
-  const handlers = Object.fromEntries(['musical-audition','publish','musical-number','audition-scene'].map((file) => {
+  delete require.cache[require.resolve('../server/musical-audition')];
+  const handlers = Object.fromEntries(['publish','musical-number','audition-scene'].map((file) => {
     const path = require.resolve(`../api/shared-script/${file}`); delete require.cache[path]; return [file,require(path)];
   }));
   require.cache[sharedPath] = original;
   return { current: () => current, writes: () => writes,
     request: async (method, body, name = 'musical-audition') => {
       const response = { statusCode:200, setHeader(){}, status(code){this.statusCode=code;return this;},json(value){this.body=value;return this;} };
-      await handlers[name]({method,body,headers:{host:'localhost'}},response); return response;
+      await handlers[name === 'musical-audition' ? 'audition-scene' : name]({method,body,query:name === 'musical-audition' ? {auditionType:'music'} : {},headers:{host:'localhost'}},response); return response;
     },
   };
 };

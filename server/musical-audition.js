@@ -1,5 +1,5 @@
-const { hasSongAdminPasswordConfigured, isValidSongAdminPassword, parseJsonBody, readManifest, writeManifest } = require('./_shared');
-const { normalizeRoles, validateMusicalAudition, validAudioUrl } = require('../../shared/musicalAuditions');
+const { hasSongAdminPasswordConfigured, isValidSongAdminPassword, parseJsonBody, readManifest, writeManifest } = require('../api/shared-script/_shared');
+const { normalizeRoles, validateMusicalAudition, validAudioUrl } = require('../shared/musicalAuditions');
 
 module.exports = async (request, response) => {
   if (!['POST', 'PATCH', 'DELETE'].includes(request.method)) {

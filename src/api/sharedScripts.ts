@@ -180,7 +180,7 @@ export const verifySongAdminPassword = async (password: string) => {
 };
 
 const mutateMusicalAudition = async (method: string, input: object) => {
-  const response = await fetch(buildProtectedApiUrl('/musical-audition'), {
+  const response = await fetch(buildProtectedApiUrl('/audition-scene', { auditionType: 'music' }), {
     method, credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(input),
   });

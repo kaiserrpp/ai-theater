@@ -1,7 +1,9 @@
 const { hasSongAdminPasswordConfigured, isValidSongAdminPassword, parseJsonBody, readManifest, writeManifest } = require('./_shared');
+const handleMusicalAudition = require('../../server/musical-audition');
 const { validateAuditionScript, normalizeAuditionScript } = require('../../shared/auditionScenes');
 
 module.exports = async (request, response) => {
+  if (request.query?.auditionType === 'music') return handleMusicalAudition(request, response);
   if (!['POST', 'PATCH', 'DELETE'].includes(request.method)) {
     response.setHeader('Allow', 'POST, PATCH, DELETE');
     return response.status(405).json({ error: 'Método no permitido.' });
