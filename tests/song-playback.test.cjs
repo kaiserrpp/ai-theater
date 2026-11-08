@@ -7,6 +7,7 @@ require.extensions['.ts'] = (loadedModule, filename) => loadedModule._compile(ts
   compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
 }).outputText,filename);
 const { createSongPlayback } = require('../src/utils/songPlayback.ts');
+const { selectSongPlaylist } = require('../src/utils/songPlaylistSelection.ts');
 if(previousLoader)require.extensions['.ts']=previousLoader;else delete require.extensions['.ts'];
 
 const tracks = ['one','two','three'].map(key=>({key,audio:{audioUrl:`https://example.com/${key}.mp3`}}));
@@ -60,4 +61,50 @@ test('a rejected play promise from a previous track cannot interrupt a newer tra
   assert.equal(state.key,'two');assert.equal(state.error,'');assert.equal(state.playing,true);
   audio.play=()=>Promise.reject(new Error('blocked'));audio.finish();await Promise.resolve();
   assert.equal(state.key,'three');assert.equal(state.playing,false);assert.match(state.error,/Pulsa reproducir/);
+});
+
+test('single-song playback stops at its end when repetition is off but still allows previous and next within its group', () => {
+  const {player,audio,state}=setup();player.setRepeat('off');player.play(tracks[0],tracks,'single');
+  const calls=audio.calls;audio.finish();assert.equal(state.key,'one');assert.equal(state.playing,false);assert.equal(audio.calls,calls);
+  player.navigate('next');assert.equal(state.key,'two');assert.equal(state.position,0);assert.equal(state.playing,true);
+  audio.finish();assert.equal(state.key,'two');assert.equal(state.playing,false);
+  player.navigate('previous');assert.equal(state.key,'one');player.navigate('previous');assert.equal(state.key,'three');
+  player.navigate('next');assert.equal(state.key,'one');
+});
+
+test('single-song mode repeats only the chosen song, and a new group session resumes normal queue advancement', () => {
+  const {player,audio,state}=setup();player.play(tracks[1],tracks,'single');assert.equal(audio.loop,true);
+  audio.finish();assert.equal(state.key,'two');
+  player.play(tracks[0],tracks,'queue');assert.equal(audio.loop,false);audio.finish();assert.equal(state.key,'two');
+});
+
+test('manual navigation wraps both ways, retains practice speed and pitch, and cannot restart a closed player', () => {
+  const {player,audio,state,created}=setup();player.setRate(0.75);player.play(tracks[0],tracks);
+  player.seek(6);player.navigate('previous');assert.equal(state.key,'three');assert.equal(state.position,0);
+  assert.equal(audio.playbackRate,0.75);assert.equal(audio.preservesPitch,true);
+  player.navigate('next');assert.equal(state.key,'one');assert.equal(created(),1);
+  player.stop();const calls=audio.calls;player.navigate('next');assert.equal(audio.calls,calls);assert.equal(state.key,null);
+});
+
+test('rap speed supports 0.70 through 1.00, keeps its setting between tracks and ignores invalid numbers', () => {
+  const {player,audio}=setup();player.setRate(0.7);player.play(tracks[0],tracks);
+  assert.equal(audio.playbackRate,0.7);audio.finish();assert.equal(audio.playbackRate,0.7);
+  for(const speed of [0.75,0.8,0.85,0.9,0.95,1]){player.setRate(speed);assert.equal(audio.playbackRate,speed);assert.equal(audio.preservesPitch,true);}
+  player.setRate(0);assert.equal(audio.playbackRate,0.7);player.setRate(1.2);assert.equal(audio.playbackRate,1);
+  player.setRate(NaN);assert.equal(audio.playbackRate,1);
+});
+
+test('explicit all, vocal-guide and karaoke groups keep their order and never mix work audio with audition fragments', () => {
+  const library=[
+    {key:'work-guide',audio:{kind:'vocal_guide'}},{key:'work-karaoke',audio:{kind:'karaoke'}},
+    {key:'cut-ana-guide',auditionId:'ana',audio:{kind:'vocal_guide'}},{key:'cut-ana-karaoke',auditionId:'ana',audio:{kind:'karaoke'}},
+    {key:'cut-luis-guide',auditionId:'luis',audio:{kind:'vocal_guide'}},
+  ];
+  const select=(scope,kind,visibleAuditionIds=['ana'])=>selectSongPlaylist(library,{scope,kind,visibleAuditionIds}).map(track=>track.key);
+  assert.deepEqual(select('work','all'),['work-guide','work-karaoke']);
+  assert.deepEqual(select('work','vocal_guide'),['work-guide']);assert.deepEqual(select('work','karaoke'),['work-karaoke']);
+  assert.deepEqual(select('auditions','all'),['cut-ana-guide','cut-ana-karaoke']);
+  assert.deepEqual(select('auditions','vocal_guide'),['cut-ana-guide']);assert.deepEqual(select('auditions','karaoke'),['cut-ana-karaoke']);
+  assert.deepEqual(select('auditions','vocal_guide',['ana','luis']),['cut-ana-guide','cut-luis-guide']);
+  assert.deepEqual(select('auditions','all',[]),[]);
 });

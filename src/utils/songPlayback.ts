@@ -1,5 +1,6 @@
 export interface PlaybackTrack { key: string; audio: { audioUrl: string }; }
 export type SongRepeatMode = 'queue' | 'track' | 'off';
+export type SongPlaybackMode = 'queue' | 'single';
 
 // Reuse the audio element for every entry, preserving the playback permission
 // obtained by the user's tap on iPhone. All async results belong to one cycle.
@@ -16,6 +17,7 @@ export const createSongPlayback = <T extends PlaybackTrack>(options: {
   let queue: T[] = [];
   let current: T | null = null;
   let repeat: SongRepeatMode = 'queue';
+  let mode: SongPlaybackMode = 'queue';
   let rate = 1;
   let cycle = 0;
   const updateQueue = () => options.onQueue({ index: queue.findIndex((track) => track.key === current?.key), total: queue.length });
@@ -34,7 +36,8 @@ export const createSongPlayback = <T extends PlaybackTrack>(options: {
     element.onended = () => {
       if (token !== cycle || !current) return;
       const index = queue.findIndex((entry) => entry.key === current!.key);
-      const next = repeat === 'track' ? current : queue[index + 1] || (repeat === 'queue' ? queue[0] : null);
+      const next = repeat === 'track' || (mode === 'single' && repeat === 'queue') ? current
+        : mode === 'single' ? null : queue[index + 1] || (repeat === 'queue' ? queue[0] : null);
       if (next) start(next, true);
       else options.onPlaying(false);
     };
@@ -44,7 +47,9 @@ export const createSongPlayback = <T extends PlaybackTrack>(options: {
     } else if (restart || element.ended) {
       element.currentTime = 0; options.onPosition(0);
     }
-    element.loop = repeat === 'track'; element.playbackRate = rate;
+    element.loop = repeat === 'track' || (mode === 'single' && repeat === 'queue');
+    element.preservesPitch = true;
+    element.playbackRate = rate;
     void element.play().catch(() => {
       if (token === cycle) { options.onPlaying(false); options.onError('Pulsa reproducir para volver a iniciar el audio.'); }
     });
@@ -54,17 +59,28 @@ export const createSongPlayback = <T extends PlaybackTrack>(options: {
     options.onTrack(null); options.onPlaying(false); options.onPosition(0); options.onDuration(0); options.onError(''); updateQueue();
   };
   return {
-    play: (track: T, entries: T[]) => {
+    play: (track: T, entries: T[], playbackMode: SongPlaybackMode = 'queue') => {
+      mode = playbackMode;
       const used = new Set<string>();
       queue = entries.filter((entry) => { if (used.has(entry.key)) return false; used.add(entry.key); return true; });
       if (!queue.some((entry) => entry.key === track.key)) queue.push(track);
       start(track);
     },
     resume: () => { if (current) start(current); },
+    navigate: (direction: 'previous' | 'next') => {
+      if (!current || queue.length < 2) return;
+      const index = queue.findIndex((entry) => entry.key === current!.key);
+      const nextIndex = (index + (direction === 'previous' ? -1 : 1) + queue.length) % queue.length;
+      start(queue[nextIndex], true);
+    },
     pause: () => { audio?.pause(); options.onPlaying(false); },
     stop,
-    setRepeat: (value: SongRepeatMode) => { repeat = value; if (audio) audio.loop = value === 'track'; },
-    setRate: (value: number) => { rate = value; if (audio) audio.playbackRate = value; },
+    setRepeat: (value: SongRepeatMode) => { repeat = value; if (audio) audio.loop = value === 'track' || (mode === 'single' && value === 'queue'); },
+    setRate: (value: number) => {
+      if (!Number.isFinite(value)) return;
+      rate = Math.round(Math.max(0.7, Math.min(1, value)) * 100) / 100;
+      if (audio) { audio.preservesPitch = true; audio.playbackRate = rate; }
+    },
     seek: (seconds: number) => {
       if (!audio) return;
       audio.currentTime = Math.max(0, Math.min(Number.isFinite(audio.duration) ? audio.duration : Infinity, seconds));

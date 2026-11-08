@@ -31,8 +31,8 @@ export const Button = ({ label, onPress, secondary, disabled }: { label: string;
     <Text style={[ui.buttonText, secondary && ui.secondaryText]}>{label}</Text>
   </TouchableOpacity>
 );
-export const Chip = ({ label, selected, onPress }: { label: string; selected?: boolean; onPress: () => void }) => (
-  <TouchableOpacity accessibilityRole="button" accessibilityState={{ selected: Boolean(selected) }} onPress={onPress} style={[ui.chip, selected && ui.chipActive]}>
+export const Chip = ({ label, selected, onPress, disabled = false, accessibilityLabel }: { label: string; selected?: boolean; onPress: () => void; disabled?: boolean; accessibilityLabel?: string }) => (
+  <TouchableOpacity accessibilityRole="button" accessibilityLabel={accessibilityLabel} disabled={disabled} accessibilityState={{ selected: Boolean(selected), disabled }} onPress={onPress} style={[ui.chip, selected && ui.chipActive, disabled && { opacity: 0.4 }]}>
     <Text style={[ui.chipText, selected && ui.chipActiveText]}>{label}</Text>
   </TouchableOpacity>
 );
