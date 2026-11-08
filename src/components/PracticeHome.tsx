@@ -80,7 +80,7 @@ export const PracticeHome = (props: Props) => {
 
   return <View style={{ flex: 1 }}>
     {!inRehearsal ? <View style={ui.header}>
-      <View style={{ flex: 1, gap: 3 }}><Text style={[ui.label, { fontSize: 11, letterSpacing: 2 }]}>AI · THEATRE</Text><Text numberOfLines={1} style={{ fontSize: 16, color: palette.ink, fontWeight: '600' }}>{props.script?.obra || 'Tu espacio de ensayo'}</Text></View>
+      <View style={{ flex: 1, gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><Text style={[ui.label, { fontSize: 11, letterSpacing: 2 }]}>AI · THEATRE</Text><VersionBadge compact /></View><Text numberOfLines={1} style={{ fontSize: 16, color: palette.ink, fontWeight: '600' }}>{props.script?.obra || 'Tu espacio de ensayo'}</Text></View>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Más opciones" onPress={() => setSheet('menu')} style={ui.icon}><Icon name="dots-horizontal" size={28} /></TouchableOpacity>
     </View> : null}
 

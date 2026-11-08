@@ -21,6 +21,8 @@ El manifiesto compartido pasa a versión 6 con una colección `musicalAuditions`
 
 **Inicio** da acceso a **Ensayar escenas**, **Escuchar y practicar** y al último ensayo pendiente. La navegación inferior mantiene **Inicio / Ensayar / Canciones**. En Ensayar puedes alternar **Audiciones / Obra**, elegir tus personajes y practicar tus escenas o todas.
 
+La cabecera muestra siempre la versión cargada junto a **AI · THEATRE** en Inicio, Ensayar y Canciones, incluso mientras se carga una obra. Se toma de la misma versión del paquete que usa cada publicación. También sigue disponible en **⋯ → Más opciones**.
+
 Las operaciones de importación, edición, publicación y cambio de obra están en **⋯ → Materiales y gestión** y **⋯ → Cambiar obra**. Escuchar y ensayar no requieren acceso de gestión. La biblioteca musical separa los audios con voz y karaoke, con reproducción, búsqueda de posición, repetición, velocidad y letra cuando está disponible; al cambiar de pestaña conserva un minirreproductor.
 
 El modo inteligente es la opción inicial en navegadores con reconocimiento. Una elección expresa de manual o silencio se conserva. **⋯ → Micrófono y voz**, también accesible desde el botón del micro durante el ensayo, permite cambiarlo. Antes de cada ensayo con micrófono, primero se miden el ruido de fondo y la voz; después se comprueba el altavoz. La preparación se repite siempre, sin restaurar una calibración guardada. En manual se confirma el altavoz y no se solicita el micrófono.
