@@ -168,7 +168,7 @@ module.exports = async (request, response) => {
 
     const shareId = typeof payload.shareId === 'string' ? payload.shareId.trim() : '';
     const targetId = typeof payload.targetId === 'string' ? payload.targetId.trim() : '';
-    const targetType = payload.targetType === 'musical-number' ? 'musical-number' : 'song';
+    const targetType = ['musical-number', 'musical-audition'].includes(payload.targetType) ? payload.targetType : 'song';
     const sourceUrl = typeof payload.sourceUrl === 'string' ? payload.sourceUrl.trim() : '';
     const sourcePathname =
       typeof payload.sourcePathname === 'string' ? payload.sourcePathname.trim() : '';
@@ -216,11 +216,10 @@ module.exports = async (request, response) => {
     } catch (error) {
       const stderr =
         error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : '';
-      const stdout =
-        error && typeof error === 'object' && 'stdout' in error ? String(error.stdout) : '';
-      const details = stderr.trim() || stdout.trim() || 'ffmpeg no pudo convertir el video.';
-      response.status(500).json({
-        error: `No se pudo convertir el video a audio en servidor. ${details}`,
+      const hasNoAudio = /does not contain any stream|matches no streams|Stream map.*matches no streams/i.test(stderr);
+      response.status(hasNoAudio ? 422 : 500).json({
+        error: hasNoAudio ? 'El vídeo no contiene una pista de sonido. Elige otro vídeo o sube un archivo de audio.'
+          : 'No se pudo extraer el sonido del vídeo. Prueba con otro vídeo o con un archivo de audio.',
       });
       return;
     }
@@ -233,7 +232,7 @@ module.exports = async (request, response) => {
     const safeBaseName =
       sanitizeFileName(sourceBaseName) || `audio-extraido-${Date.now()}`;
     const extractedFileName = `${safeBaseName}.mp3`;
-    const targetFolder = targetType === 'musical-number' ? 'musical-numbers' : 'songs';
+    const targetFolder = targetType === 'musical-audition' ? 'musical-auditions' : targetType === 'musical-number' ? 'musical-numbers' : 'songs';
     const pathname = `shared-scripts/${getStorageNamespace()}/${shareId}/${targetFolder}/${targetId}/${Date.now()}-${extractedFileName}`;
 
     const blob = await put(pathname, outputBuffer, {

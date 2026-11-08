@@ -6,10 +6,12 @@ En **Canciones → Audiciones**, **+ Subir canción de audición** abre directam
 
 1. Elige un número musical o escribe el nombre de uno nuevo. Se puede crear sin vincularlo al guion, aunque la obra ya tenga texto.
 2. Pon nombre al fragmento y selecciona los personajes que cantan. Puedes añadir personajes que aún no estén en el guion.
-3. Elige los archivos ya recortados de **Con voz** y/o **Karaoke**; puedes guardar primero los datos o una sola versión y completarlos después. La letra del fragmento es opcional.
+3. Elige los archivos ya recortados de **Con voz** y/o **Karaoke**. Admite audios y vídeos; de los vídeos se extrae el sonido al guardar. Puedes guardar primero los datos o una sola versión y completarlos después. La letra del fragmento es opcional.
 4. Pulsa **Guardar audición** en la barra inferior, que permanece visible mientras revisas el formulario. La subida muestra el progreso y conserva los archivos ya guardados si falla una versión; se puede reintentar desde el mismo formulario.
 
 Cada tarjeta representa un fragmento y ofrece sus versiones Con voz y Karaoke. Un número admite varios fragmentos con personajes, audios y letras independientes. El reproductor conserva repetición, velocidad, posición y letra; la pestaña **Obra** mantiene los audios completos. **Mis personajes** filtra los fragmentos y recuerda la selección por obra en el dispositivo.
+
+En iPhone, usa **Explorar** para audios guardados en Archivos y **Fototeca** para vídeos. El formulario indica que un vídeo está pendiente de extraer y muestra por separado la subida y la extracción. Si falla la conversión se puede reintentar sin subir otra vez el vídeo durante esa edición; si falla el registro posterior, conserva el MP3 ya extraído. Un vídeo sin pista de sonido muestra un error específico y conserva los materiales anteriores. La app no controla la preparación que hace Fotos antes de entregar el archivo; si se queda esperando, se puede guardar el vídeo en Archivos y elegirlo desde Explorar.
 
 Con gestión activa, el lápiz de cada fragmento permite cambiar personajes, letra, número o archivos y eliminar el fragmento. Los cambios y audios usan una revisión para rechazar ediciones antiguas. Se conservan la canción completa y los demás fragmentos. Los números que aún tengan fragmentos asociados no se pueden eliminar hasta mover o quitar esos fragmentos.
 
