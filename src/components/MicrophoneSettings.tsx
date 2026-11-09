@@ -1,15 +1,19 @@
-import React from 'react';
+import React, { useState, useSyncExternalStore } from 'react';
 import { Switch, Text, TouchableOpacity, View } from 'react-native';
 import { ListenPreference } from '../utils/rehearsalPreferences';
-import { Icon, usePracticeTheme } from './PracticeUI';
+import { rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
+import { Button, Icon, usePracticeTheme } from './PracticeUI';
 
-export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported }: {
+export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, onRepeatPreparation }: {
   mode: ListenPreference; onModeChange: (mode: ListenPreference) => void;
   showTranscript: boolean; onTranscriptChange: (visible: boolean) => void; supported: boolean;
+  onRepeatPreparation?: () => void;
 }) => {
   const { palette, ui } = usePracticeTheme();
+  const preparation = useSyncExternalStore(rehearsalPreparationSession.subscribe, rehearsalPreparationSession.getSnapshot, rehearsalPreparationSession.getSnapshot);
+  const [repeatRequested, setRepeatRequested] = useState(false);
   return <>
-  <Text style={ui.text}>La app recuerda tu elección en este dispositivo. Al iniciar un ensayo comprobaremos la escucha.</Text>
+  <Text style={ui.text}>La app recuerda tu elección en este dispositivo. Las pruebas de audio se hacen una vez y se conservan hasta que cierres la app.</Text>
   {([
     ['intelligent', 'Inteligente', 'Comprueba tus palabras y avanza al completar la réplica.'],
     ['manual', 'Manual', 'Avanza tú con el botón siguiente.'],
@@ -26,6 +30,18 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   <View style={[ui.card, ui.row]}><View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 16 }]}>Mostrar transcripción</Text>
     <Text style={ui.text}>Muestra lo que la app oye en modo inteligente.</Text></View>
     <Switch accessibilityLabel="Mostrar transcripción" value={showTranscript} onValueChange={onTranscriptChange} trackColor={{ true: palette.plum }} />
+  </View>
+  <View style={ui.card}>
+    <Text style={ui.subtitle}>Pruebas de audio</Text>
+    <Text accessibilityLiveRegion="polite" style={ui.text}>{repeatRequested
+      ? 'Volveremos a comprobar el audio al empezar el próximo ensayo.'
+      : preparation.speakerConfirmed ? 'El altavoz ya está comprobado. Reutilizaremos las pruebas completadas mientras la app siga abierta.'
+      : 'Comprobaremos el audio al empezar el ensayo.'}</Text>
+    <Button label={onRepeatPreparation ? 'Repetir pruebas de audio' : 'Repetir pruebas en el próximo ensayo'} secondary onPress={() => {
+      rehearsalPreparationSession.reset();
+      setRepeatRequested(true);
+      onRepeatPreparation?.();
+    }} />
   </View>
 </>;
 };

@@ -52,7 +52,7 @@ test('a cancelled calibration cannot start later steps or close the new session 
   })), /preparation-cancelled/);
   assert.deepEqual(events, ['open']);
 });
-test('intelligent mode requires speaker, fresh calibration, live recognition and the final output confirmation', () => {
+test('intelligent mode requires speaker, calibration, live recognition and the final output confirmation', () => {
   const complete = { speakerConfirmed: true, microphoneCalibrated: true, recognitionAudioActive: true, speakerWithRecognitionConfirmed: true };
   assert.equal(canStart('intelligent', complete), true);
   for (const key of Object.keys(complete)) assert.equal(canStart('intelligent', { ...complete, [key]: false }), false, key);
