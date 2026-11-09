@@ -11,7 +11,7 @@ export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
       <Image source={{ uri: background.uri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
       <View style={[StyleSheet.absoluteFillObject, { backgroundColor: palette.overlay }]} />
     </View> : null}
-    <StatusBar style={palette.ink === '#ffffff' ? 'light' : 'dark'} />
+    <StatusBar style={palette.isDark ? 'light' : 'dark'} />
     <SafeAreaView style={styles.safeArea}><View style={styles.container}>{children}</View></SafeAreaView>
   </View>;
 };

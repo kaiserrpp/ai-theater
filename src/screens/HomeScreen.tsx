@@ -35,6 +35,8 @@ import {
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRolesAndSongs } from '../utils/scriptScenes';
 import { LAST_WORK_STORAGE_KEY } from '../store/storageKeys';
 import { parsePreferredWork, resolveStartupWork, type PreferredWork } from '../utils/preferredWork';
+import { AppearanceProvider } from '../store/appearance';
+import { appearanceWorkKey } from '../store/workAppearances';
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   ALL: null,
@@ -122,8 +124,12 @@ const cloneSavedScriptConfig = (config: SavedScriptConfig): SavedScriptConfig =>
   sharedScriptId: config.sharedScriptId,
 });
 
-export const HomeScreen = () => {
+const ManagementHeader = ({ onBack }: { onBack: () => void }) => {
   const { ui } = usePracticeTheme();
+  return <View style={[ui.header, { justifyContent: 'space-between' }]}><Text style={ui.subtitle}>Materiales y gestión</Text><Button label="Volver" secondary onPress={onBack} /></View>;
+};
+
+export const HomeScreen = () => {
   const [isManagingWorkspace, setIsManagingWorkspace] = useState(false);
   const adminPassword = useAdminPassword();
   const [isManagingAuditions, setIsManagingAuditions] = useState(false);
@@ -895,6 +901,7 @@ export const HomeScreen = () => {
     );
   };
 
+  const renderScreen = () => {
   if (isManagingAuditions && displayScriptData) {
     return (
       <ScreenWrapper>
@@ -948,7 +955,7 @@ export const HomeScreen = () => {
 
   return (
     <ScreenWrapper>
-      <View style={[ui.header, { justifyContent: 'space-between' }]}><Text style={ui.subtitle}>Materiales y gestión</Text><Button label="Volver" secondary onPress={() => { setIsManagingWorkspace(false); setIsManagingSongs(false); }} /></View>
+      <ManagementHeader onBack={() => { setIsManagingWorkspace(false); setIsManagingSongs(false); }} />
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.titlePanel}>
           <Text style={styles.title}>AI-Theatre</Text>
@@ -1513,6 +1520,13 @@ export const HomeScreen = () => {
       </ScrollView>
     </ScreenWrapper>
   );
+  };
+  const workKey = sharedScript?.shareId ? appearanceWorkKey({ kind: 'shared', id: sharedScript.shareId })
+    : scriptData ? appearanceWorkKey({ kind: 'local', id: getScriptIdentity(scriptData) }) : null;
+  return <AppearanceProvider workKey={workKey} workTitle={scriptData?.obra ?? ''}
+    legacyWorkKey={preferredWork === undefined ? undefined : appearanceWorkKey(preferredWork)}>
+    {renderScreen()}
+  </AppearanceProvider>;
 };
 
 const styles = StyleSheet.create({

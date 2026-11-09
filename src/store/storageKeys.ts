@@ -2,6 +2,7 @@ export const PENDING_ANALYSIS_STORAGE_KEY = '@pending_job';
 export const SCRIPT_LIBRARY_STORAGE_KEY = '@teatro_ia_library';
 export const LAST_WORK_STORAGE_KEY = '@teatro_ia_last_work';
 export const BACKGROUND_STORAGE_KEY = '@teatro_ia_background';
+export const WORK_APPEARANCES_STORAGE_KEY = '@teatro_ia_work_appearances_v1';
 export const AUDITION_PREFERENCES_STORAGE_PREFIX = '@teatro_ia_audition_preferences:';
 export const SCRIPT_ROLE_MERGES_STORAGE_PREFIX = '@teatro_ia_role_merges:';
 export const LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY =

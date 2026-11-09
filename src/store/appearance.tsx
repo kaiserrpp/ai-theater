@@ -1,21 +1,28 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { discardBackgroundImage } from '../api/backgroundImage';
-import { paletteForBackground, parseBackgroundPreference, type BackgroundPreference } from '../utils/appearance';
-import { BACKGROUND_STORAGE_KEY } from './storageKeys';
+import { paletteForBackground, type BackgroundPreference } from '../utils/appearance';
+import { createWorkAppearanceStore, type WorkAppearances } from './workAppearances';
 
 const AppearanceContext = createContext({
   background: null as BackgroundPreference | null,
   palette: paletteForBackground(null), ready: false, notice: '',
+  workKey: null as string | null, workTitle: '', retryLoad: () => {},
   saveBackground: async (_background: BackgroundPreference | null) => {},
 });
 
-export const AppearanceProvider = ({ children }: { children: React.ReactNode }) => {
-  const [background, setBackground] = useState<BackgroundPreference | null>(null);
-  const [ready, setReady] = useState(false);
+export const AppearanceProvider = ({ children, workKey, workTitle, legacyWorkKey }: {
+  children: React.ReactNode; workKey: string | null; workTitle: string; legacyWorkKey: string | null | undefined;
+}) => {
+  const [backgrounds, setBackgrounds] = useState<WorkAppearances>({});
+  const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState('');
-  const palette = useMemo(() => paletteForBackground(background?.average ?? null), [background]);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const store = useRef<ReturnType<typeof createWorkAppearanceStore> | null>(null);
+  const background = workKey ? backgrounds[workKey] ?? null : null;
+  const ready = loaded && Boolean(workKey);
+  const palette = useMemo(() => paletteForBackground(background?.average ?? null, background?.accent ?? background?.average ?? null), [background]);
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const previousColor = document.body.style.backgroundColor;
@@ -29,26 +36,26 @@ export const AppearanceProvider = ({ children }: { children: React.ReactNode }) 
     };
   }, [palette.bg]);
   useEffect(() => {
+    if (loaded || legacyWorkKey === undefined || (!workKey && !legacyWorkKey)) return;
     let cancelled = false;
-    void AsyncStorage.getItem(BACKGROUND_STORAGE_KEY).then((stored) => {
-      if (!cancelled) setBackground(parseBackgroundPreference(stored));
-    }).catch(() => { if (!cancelled) setNotice('No se pudo recuperar el fondo guardado. Puedes volver a elegirlo.'); })
-      .finally(() => { if (!cancelled) setReady(true); });
+    store.current ??= createWorkAppearanceStore(AsyncStorage, (legacyWorkKey ?? workKey)!);
+    void store.current.load().then((works) => {
+      if (!cancelled) { setBackgrounds(works); setLoaded(true); setNotice(''); }
+    }).catch(() => { if (!cancelled) setNotice('No se pudo recuperar la apariencia de tus obras. Vuelve a intentarlo.'); });
     return () => { cancelled = true; };
-  }, []);
+  }, [legacyWorkKey, loadAttempt, loaded, workKey]);
   const saveBackground = async (next: BackgroundPreference | null) => {
+    if (!workKey || !ready || !store.current) throw new Error('Abre una obra antes de elegir su fondo.');
     try {
-      if (next) await AsyncStorage.setItem(BACKGROUND_STORAGE_KEY, JSON.stringify(next));
-      else await AsyncStorage.removeItem(BACKGROUND_STORAGE_KEY);
+      const result = await store.current.save(workKey, next);
+      setBackgrounds(result.works); setNotice('');
+      if (result.orphanedUri) await discardBackgroundImage(result.orphanedUri).catch(() => {});
     } catch {
       if (next && next.uri !== background?.uri) await discardBackgroundImage(next.uri).catch(() => {});
       throw new Error('No se pudo guardar el fondo. Libera espacio en este dispositivo y vuelve a intentarlo.');
     }
-    const previous = background;
-    setBackground(next); setNotice('');
-    if (previous && previous.uri !== next?.uri) await discardBackgroundImage(previous.uri).catch(() => {});
   };
-  return <AppearanceContext.Provider value={{ background, palette, ready, notice, saveBackground }}>{children}</AppearanceContext.Provider>;
+  return <AppearanceContext.Provider value={{ background, palette, ready, notice, saveBackground, workKey, workTitle, retryLoad: () => setLoadAttempt((attempt) => attempt + 1) }}>{children}</AppearanceContext.Provider>;
 };
 
 export const useAppearance = () => useContext(AppearanceContext);

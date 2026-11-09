@@ -25,7 +25,7 @@ El manifiesto compartido pasa a versión 6 con una colección `musicalAuditions`
 
 ## Inicio y ensayo
 
-En **⋯ → Fondo y apariencia** puedes elegir una imagen JPG, PNG o WebP (hasta 20 MB), cambiarla o restaurar el fondo original. El fondo se guarda en este dispositivo y se mantiene al cambiar de obra. La app analiza la luminosidad y los colores de la imagen para adaptar textos y botones; una capa de contraste protege la lectura incluso en zonas de la foto con mucha luz o sombra. En web se reduce la imagen antes de guardarla; no se sube al servidor.
+En **⋯ → Fondo y apariencia** puedes elegir una imagen JPG, PNG o WebP (hasta 20 MB) para la obra abierta, cambiarla o restaurar su fondo original. Cada obra recuerda su imagen y su paleta en este dispositivo; al cambiar de obra se recupera su apariencia. La app obtiene los tonos de menús, tarjetas, textos y botones del fondo. La imagen tiene menos oscurecimiento y los colores se ajustan para conservar el contraste incluso en zonas muy claras u oscuras. En web se reduce la imagen antes de guardarla y se busca un color destacado del cartel; no se sube al servidor. El fondo de la versión anterior se conserva para la última obra que se usaba, aunque la actualización se abra mediante el enlace de otra obra.
 
 La última obra abierta correctamente se recuerda como predeterminada en este dispositivo. Al volver a entrar se recupera automáticamente, junto con sus personajes y ajustes guardados. Puedes elegir otra en **⋯ → Cambiar obra**. Un enlace compartido abre la obra de ese enlace y pasa a ser la nueva predeterminada si se carga correctamente. Si la obra no se puede abrir, el selector sigue disponible para reintentar o cambiarla.
 

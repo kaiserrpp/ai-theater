@@ -1,5 +1,5 @@
 import type { DocumentPickerAsset } from 'expo-document-picker';
-import type { BackgroundPreference, RGB } from '../utils/appearance';
+import { imageAccentFromPixels, type BackgroundPreference, type RGB } from '../utils/appearance';
 
 export const prepareBackgroundImage = async (asset: DocumentPickerAsset): Promise<BackgroundPreference> => {
   const file = asset.file;
@@ -34,7 +34,8 @@ export const prepareBackgroundImage = async (asset: DocumentPickerAsset): Promis
     for (let index = 0; index < pixels.length; index += 4) {
       average[0] += pixels[index]; average[1] += pixels[index + 1]; average[2] += pixels[index + 2];
     }
-    return { uri, name: asset.name, average: average.map((channel) => Math.round(channel / 1024)) as RGB };
+    const mean = average.map((channel) => Math.round(channel / 1024)) as RGB;
+    return { uri, name: asset.name, average: mean, accent: imageAccentFromPixels(pixels, mean) };
   } finally { if (objectUrl) URL.revokeObjectURL(objectUrl); }
 };
 
