@@ -14,7 +14,8 @@ import {
   View,
 } from 'react-native';
 import { extractSharedSongAudioFromVideo, uploadSharedSongAudio } from '../api/sharedSongUploads';
-import { getAdminPassword, setAdminPassword, useAdminPassword } from '../store/adminSession';
+import { useIsAdmin } from '../store/adminSession';
+import { AdminAccessPanel } from './AdminAccessPanel';
 import { UploadActivity } from './UploadActivity';
 import {
   createSharedMusicalNumber,
@@ -27,7 +28,6 @@ import {
   updateSharedMusicalNumber,
   updateSharedMusicalNumberAudio,
   updateSharedSongAudio,
-  verifySongAdminPassword,
 } from '../api/sharedScripts';
 import {
   MusicalTimelineCue,
@@ -352,15 +352,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       : null;
   const [isVisible, setIsVisible] = useState(false);
   const [viewMode, setViewMode] = useState<SongManagerViewMode>('menu');
-  const activeAdminPassword = useAdminPassword();
-  const [isUnlocked, setIsUnlocked] = useState(Boolean(getAdminPassword()));
-  const [password, setPassword] = useState(getAdminPassword() ?? '');
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  useEffect(() => {
-    setIsUnlocked(Boolean(activeAdminPassword));
-    setPassword(activeAdminPassword ?? '');
-  }, [activeAdminPassword]);
-  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
+  const isUnlocked = useIsAdmin();
   const [, setManageSection] = useState<ManageSection>('musical-numbers');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
   const [selectedMusicalNumberId, setSelectedMusicalNumberId] = useState<string | null>(null);
@@ -1343,28 +1335,6 @@ export const SongManagerPanel: React.FC<Props> = ({
     stopPreviewAudio();
   }, [stopPreviewAudio]);
 
-  const handleUnlock = async () => {
-    if (!password.trim()) {
-      setPasswordError('Introduce la password de gestion.');
-      return;
-    }
-
-    setIsVerifyingPassword(true);
-    setPasswordError(null);
-
-    try {
-      await verifySongAdminPassword(password.trim());
-      setAdminPassword(password.trim());
-      setPassword(password.trim());
-      setIsUnlocked(true);
-      setManagerError(null);
-    } catch (error) {
-      setPasswordError(error instanceof Error ? error.message : 'No se pudo validar la password.');
-    } finally {
-      setIsVerifyingPassword(false);
-    }
-  };
-
   const handleSelectSong = (songId: string) => {
     setSelectedSongId(songId);
     setIsSongPickerVisible(false);
@@ -1487,7 +1457,6 @@ export const SongManagerPanel: React.FC<Props> = ({
       targetId: selectedSong.id,
       targetType: 'song',
       file,
-      password: password.trim(),
       onUploadProgress: (percentage) => setUploadProgress(Math.round(percentage)),
     });
 
@@ -1504,7 +1473,6 @@ export const SongManagerPanel: React.FC<Props> = ({
       shareId: sharedScript.shareId,
       targetId: selectedSong.id,
       targetType: 'song',
-      password: password.trim(),
       sourceUrl: uploadedSource.url,
       sourcePathname: uploadedSource.pathname,
       sourceFileName: uploadedSource.fileName,
@@ -1542,7 +1510,6 @@ export const SongManagerPanel: React.FC<Props> = ({
       const manifest = await registerSharedSongAudio({
         shareId: sharedScript.shareId,
         songId: selectedSong.id,
-        password: password.trim(),
         label: nextLabel,
         kind: audioKind,
         guideRoles,
@@ -1584,7 +1551,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         shareId: sharedScript.shareId,
         songId: selectedSong.id,
         audioId: editingAudio.id,
-        password: password.trim(),
         label: nextLabel,
         kind: audioKind,
         guideRoles,
@@ -1628,7 +1594,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         shareId: sharedScript.shareId,
         songId: selectedSong.id,
         audioId: editingAudio.id,
-        password: password.trim(),
         label: nextLabel,
         kind: audioKind,
         guideRoles,
@@ -1664,7 +1629,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         shareId: sharedScript.shareId,
         songId: selectedSong.id,
         audioId,
-        password: password.trim(),
       });
 
       await refreshSharedManifest(manifest);
@@ -1746,7 +1710,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         ? await updateSharedMusicalNumber({
             shareId: sharedScript.shareId,
             musicalNumberId: targetMusicalNumberId,
-            password: password.trim(),
             title,
             sceneTitle,
             startLineIndex: normalizedRange?.startLineIndex ?? -1,
@@ -1754,7 +1717,6 @@ export const SongManagerPanel: React.FC<Props> = ({
           })
         : await createSharedMusicalNumber({
             shareId: sharedScript.shareId,
-            password: password.trim(),
             title,
             sceneTitle,
             startLineIndex: normalizedRange?.startLineIndex ?? -1,
@@ -1799,7 +1761,6 @@ export const SongManagerPanel: React.FC<Props> = ({
       const manifest = await deleteSharedMusicalNumber({
         shareId: sharedScript.shareId,
         musicalNumberId: musicalNumber.id,
-        password: password.trim(),
       });
 
       await refreshSharedManifest(manifest);
@@ -1835,7 +1796,6 @@ export const SongManagerPanel: React.FC<Props> = ({
       targetId: selectedMusicalNumber.id,
       targetType: 'musical-number',
       file,
-      password: password.trim(),
       onUploadProgress: (percentage) => setMusicalNumberUploadProgress(Math.round(percentage)),
     });
 
@@ -1852,7 +1812,6 @@ export const SongManagerPanel: React.FC<Props> = ({
       shareId: sharedScript.shareId,
       targetId: selectedMusicalNumber.id,
       targetType: 'musical-number',
-      password: password.trim(),
       sourceUrl: uploadedSource.url,
       sourcePathname: uploadedSource.pathname,
       sourceFileName: uploadedSource.fileName,
@@ -1910,7 +1869,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         startLineIndex: selectedMusicalNumber.startLineIndex,
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
-        password: password.trim(),
         label: nextLabel,
         kind: musicalNumberAudioKind,
         guideRoles: musicalNumberGuideRoles,
@@ -1961,7 +1919,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
-        password: password.trim(),
         label: nextLabel,
         kind: musicalNumberAudioKind,
         guideRoles: musicalNumberGuideRoles,
@@ -2014,7 +1971,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
-        password: password.trim(),
         label: nextLabel,
         kind: musicalNumberAudioKind,
         guideRoles: musicalNumberGuideRoles,
@@ -2055,7 +2011,6 @@ export const SongManagerPanel: React.FC<Props> = ({
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
         audioId,
-        password: password.trim(),
       });
 
       await refreshSharedManifest(manifest);
@@ -2207,7 +2162,6 @@ export const SongManagerPanel: React.FC<Props> = ({
           endLineIndex: selectedMusicalNumber.endLineIndex,
           songIds: selectedMusicalNumber.songIds,
           audioId: audio.id,
-          password: password.trim(),
           label: audio.label,
           kind: audio.kind,
           guideRoles: audio.guideRoles,
@@ -2228,7 +2182,6 @@ export const SongManagerPanel: React.FC<Props> = ({
     },
     [
       cancelTimelineSync,
-      password,
       refreshSharedManifest,
       selectedMusicalNumber,
       sharedScript,
@@ -2286,7 +2239,6 @@ export const SongManagerPanel: React.FC<Props> = ({
     setSyncActiveEntryIndex(0);
     setIsSavingTimelineCues(false);
     setManagerError(null);
-    setPasswordError(null);
     setPreviewAudioError(null);
   }, []);
 
@@ -3883,35 +3835,14 @@ export const SongManagerPanel: React.FC<Props> = ({
                   <TouchableOpacity style={styles.secondaryAction} onPress={goBackToSongMenu}>
                     <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
                   </TouchableOpacity>
-                  <View style={styles.authBox}>
-                    <Text style={styles.authTitle}>Password de gestion</Text>
-                    <TextInput
-                      value={password}
-                      onChangeText={setPassword}
-                      placeholder="Introduce la password"
-                      secureTextEntry
-                      style={styles.passwordInput}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
-                    <TouchableOpacity
-                      style={[styles.primaryAction, isVerifyingPassword && styles.buttonDisabled]}
-                      onPress={() => void handleUnlock()}
-                      disabled={isVerifyingPassword}
-                    >
-                      <Text style={styles.primaryActionText}>
-                        {isVerifyingPassword ? 'Validando...' : 'Entrar'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                  <AdminAccessPanel initiallyExpanded />
                 </>
               ) : (
                 <>
                   <TouchableOpacity style={styles.secondaryAction} onPress={goBackToSongMenu}>
                     <Text style={styles.secondaryActionText}>Volver al menu de canciones</Text>
                   </TouchableOpacity>
-                  <Text style={styles.successText}>Sesion de gestion activa.</Text>
+                  <AdminAccessPanel />
                   <Text style={styles.selectionSummary}>
                     Gestiona numeros musicales. Los bloques de cancion se detectan automaticamente dentro del tramo que elijas.
                   </Text>

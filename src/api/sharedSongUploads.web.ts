@@ -1,39 +1,12 @@
+import { buildSharedApiUrl } from './sharedApiUrl';
+import { invalidateAdminSession } from '../store/adminSession';
 export const MAX_SHARED_SONG_UPLOAD_BYTES = 512 * 1024 * 1024;
 const BLOB_API_URL = 'https://vercel.com/api/blob';
 const BLOB_API_VERSION = '12';
 const UPLOAD_TIMEOUT_MS = 20 * 60_000;
 const VIDEO_AUDIO_EXTRACTION_TIMEOUT_MS = 3 * 60_000;
 
-const buildProtectedApiUrl = (
-  path: string,
-  searchParams?: Record<string, string | number | null | undefined>
-) => {
-  const baseUrl =
-    typeof window !== 'undefined'
-      ? new URL(path, window.location.origin)
-      : new URL(`http://localhost${path}`);
-
-  if (typeof window !== 'undefined') {
-    const currentParams = new URLSearchParams(window.location.search);
-    currentParams.forEach((value, key) => {
-      if (!baseUrl.searchParams.has(key)) {
-        baseUrl.searchParams.append(key, value);
-      }
-    });
-  }
-
-  if (searchParams) {
-    Object.entries(searchParams).forEach(([key, value]) => {
-      if (value === null || value === undefined || value === '') {
-        return;
-      }
-
-      baseUrl.searchParams.set(key, String(value));
-    });
-  }
-
-  return typeof window !== 'undefined' ? `${baseUrl.pathname}${baseUrl.search}` : `${path}${baseUrl.search}`;
-};
+const buildProtectedApiUrl = buildSharedApiUrl;
 
 export interface SharedSongUploadResult {
   url: string;
@@ -47,7 +20,7 @@ interface ExtractSharedSongVideoAudioInput {
   shareId: string;
   targetId: string;
   targetType?: 'song' | 'musical-number' | 'musical-audition';
-  password: string;
+  password?: string;
   sourceUrl: string;
   sourcePathname?: string | null;
   sourceFileName?: string | null;
@@ -59,7 +32,7 @@ interface UploadSharedSongAudioInput {
   targetId: string;
   targetType?: 'song' | 'musical-number' | 'musical-audition';
   file: Blob;
-  password: string;
+  password?: string;
   onUploadProgress?: (percentage: number) => void;
 }
 
@@ -103,6 +76,7 @@ const fetchSharedStorageNamespace = async () => {
     })
       .then(async (response) => {
         if (!response.ok) {
+          if (response.status === 401) invalidateAdminSession();
           const payload = (await response.json().catch(() => ({}))) as { error?: string };
           throw new Error(payload.error || 'No se pudo preparar el contexto de almacenamiento.');
         }
@@ -131,7 +105,7 @@ const fetchClientToken = async ({
   targetType,
 }: {
   pathname: string;
-  password: string;
+  password?: string;
   shareId: string;
   targetId: string;
   targetType: 'song' | 'musical-number' | 'musical-audition';
@@ -140,7 +114,8 @@ const fetchClientToken = async ({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-song-admin-password': password,
+      'X-AI-Theatre-Admin': '1',
+      ...(password ? { 'x-song-admin-password': password } : {}),
     },
     credentials: 'include',
     body: JSON.stringify({
@@ -154,6 +129,7 @@ const fetchClientToken = async ({
   });
 
   if (!response.ok) {
+    if (response.status === 401) invalidateAdminSession();
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(payload.error || 'No se pudo preparar la subida del audio.');
   }
@@ -308,6 +284,7 @@ export const extractSharedSongAudioFromVideo = async ({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-AI-Theatre-Admin': '1',
         Accept: 'application/json',
       },
       credentials: 'include',
@@ -336,6 +313,7 @@ export const extractSharedSongAudioFromVideo = async ({
   }
 
   if (!response.ok) {
+    if (response.status === 401) invalidateAdminSession();
     const payload = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(payload.error || 'No se pudo extraer el audio del video en servidor.');
   }

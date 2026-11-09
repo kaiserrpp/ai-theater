@@ -1,4 +1,4 @@
-const { hasSongAdminPasswordConfigured, isValidSongAdminPassword, parseJsonBody, readManifest, writeManifest } = require('./_shared');
+const { hasSongAdminPasswordConfigured, isAuthorizedSongAdminRequest, parseJsonBody, readManifest, writeManifest } = require('./_shared');
 const handleMusicalAudition = require('../../server/musical-audition');
 const { validateAuditionScript, normalizeAuditionScript } = require('../../shared/auditionScenes');
 
@@ -17,7 +17,7 @@ module.exports = async (request, response) => {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return response.status(400).json({ error: 'Los datos recibidos no son válidos.' });
   }
-  if (!isValidSongAdminPassword(payload.password)) return response.status(401).json({ error: 'Clave de gestión incorrecta.' });
+  if (!isAuthorizedSongAdminRequest(request, payload.password)) return response.status(401).json({ error: 'El acceso de administración ha caducado. Vuelve a introducir la clave.' });
   if (typeof payload.shareId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(payload.shareId)) {
     return response.status(400).json({ error: 'Falta identificar la obra.' });
   }

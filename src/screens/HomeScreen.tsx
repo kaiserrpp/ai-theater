@@ -13,7 +13,7 @@ import {
 import { RehearsalView } from '../components/RehearsalView';
 import { AdminAccessPanel } from '../components/AdminAccessPanel';
 import { AuditionScenesPanel } from '../components/AuditionScenesPanel';
-import { useAdminPassword } from '../store/adminSession';
+import { useIsAdmin } from '../store/adminSession';
 import { normalizeAuditionScenes } from '../../shared/auditionScenes';
 import { normalizeMusicalAuditions } from '../../shared/musicalAuditions';
 import { ScreenWrapper } from '../components/ScreenWrapper';
@@ -131,7 +131,7 @@ const ManagementHeader = ({ onBack }: { onBack: () => void }) => {
 
 export const HomeScreen = () => {
   const [isManagingWorkspace, setIsManagingWorkspace] = useState(false);
-  const adminPassword = useAdminPassword();
+  const isAdmin = useIsAdmin();
   const [isManagingAuditions, setIsManagingAuditions] = useState(false);
   const {
     analyzeInStages,
@@ -572,7 +572,7 @@ export const HomeScreen = () => {
   ]);
 
   const handlePublishSharedScript = useCallback(async () => {
-    if (!scriptData || !adminPassword) {
+    if (!scriptData || !isAdmin) {
       return;
     }
 
@@ -591,7 +591,6 @@ export const HomeScreen = () => {
       );
 
       const response = await publishSharedScript({
-        password: adminPassword,
         shareId: sharedScript?.shareId ?? null,
         fileName: currentScriptFileName ?? scriptData.obra,
         scriptData,
@@ -622,10 +621,10 @@ export const HomeScreen = () => {
     } finally {
       setIsSharingScript(false);
     }
-  }, [adminPassword, currentScriptFileName, mergeMap, scriptData, sharedScript]);
+  }, [isAdmin, currentScriptFileName, mergeMap, scriptData, sharedScript]);
 
   const handleCreateScriptlessSharedScript = async () => {
-    if (!adminPassword) return;
+    if (!isAdmin) return;
     const title = scriptlessTitle.trim() || 'Nueva obra';
     const nextScriptData: ScriptData = {
       obra: title,
@@ -642,7 +641,6 @@ export const HomeScreen = () => {
 
     try {
       const response = await publishSharedScript({
-        password: adminPassword,
         shareId: null,
         fileName: title,
         scriptData: nextScriptData,
@@ -780,7 +778,7 @@ export const HomeScreen = () => {
   }, [isHydratingSharedMergeMap, mergeMap, sharedScript]);
 
   useEffect(() => {
-    if (!adminPassword || !sharedScript || !scriptData || !areRoleMergesReady || isSharingScript || isHydratingSharedMergeMap) {
+    if (!isAdmin || !sharedScript || !scriptData || !areRoleMergesReady || isSharingScript || isHydratingSharedMergeMap) {
       return;
     }
 
@@ -789,7 +787,7 @@ export const HomeScreen = () => {
     }
 
     void handlePublishSharedScript();
-  }, [adminPassword, areRoleMergesReady, handlePublishSharedScript, isHydratingSharedMergeMap, isSharingScript, mergeMap, scriptData, sharedScript]);
+  }, [isAdmin, areRoleMergesReady, handlePublishSharedScript, isHydratingSharedMergeMap, isSharingScript, mergeMap, scriptData, sharedScript]);
 
   const handleRehearsalProgressChange = useCallback(
     (lineIndex: number, totalLines: number) => {
@@ -1155,7 +1153,7 @@ export const HomeScreen = () => {
                 </View>
               </View>
 
-              {!loading && scriptData && adminPassword && (
+              {!loading && scriptData && isAdmin && (
                 <View style={styles.mergeWrapper}>
                   <TouchableOpacity
                     style={[styles.btnMenu, styles.mergeToggleButton]}
@@ -1260,7 +1258,7 @@ export const HomeScreen = () => {
               )}
             </View>
 
-            {!!displayScriptData && !effectiveLoading && adminPassword ? (
+            {!!displayScriptData && !effectiveLoading && isAdmin ? (
               <View style={styles.shareActions}>
                 <TouchableOpacity
                   style={[styles.compactShareButton, sharedScript && styles.compactShareButtonActive]}
@@ -1464,7 +1462,7 @@ export const HomeScreen = () => {
             </View>
 
             <View style={styles.homeActions}>
-              {adminPassword ? <>
+              {isAdmin ? <>
               <TouchableOpacity
                 style={styles.btnMain}
                 onPress={async () => {

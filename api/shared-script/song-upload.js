@@ -2,7 +2,7 @@ const { handleUpload } = require('@vercel/blob/client');
 const {
   getSongAdminPasswordFromRequest,
   hasSongAdminPasswordConfigured,
-  isValidSongAdminPassword,
+  isAuthorizedSongAdminRequest,
   parseJsonBody,
 } = require('./_shared');
 
@@ -34,7 +34,7 @@ module.exports = async (request, response) => {
       onBeforeGenerateToken: async (_pathname, clientPayload) => {
         const password = getSongAdminPasswordFromRequest(request);
 
-        if (!isValidSongAdminPassword(password)) {
+        if (!isAuthorizedSongAdminRequest(request, password)) {
           throw new Error('Password incorrecta.');
         }
 

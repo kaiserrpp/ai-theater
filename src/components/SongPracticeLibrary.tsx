@@ -3,7 +3,7 @@ import { normalizeRoles } from '../../shared/musicalAuditions';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SharedMusicalAudition, SharedScriptManifest, SharedSongAudioAsset } from '../types/sharedScript';
-import { useAdminPassword } from '../store/adminSession';
+import { useIsAdmin } from '../store/adminSession';
 import { createSongPlayback, type SongPlaybackMode, type SongRepeatMode } from '../utils/songPlayback';
 import { selectSongPlaylist, type SongPlaylistKind } from '../utils/songPlaylistSelection';
 import { MusicalAuditionEditor } from './MusicalAuditionEditor';
@@ -17,7 +17,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   onUpdated: (manifest: SharedScriptManifest) => void; onManageWork: () => void;
 }) => {
   const { palette, ui } = usePracticeTheme();
-  const adminPassword = useAdminPassword();
+  const isAdmin = useIsAdmin();
   const [scope, setScope] = useState<'auditions' | 'work'>('auditions');
   const [mine, setMine] = useState(false);
   const [musicRoles, setMusicRoles] = useState<string[]>([]);
@@ -183,7 +183,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
       {!visibleCuts.length ? <View style={ui.card}><Icon name="music-note-outline" size={32} /><Text style={ui.subtitle}>{mine ? 'No hay fragmentos para estos personajes' : 'Canciones para tus audiciones'}</Text><Text style={ui.text}>{mine ? 'Puedes cambiar tus personajes o ver todas las audiciones.' : 'Añade un fragmento, sus personajes y los audios con voz y karaoke. Aparecerán aquí para practicar.'}</Text></View> : null}
       {visibleCuts.map((cut) => <View key={cut.id} style={ui.card}>
         <View style={ui.row}><View style={{ flex: 1, gap: 6 }}><Text style={ui.label}>{manifest?.musicalNumbers.find((number) => number.id === cut.musicalNumberId)?.title || 'Número musical'}</Text><Text style={ui.subtitle}>{cut.title}</Text><Text style={ui.text}>{cut.roles.join(' · ')}</Text></View>
-          {adminPassword ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Editar ${cut.title}`} onPress={() => openEditor(cut)} style={ui.icon}><Icon name="pencil-outline" /></TouchableOpacity> : null}
+          {isAdmin ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Editar ${cut.title}`} onPress={() => openEditor(cut)} style={ui.icon}><Icon name="pencil-outline" /></TouchableOpacity> : null}
         </View>
         {selected?.auditionId !== cut.id ? <View style={ui.row}>{([['vocal_guide','Con voz'],['karaoke','Karaoke']] as const).filter(([audioKind]) => kind === 'all' || audioKind === kind).map(([audioKind,label]) => {
           const track = tracks.find((candidate) => candidate.auditionId === cut.id && candidate.audio.kind === audioKind);

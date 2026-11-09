@@ -15,6 +15,7 @@ const setup = (manifest = base()) => {
   const original = require.cache[sharedPath];
   require.cache[sharedPath] = { ...original, exports: { ...shared,
     hasSongAdminPasswordConfigured: () => true, isValidSongAdminPassword: (password) => password === 'test-key',
+    isAuthorizedSongAdminRequest: (_request, password) => password === 'test-key',
     readManifest: async () => structuredClone(current),
     writeManifest: async (value) => { writes++; current = shared.normalizeManifest(value); return structuredClone(current); },
   }};

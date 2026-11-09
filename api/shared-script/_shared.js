@@ -1,6 +1,7 @@
 const { head, list, put } = require('@vercel/blob');
 const { normalizeAuditionScenes } = require('../../shared/auditionScenes');
 const { normalizeMusicalAuditions } = require('../../shared/musicalAuditions');
+const adminSession = require('../../server/admin-session');
 
 const MANIFEST_VERSION = 6;
 const EMPTY_SONGS = [];
@@ -365,11 +366,10 @@ const getSongAdminPasswordFromRequest = (request) => {
   return '';
 };
 
-const hasSongAdminPasswordConfigured = () =>
-  typeof process.env.SONG_ADMIN_PASSWORD === 'string' && process.env.SONG_ADMIN_PASSWORD.length > 0;
+const hasSongAdminPasswordConfigured = adminSession.hasAdminPassword;
 
-const isValidSongAdminPassword = (password) =>
-  hasSongAdminPasswordConfigured() && password === process.env.SONG_ADMIN_PASSWORD;
+const isValidSongAdminPassword = adminSession.isValidAdminPassword;
+const isAuthorizedSongAdminRequest = (request, password) => adminSession.isAuthorizedAdminRequest(request, password, getStorageNamespace());
 
 const buildShareUrl = (request, shareId) => {
   const protocol = request.headers['x-forwarded-proto'] || 'https';
@@ -480,6 +480,7 @@ module.exports = {
   hasSongAdminPasswordConfigured,
   isValidScriptData,
   isValidSongAdminPassword,
+  isAuthorizedSongAdminRequest,
   listSharedScriptSummaries,
   normalizeManifest,
   normalizeMergeMap,

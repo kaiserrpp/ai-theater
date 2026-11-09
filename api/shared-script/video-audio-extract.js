@@ -10,7 +10,7 @@ const { Readable, Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 const {
   hasSongAdminPasswordConfigured,
-  isValidSongAdminPassword,
+  isAuthorizedSongAdminRequest,
   parseJsonBody,
   getStorageNamespace,
 } = require('./_shared');
@@ -161,7 +161,7 @@ module.exports = async (request, response) => {
     const payload = parseJsonBody(request);
     const password = typeof payload.password === 'string' ? payload.password : '';
 
-    if (!isValidSongAdminPassword(password)) {
+    if (!isAuthorizedSongAdminRequest(request, password)) {
       response.status(401).json({ error: 'Password incorrecta.' });
       return;
     }

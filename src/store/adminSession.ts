@@ -1,19 +1,25 @@
 import { useSyncExternalStore } from 'react';
+import { buildSharedApiUrl } from '../api/sharedApiUrl';
+import { createAdminSessionController, type AdminSessionTransport } from '../utils/adminSessionController';
 
-// The existing management password is only kept in memory for this app session.
-let password: string | null = null;
-const listeners = new Set<() => void>();
-
-export const getAdminPassword = () => password;
-
-export const setAdminPassword = (value: string | null) => {
-  password = value;
-  listeners.forEach((listener) => listener());
+const request: AdminSessionTransport = async (method, body) => {
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), 12000);
+  try {
+    const response = await fetch(buildSharedApiUrl('/api/shared-script/song-auth'), {
+      method, credentials: 'include', cache: 'no-store', signal: abort.signal,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-AI-Theatre-Admin': '1' },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'No se pudo comprobar el acceso de administración.');
+    return payload;
+  } finally { clearTimeout(timeout); }
 };
-
-const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-};
-
-export const useAdminPassword = () => useSyncExternalStore(subscribe, getAdminPassword, () => null);
+const session = createAdminSessionController(request);
+export const restoreAdminSession = session.restore;
+export const authenticateAdmin = session.signIn;
+export const logoutAdmin = session.signOut;
+export const invalidateAdminSession = session.invalidate;
+export const useAdminSession = () => useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
+export const useIsAdmin = () => useAdminSession().status === 'authenticated';

@@ -72,7 +72,7 @@ export interface SharedMusicalAudition {
 }
 
 export interface MusicalAuditionDetailsInput {
-  shareId: string; password: string; auditionId: string; revision?: number;
+  shareId: string; password?: string; auditionId: string; revision?: number;
   musicalNumberId?: string; musicalNumberTitle?: string;
   title: string; roles: string[]; lyrics: string;
 }
@@ -89,7 +89,7 @@ export interface SharedAuditionScene {
 
 export interface SharedAuditionSceneInput {
   shareId: string;
-  password: string;
+  password?: string;
   sceneId?: string;
   revision?: number;
   title: string;
@@ -111,7 +111,7 @@ export interface SharedScriptListItem {
 }
 
 export interface SharedScriptPublishInput {
-  password: string;
+  password?: string;
   shareId?: string | null;
   fileName: string;
   scriptData: ScriptData;
@@ -123,7 +123,7 @@ export interface SharedScriptPublishInput {
 export interface SharedSongAudioRegistrationInput {
   shareId: string;
   songId: string;
-  password: string;
+  password?: string;
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
@@ -138,7 +138,7 @@ export interface SharedSongAudioUpdateInput {
   shareId: string;
   songId: string;
   audioId: string;
-  password: string;
+  password?: string;
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
@@ -153,12 +153,12 @@ export interface SharedSongAudioDeleteInput {
   shareId: string;
   songId: string;
   audioId: string;
-  password: string;
+  password?: string;
 }
 
 export interface SharedMusicalNumberCreateInput {
   shareId: string;
-  password: string;
+  password?: string;
   title: string;
   sceneTitle: string;
   startLineIndex: number;
@@ -168,7 +168,7 @@ export interface SharedMusicalNumberCreateInput {
 export interface SharedMusicalNumberUpdateInput {
   shareId: string;
   musicalNumberId: string;
-  password: string;
+  password?: string;
   title: string;
   sceneTitle: string;
   startLineIndex: number;
@@ -178,7 +178,7 @@ export interface SharedMusicalNumberUpdateInput {
 export interface SharedMusicalNumberDeleteInput {
   shareId: string;
   musicalNumberId: string;
-  password: string;
+  password?: string;
 }
 
 export interface SharedMusicalNumberAudioRegistrationInput {
@@ -189,7 +189,7 @@ export interface SharedMusicalNumberAudioRegistrationInput {
   startLineIndex?: number;
   endLineIndex?: number;
   songIds?: string[];
-  password: string;
+  password?: string;
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
@@ -209,7 +209,7 @@ export interface SharedMusicalNumberAudioUpdateInput {
   endLineIndex?: number;
   songIds?: string[];
   audioId: string;
-  password: string;
+  password?: string;
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
@@ -229,7 +229,7 @@ export interface SharedMusicalNumberAudioDeleteInput {
   endLineIndex?: number;
   songIds?: string[];
   audioId: string;
-  password: string;
+  password?: string;
 }
 
 export type IntelligentLineFeedbackResult =

@@ -13,7 +13,7 @@ interface UploadSharedSongAudioInput {
   targetId: string;
   targetType?: 'song' | 'musical-number' | 'musical-audition';
   file: Blob;
-  password: string;
+  password?: string;
   onUploadProgress?: (percentage: number) => void;
 }
 
@@ -21,7 +21,7 @@ interface ExtractSharedSongVideoAudioInput {
   shareId: string;
   targetId: string;
   targetType?: 'song' | 'musical-number' | 'musical-audition';
-  password: string;
+  password?: string;
   sourceUrl: string;
   sourcePathname?: string | null;
   sourceFileName?: string | null;

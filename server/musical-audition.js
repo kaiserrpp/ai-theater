@@ -1,4 +1,4 @@
-const { hasSongAdminPasswordConfigured, isValidSongAdminPassword, parseJsonBody, readManifest, writeManifest } = require('../api/shared-script/_shared');
+const { hasSongAdminPasswordConfigured, isAuthorizedSongAdminRequest, parseJsonBody, readManifest, writeManifest } = require('../api/shared-script/_shared');
 const { normalizeRoles, validateMusicalAudition, validAudioUrl } = require('../shared/musicalAuditions');
 
 module.exports = async (request, response) => {
@@ -10,7 +10,7 @@ module.exports = async (request, response) => {
   let input;
   try { input = parseJsonBody(request); } catch { return response.status(400).json({ error: 'Los datos recibidos no son válidos.' }); }
   if (!input || typeof input !== 'object' || Array.isArray(input)) return response.status(400).json({ error: 'Los datos recibidos no son válidos.' });
-  if (!isValidSongAdminPassword(input.password)) return response.status(401).json({ error: 'Clave de gestión incorrecta.' });
+  if (!isAuthorizedSongAdminRequest(request, input.password)) return response.status(401).json({ error: 'El acceso de administración ha caducado. Vuelve a introducir la clave.' });
   if (typeof input.shareId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(input.shareId)) return response.status(400).json({ error: 'Falta identificar la obra.' });
   if (input.auditionId != null && (typeof input.auditionId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(input.auditionId))) return response.status(400).json({ error: 'El identificador del fragmento no es válido.' });
   const operation = input.operation || 'details';

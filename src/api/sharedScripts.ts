@@ -16,42 +16,14 @@ import type {
   SharedScriptPublishInput,
 } from '../types/sharedScript';
 
-const SHARED_SCRIPT_API_URL = '/api/shared-script';
+import { buildSharedApiUrl } from './sharedApiUrl';
+import { invalidateAdminSession } from '../store/adminSession';
 
-const buildProtectedApiUrl = (
-  path = '',
-  searchParams?: Record<string, string | number | null | undefined>
-) => {
-  const baseUrl =
-    typeof window !== 'undefined'
-      ? new URL(`${SHARED_SCRIPT_API_URL}${path}`, window.location.origin)
-      : new URL(`http://localhost${SHARED_SCRIPT_API_URL}${path}`);
-
-  if (typeof window !== 'undefined') {
-    const currentParams = new URLSearchParams(window.location.search);
-    currentParams.forEach((value, key) => {
-      if (!baseUrl.searchParams.has(key)) {
-        baseUrl.searchParams.append(key, value);
-      }
-    });
-  }
-
-  if (searchParams) {
-    Object.entries(searchParams).forEach(([key, value]) => {
-      if (value === null || value === undefined || value === '') {
-        return;
-      }
-
-      baseUrl.searchParams.set(key, String(value));
-    });
-  }
-
-  return typeof window !== 'undefined'
-    ? `${baseUrl.pathname}${baseUrl.search}`
-    : `${SHARED_SCRIPT_API_URL}${path}${baseUrl.search}`;
-};
+const buildProtectedApiUrl = (path = '', searchParams?: Record<string, string | number | null | undefined>) =>
+  buildSharedApiUrl(`/api/shared-script${path}`, searchParams);
 
 const parseErrorMessage = async (response: Response) => {
+  if (response.status === 401) { invalidateAdminSession(); return 'El acceso de administración ha caducado. Introduce la clave para continuar.'; }
   try {
     const payload = (await response.json()) as { error?: string };
     return payload.error || `Error ${response.status}`;
@@ -106,6 +78,7 @@ export const publishSharedScript = async (input: SharedScriptPublishInput) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -142,7 +115,8 @@ export const fetchSharedScriptList = async () => {
 export const saveSharedAuditionScene = async (input: SharedAuditionSceneInput) => {
   const response = await fetch(buildProtectedApiUrl('/audition-scene'), {
     method: input.sceneId ? 'PATCH' : 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: { 'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1', Accept: 'application/json' },
     credentials: 'include',
     body: JSON.stringify(input),
   });
@@ -150,38 +124,22 @@ export const saveSharedAuditionScene = async (input: SharedAuditionSceneInput) =
   return (await response.json()) as SharedScriptManifest;
 };
 
-export const deleteSharedAuditionScene = async (input: { shareId: string; sceneId: string; revision: number; password: string }) => {
+export const deleteSharedAuditionScene = async (input: { shareId: string; sceneId: string; revision: number; password?: string }) => {
   const response = await fetch(buildProtectedApiUrl('/audition-scene'), {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: { 'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1', Accept: 'application/json' },
     credentials: 'include',
     body: JSON.stringify(input),
   });
   if (!response.ok) throw new Error(await parseErrorMessage(response));
   return (await response.json()) as SharedScriptManifest;
-};
-
-export const verifySongAdminPassword = async (password: string) => {
-  const response = await fetch(buildProtectedApiUrl('/song-auth'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify({ password }),
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseErrorMessage(response));
-  }
-
-  return (await response.json()) as { ok: true };
 };
 
 const mutateMusicalAudition = async (method: string, input: object) => {
   const response = await fetch(buildProtectedApiUrl('/audition-scene', { auditionType: 'music' }), {
-    method, credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    method, credentials: 'include', headers: { 'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1', Accept: 'application/json' },
     body: JSON.stringify(input),
   });
   if (!response.ok) throw new Error(await parseErrorMessage(response));
@@ -189,12 +147,12 @@ const mutateMusicalAudition = async (method: string, input: object) => {
 };
 export const saveMusicalAudition = (input: MusicalAuditionDetailsInput) =>
   mutateMusicalAudition(input.revision == null ? 'POST' : 'PATCH', input);
-export const saveMusicalAuditionAudio = (input: { shareId: string; password: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke'; audio: {
+export const saveMusicalAuditionAudio = (input: { shareId: string; password?: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke'; audio: {
   audioUrl: string; audioFileName: string | null; contentType: string | null; size: number | null;
 } }) => mutateMusicalAudition('PATCH', { ...input, operation: 'audio' });
-export const removeMusicalAuditionAudio = (input: { shareId: string; password: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke' }) =>
+export const removeMusicalAuditionAudio = (input: { shareId: string; password?: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke' }) =>
   mutateMusicalAudition('PATCH', { ...input, operation: 'remove-audio' });
-export const deleteMusicalAudition = (input: { shareId: string; password: string; auditionId: string; revision: number }) =>
+export const deleteMusicalAudition = (input: { shareId: string; password?: string; auditionId: string; revision: number }) =>
   mutateMusicalAudition('DELETE', input);
 
 export const registerSharedSongAudio = async (input: SharedSongAudioRegistrationInput) => {
@@ -202,6 +160,7 @@ export const registerSharedSongAudio = async (input: SharedSongAudioRegistration
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -220,6 +179,7 @@ export const updateSharedSongAudio = async (input: SharedSongAudioUpdateInput) =
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -238,6 +198,7 @@ export const deleteSharedSongAudio = async (input: SharedSongAudioDeleteInput) =
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -256,6 +217,7 @@ export const createSharedMusicalNumber = async (input: SharedMusicalNumberCreate
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -274,6 +236,7 @@ export const updateSharedMusicalNumber = async (input: SharedMusicalNumberUpdate
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -292,6 +255,7 @@ export const deleteSharedMusicalNumber = async (input: SharedMusicalNumberDelete
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -312,6 +276,7 @@ export const registerSharedMusicalNumberAudio = async (
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -330,6 +295,7 @@ export const updateSharedMusicalNumberAudio = async (input: SharedMusicalNumberA
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -348,6 +314,7 @@ export const deleteSharedMusicalNumberAudio = async (input: SharedMusicalNumberA
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',
@@ -368,6 +335,7 @@ export const submitIntelligentLineFeedback = async (
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-AI-Theatre-Admin': '1',
       Accept: 'application/json',
     },
     credentials: 'include',

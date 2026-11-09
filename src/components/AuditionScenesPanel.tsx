@@ -9,7 +9,7 @@ import {
 import { analyzeScriptLocally } from '../api/localScriptAnalyzer';
 import { analyzeScriptInStages } from '../api/geminiScriptAnalyzer';
 import { deleteSharedAuditionScene, fetchSharedScript, saveSharedAuditionScene } from '../api/sharedScripts';
-import { useAdminPassword } from '../store/adminSession';
+import { useIsAdmin } from '../store/adminSession';
 import { AUDITION_PREFERENCES_STORAGE_PREFIX } from '../store/storageKeys';
 import { Dialogue, SCENE_SYSTEM_SPEAKER, SONG_SYSTEM_SPEAKER, ScriptData } from '../types/script';
 import { SharedAuditionScene, SharedScriptManifest } from '../types/sharedScript';
@@ -61,7 +61,7 @@ const Field = ({ label, value, onChangeText, multiline = false, editable = true 
 
 export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, onManifestUpdated, onExit, practiceOnly = false, initialSceneId, initialMode, onRehearsalActiveChange, onPracticeSelected }: Props) => {
   const { palette, ui } = usePracticeTheme();
-  const password = useAdminPassword();
+  const isAdmin = useIsAdmin();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<AuditionPreferences | null>(null);
@@ -164,7 +164,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   };
 
   const importPdf = async () => {
-    if (!password || busy) return;
+    if (!isAdmin || busy) return;
     setBusy(true);
     setError(null);
     setNotice('');
@@ -216,7 +216,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   };
 
   const save = async () => {
-    if (!sharedScript || !password || !draft || busy) return;
+    if (!sharedScript || !isAdmin || !draft || busy) return;
     const title = draft.title.trim();
     const data: ScriptData = { obra: title, personajes: [], guion: draft.guion };
     const validation = !title || title.length > 160 ? 'Pon un título de hasta 160 caracteres.' : validateAuditionScript(data);
@@ -224,8 +224,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
     setBusy(true);
     setError(null);
     try {
-      const next = await saveSharedAuditionScene({ shareId: sharedScript.shareId, password,
-        sceneId: draft.sceneId, revision: draft.revision, title, fileName: draft.fileName,
+      const next = await saveSharedAuditionScene({ shareId: sharedScript.shareId, sceneId: draft.sceneId, revision: draft.revision, title, fileName: draft.fileName,
         scriptData: normalizeAuditionScript(data, title) });
       const sceneId = draft.sceneId ?? next.auditionScenes[next.auditionScenes.length - 1]?.id;
       onManifestUpdated(next);
@@ -240,11 +239,11 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   };
 
   const remove = async (scene: SharedAuditionScene) => {
-    if (!sharedScript || !password || busy) return;
+    if (!sharedScript || !isAdmin || busy) return;
     setBusy(true);
     setError(null);
     try {
-      onManifestUpdated(await deleteSharedAuditionScene({ shareId: sharedScript.shareId, password, sceneId: scene.id, revision: scene.revision }));
+      onManifestUpdated(await deleteSharedAuditionScene({ shareId: sharedScript.shareId, sceneId: scene.id, revision: scene.revision }));
       if (selectedId === scene.id) setSelectedId(null);
       setDeleteRequested(null);
       setNotice('Escena de audición eliminada.');
@@ -325,7 +324,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
         <View style={styles.card}>
           <Text style={styles.subtitle}>Prepara las audiciones de esta obra</Text>
           <Text style={styles.hint}>Publica la obra para guardar sus mini-guiones y compartirlos con el grupo.</Text>
-          {password ? <Action label="Preparar obra para audiciones" disabled={busy} onPress={() => {
+          {isAdmin ? <Action label="Preparar obra para audiciones" disabled={busy} onPress={() => {
             setBusy(true);
             void onEnsureShared().then((manifest) => {
               if (!manifest) setError('No se pudo preparar la obra. Vuelve a la obra y revisa el mensaje de publicación.');
@@ -383,7 +382,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
           <View style={styles.card}>
             <Text style={styles.subtitle}>Escenas de audición</Text>
             <Text style={styles.hint}>{scenes.length ? 'Abre una escena y elige qué personaje preparar.' : 'Todavía no hay escenas. Cada PDF se guarda como un mini-guion independiente.'}</Text>
-            {password ? <>
+            {isAdmin ? <>
               <Action label="Importar mini-guion PDF" disabled={busy || refreshing} onPress={() => void importPdf()} />
               <Action label="Escribir mini-guion" secondary disabled={busy || refreshing} onPress={() => {
                 setDraft({ title: '', fileName: null, guion: [{ p: '', t: '' }] }); setError(null); setNotice('');
@@ -444,7 +443,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
                 </View> : null}
               </> : <Text style={styles.hint}>Recuperando tu ensayo…</Text>
             ) : null}
-            {password ? <View style={styles.row}>
+            {isAdmin ? <View style={styles.row}>
               <Action label={`Editar ${scene.title}`} secondary disabled={busy || refreshing} onPress={() => {
                 setDraft({ sceneId: scene.id, revision: scene.revision, title: scene.title, fileName: scene.fileName,
                   guion: scene.scriptData.guion.map((line) => ({ ...line, ...(line.r ? { r: [...line.r] } : {}) })) });
@@ -452,7 +451,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
               }} />
               <Action label={`Eliminar ${scene.title}`} danger disabled={busy || refreshing} onPress={() => setDeleteRequested(scene.id)} />
             </View> : null}
-            {password && deleteRequested === scene.id ? <View style={styles.confirmation}>
+            {isAdmin && deleteRequested === scene.id ? <View style={styles.confirmation}>
               <Text style={styles.hint}>Se eliminará «{scene.title}» de las audiciones compartidas.</Text>
               <Action label="Confirmar eliminación" danger disabled={busy} onPress={() => void remove(scene)} />
               <Action label="Conservar escena" secondary disabled={busy} onPress={() => setDeleteRequested(null)} />
@@ -473,7 +472,7 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
             <View style={styles.dockAction}><Action label="Seguir revisando" secondary disabled={busy} onPress={() => setDiscardRequested(false)} /></View>
           </View>
         </> : <View style={styles.dockRow}>
-          <View style={styles.dockAction}><Action label={busy ? 'Procesando…' : 'Guardar mini-guion'} disabled={busy || !password} onPress={() => void save()} /></View>
+          <View style={styles.dockAction}><Action label={busy ? 'Procesando…' : 'Guardar mini-guion'} disabled={busy || !isAdmin} onPress={() => void save()} /></View>
           <View style={styles.dockAction}><Action label="Cancelar revisión" secondary disabled={busy} onPress={() => setDiscardRequested(true)} /></View>
         </View>}
       </View>

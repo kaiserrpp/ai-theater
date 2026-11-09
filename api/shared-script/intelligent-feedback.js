@@ -3,7 +3,7 @@ const {
   getSongAdminPasswordFromRequest,
   getStorageNamespace,
   hasSongAdminPasswordConfigured,
-  isValidSongAdminPassword,
+  isAuthorizedSongAdminRequest,
   parseJsonBody,
 } = require('./_shared');
 
@@ -98,7 +98,7 @@ const ensureCanReadFeedback = (request, response) => {
     return false;
   }
 
-  if (!isValidSongAdminPassword(getPasswordFromRequest(request))) {
+  if (!isAuthorizedSongAdminRequest(request, getPasswordFromRequest(request))) {
     response.status(401).json({ error: 'Password incorrecta.' });
     return false;
   }

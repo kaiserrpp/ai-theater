@@ -1,67 +1,54 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { verifySongAdminPassword } from '../api/sharedScripts';
-import { setAdminPassword, useAdminPassword } from '../store/adminSession';
+import { Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { authenticateAdmin, logoutAdmin, restoreAdminSession, useAdminSession } from '../store/adminSession';
+import { Button, usePracticeTheme } from './PracticeUI';
 
 export const AdminAccessPanel = ({ initiallyExpanded = false }: { initiallyExpanded?: boolean }) => {
-  const activePassword = useAdminPassword();
+  const session = useAdminSession();
+  const { palette, ui } = usePracticeTheme();
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [error, setError] = useState('');
   const unlock = async () => {
+    if (busy) return;
     if (!password.trim()) { setError('Introduce la clave de gestión.'); return; }
-    setBusy(true);
-    setError(null);
-    try {
-      await verifySongAdminPassword(password.trim());
-      setAdminPassword(password.trim());
-      setPassword('');
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'No se pudo validar la clave.');
-    } finally { setBusy(false); }
+    setBusy(true); setError('');
+    try { await authenticateAdmin(password.trim(), remember); setPassword(''); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo validar la clave.'); }
+    finally { setBusy(false); }
   };
-
-  return (
-    <View style={styles.box}>
-      {activePassword ? (
-        <View style={styles.row}>
-          <Text style={styles.hint}>Gestión de materiales activa</Text>
-          <TouchableOpacity accessibilityRole="button" onPress={() => setAdminPassword(null)}>
-            <Text style={styles.link}>Salir de gestión</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <>
-          <TouchableOpacity accessibilityRole="button" onPress={() => setExpanded(!expanded)}>
-            <Text style={styles.link}>{expanded ? 'Cerrar acceso de gestión' : 'Administrar materiales'}</Text>
-          </TouchableOpacity>
-          {expanded ? (
-            <>
-              <Text style={styles.hint}>La clave permite añadir y modificar materiales. Para ensayar puedes entrar directamente.</Text>
-              <TextInput accessibilityLabel="Clave de gestión" placeholder="Clave de gestión" value={password}
-                onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false}
-                editable={!busy} style={styles.input} onSubmitEditing={() => void unlock()} />
-              {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-              <TouchableOpacity accessibilityRole="button" disabled={busy} style={styles.button} onPress={() => void unlock()}>
-                <Text style={styles.buttonText}>{busy ? 'Validando…' : 'Entrar en gestión'}</Text>
-              </TouchableOpacity>
-            </>
-          ) : null}
-        </>
-      )}
-    </View>
-  );
+  const signOut = async () => {
+    setBusy(true); setError('');
+    try { await logoutAdmin(); setPassword(''); setExpanded(false); }
+    catch { setError('No se pudo cerrar la sesión. Comprueba la conexión y vuelve a intentarlo.'); }
+    finally { setBusy(false); }
+  };
+  return <View style={[ui.card, { width: '100%', padding: 16 }]} testID="admin-access-panel">
+    {session.status === 'checking' ? <Text accessibilityLiveRegion="polite" style={ui.text}>Comprobando acceso de administración…</Text>
+      : session.status === 'authenticated' ? <>
+        <Text style={[ui.subtitle, { fontSize: 17 }]}>Administración activa</Text>
+        <Text style={ui.text}>{session.remembered ? 'Este dispositivo recordará el acceso durante 90 días desde que entraste.' : 'Acceso activo para esta sesión.'}</Text>
+        <Button label={busy ? 'Cerrando sesión…' : 'Cerrar sesión de administrador'} secondary disabled={busy} onPress={() => void signOut()} />
+      </> : <>
+        <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded(!expanded)}>
+          <Text style={[ui.label, { paddingVertical: 6 }]}>{expanded ? 'Cerrar acceso de gestión' : 'Administrar materiales'}</Text>
+        </TouchableOpacity>
+        {session.status === 'unavailable' ? <Button label="Comprobar acceso guardado" secondary onPress={() => void restoreAdminSession()} /> : null}
+        {expanded ? <>
+          <Text style={ui.text}>Introduce la clave de administrador para añadir y modificar materiales. Escuchar y ensayar siguen siendo públicos.</Text>
+          <TextInput accessibilityLabel="Clave de gestión" placeholder="Clave de gestión" placeholderTextColor={palette.sub} value={password}
+            onChangeText={(value) => { setPassword(value); setError(''); }} secureTextEntry autoCapitalize="none" autoCorrect={false}
+            autoComplete="current-password" editable={!busy} onSubmitEditing={() => void unlock()}
+            style={{ borderWidth: 1, borderColor: palette.rule, borderRadius: 12, padding: 13, backgroundColor: palette.surface, color: palette.ink, fontSize: 16 }} />
+          <View style={ui.row}><View style={{ flex: 1, gap: 4 }}>
+            <Text style={[ui.subtitle, { fontSize: 15 }]}>Recordar acceso en este dispositivo</Text>
+            <Text style={ui.text}>Durante 90 días. Recordaremos el acceso, no tu contraseña.</Text>
+          </View><Switch accessibilityLabel="Recordar acceso en este dispositivo" value={remember} disabled={busy} onValueChange={setRemember} trackColor={{ true: palette.button }} /></View>
+          <Button label={busy ? 'Validando…' : 'Entrar en gestión'} disabled={busy} onPress={() => void unlock()} />
+        </> : null}
+      </>}
+    {error || session.error ? <Text accessibilityRole="alert" style={ui.error}>{error || session.error}</Text> : null}
+  </View>;
 };
-
-const styles = StyleSheet.create({
-  box: { width: '100%', padding: 14, gap: 12, backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 14, borderColor: '#dfd5e7', borderWidth: 1 },
-  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 },
-  link: { color: '#674078', fontWeight: '700', paddingVertical: 6 },
-  hint: { color: '#425269', lineHeight: 21 },
-  input: { borderWidth: 1, borderColor: '#b8c8d9', borderRadius: 10, padding: 12, backgroundColor: '#fff', fontSize: 16 },
-  error: { color: '#a32330', lineHeight: 21 },
-  button: { padding: 13, backgroundColor: '#674078', borderRadius: 10, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: '700' },
-});

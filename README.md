@@ -2,7 +2,7 @@
 
 ## Canciones de audición
 
-En **Canciones → Audiciones**, **+ Subir canción de audición** abre directamente la carga. Si no hay una sesión de gestión activa, solicita la clave existente una sola vez durante esa sesión. También está disponible en **⋯ → Materiales y gestión → Subir canción de audición**.
+En **Canciones → Audiciones**, **+ Subir canción de audición** abre directamente la carga. Si no hay acceso de administración recordado, solicita la clave existente. También está disponible en **⋯ → Materiales y gestión → Subir canción de audición**.
 
 1. Elige un número musical o escribe el nombre de uno nuevo. Se puede crear sin vincularlo al guion, aunque la obra ya tenga texto.
 2. Pon nombre al fragmento y selecciona los personajes que cantan. Puedes añadir personajes que aún no estén en el guion.
@@ -22,6 +22,12 @@ La velocidad para practicar va de **0,70× a 1×**, en pasos de **0,05** y conse
 Con gestión activa, el lápiz de cada fragmento permite cambiar personajes, letra, número o archivos y eliminar el fragmento. Los cambios y audios usan una revisión para rechazar ediciones antiguas. Se conservan la canción completa y los demás fragmentos. Los números que aún tengan fragmentos asociados no se pueden eliminar hasta mover o quitar esos fragmentos.
 
 El manifiesto compartido pasa a versión 6 con una colección `musicalAuditions`; las obras antiguas reciben una colección vacía. Republicar desde un cliente anterior conserva los fragmentos y los números a los que pertenecen. La carga usa la infraestructura de audio existente y requiere acceso de gestión; la escucha sigue siendo pública para quien abra la obra.
+
+## Acceso de administración
+
+Al introducir correctamente la clave puedes dejar activado **Recordar acceso en este dispositivo**. La app recuperará la autorización al abrirse de nuevo durante 90 días, también para canciones, audiciones y gestión de obras. Si lo desactivas se crea una sesión de navegador limitada a ocho horas. No hay cuentas de usuario ni se guarda la contraseña en almacenamiento local: el servidor entrega una cookie firmada, `HttpOnly`, `Secure` en producción y `SameSite=Strict`, vinculada al dominio y al entorno. El servidor verifica cada operación de gestión; los permisos nunca dependen de una bandera del navegador.
+
+**Cerrar sesión de administrador** elimina la autorización guardada de ese navegador. Cambiar la clave de gestión invalida las autorizaciones anteriores. Cada dispositivo o navegador requiere su primera validación. La biometría no es necesaria para este modo de acceso recordado.
 
 ## Inicio y ensayo
 
@@ -57,7 +63,7 @@ El panel de tu turno muestra si el micrófono está abierto y permite **Activar 
 
 Si iOS devuelve `service-not-allowed` con `Speech recognition service permission check has failed`, la app muestra una guía específica: **Ajustes → Privacidad y seguridad → Reconocimiento de voz**, con la entrada del navegador que se debe activar (Safari con la brújula azul). **Ya lo he activado, comprobar** vuelve a solicitar el servicio sin cambiar la escena ni el personaje. El permiso inicial se pide mediante el inicio normal del reconocimiento; una denegación guardada requiere el cambio en Ajustes. La web no dispone de un enlace documentado y fiable a ese panel concreto, por lo que no utiliza esquemas privados de iOS. El código y mensaje técnicos quedan disponibles en **Ver detalle técnico**.
 
-Quien abra el enlace de la obra puede leer y ensayar sus escenas sin clave. La creación, modificación, eliminación y publicación de materiales requieren la clave de gestión. Esta se mantiene únicamente en memoria durante la sesión de la app. El servidor utiliza `SONG_ADMIN_PASSWORD` y `BLOB_READ_WRITE_TOKEN`, como el gestor de canciones.
+Quien abra el enlace de la obra puede leer y ensayar sus escenas sin clave. La creación, modificación, eliminación y publicación de materiales requieren acceso de administración. El servidor utiliza `SONG_ADMIN_PASSWORD` y `BLOB_READ_WRITE_TOKEN`; este último también protege la firma de las sesiones. Opcionalmente se puede definir `ADMIN_SESSION_SECRET` para usar un secreto de firma independiente. No hace falta configurar servicios nuevos.
 
 Las elecciones y el progreso de cada mini-guion se recuerdan en el dispositivo. Si cambia el texto, el progreso se reinicia y se conservan los personajes elegidos que sigan participando. Las cuentas y la sincronización entre dispositivos quedan para otra fase.
 

@@ -33,6 +33,7 @@ const setup = (file, manifest = baseManifest(), failRead = false) => {
   require.cache[sharedPath] = { ...originalModule, exports: { ...realShared,
     hasSongAdminPasswordConfigured: () => true,
     isValidSongAdminPassword: (password) => password === 'test-admin',
+    isAuthorizedSongAdminRequest: (_request, password) => password === 'test-admin',
     readManifest: async () => { if (failRead) throw new Error('Lectura fallida'); return structuredClone(current); },
     writeManifest: async (value) => { writes += 1; current = realShared.normalizeManifest(value); return structuredClone(current); },
   } };

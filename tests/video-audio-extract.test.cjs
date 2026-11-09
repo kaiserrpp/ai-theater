@@ -27,7 +27,7 @@ before(() => {
     put: async (pathname, bytes, options) => { writes.push({pathname,bytes,options}); return {url:'https://example.com/converted.mp3',pathname}; },
     del: async (pathname) => { deletes.push(pathname); },
   };
-  require.cache[sharedPath].exports = { ...shared,hasSongAdminPasswordConfigured:()=>true,isValidSongAdminPassword:value=>value==='test-only',getStorageNamespace:()=> 'isolated-test' };
+  require.cache[sharedPath].exports = { ...shared,hasSongAdminPasswordConfigured:()=>true,isValidSongAdminPassword:value=>value==='test-only',isAuthorizedSongAdminRequest:(_request,value)=>value==='test-only',getStorageNamespace:()=> 'isolated-test' };
   handler = require('../api/shared-script/video-audio-extract');
   require.cache[sharedPath].exports = shared;
 });

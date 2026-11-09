@@ -4,7 +4,7 @@ const {
   createShareId,
   isValidScriptData,
   hasSongAdminPasswordConfigured,
-  isValidSongAdminPassword,
+  isAuthorizedSongAdminRequest,
   normalizeMergeMap,
   normalizeMusicalNumbers,
   normalizeSongs,
@@ -32,7 +32,7 @@ module.exports = async (request, response) => {
       response.status(500).json({ error: 'Falta configurar la clave de gestión.' });
       return;
     }
-    if (!isValidSongAdminPassword(payload.password)) {
+    if (!isAuthorizedSongAdminRequest(request, payload.password)) {
       response.status(401).json({ error: 'Clave de gestión incorrecta.' });
       return;
     }
