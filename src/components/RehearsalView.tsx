@@ -7,7 +7,8 @@ import { useSilenceAdvance, type MicrophoneCalibrationSnapshot } from '../hooks/
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { SpeechRecognitionErrorPanel } from './SpeechRecognitionErrorPanel';
 import { MicrophoneSettings } from './MicrophoneSettings';
-import { Button, Chip, Icon, palette, Sheet, ui } from './PracticeUI';
+import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
+import type { PracticePalette } from '../utils/appearance';
 import { resolveListenPreference, resolveTranscriptPreference, supportsRecognition } from '../utils/rehearsalPreferences';
 import { canBeginPreparedRehearsal, runRehearsalMicrophoneCalibration } from '../utils/rehearsalPreparation';
 import {
@@ -447,6 +448,8 @@ export const RehearsalView: React.FC<Props> = ({
   onProgressChange,
   onExit,
 }) => {
+  const { palette, ui } = usePracticeTheme();
+  const styles = useMemo(() => createStyles(palette), [palette]);
   const filteredGuion = useMemo(() => filterScriptByScenes(guion, filterScenes), [filterScenes, guion]);
   const isMobileSpeechDevice = useMemo(isLikelyMobileSpeechDevice, []);
   const defaultRehearsalSpeechRate = isMobileSpeechDevice
@@ -2866,7 +2869,7 @@ export const RehearsalView: React.FC<Props> = ({
           <View style={styles.songBox}>
             <Text style={styles.songBadge}>Cancion</Text>
             <Text style={styles.songTitle}>{currentLine.songTitle || 'Cancion'}</Text>
-            {currentLine.a ? <Text style={styles.acot}>[{currentLine.a}]</Text> : null}
+            {currentLine.a ? <Text style={[styles.acot, { color: '#66512b' }]}>[{currentLine.a}]</Text> : null}
 
             {shouldShowCurrentAudioOptions ? (
               renderCurrentAudioPanel()
@@ -3070,8 +3073,8 @@ export const RehearsalView: React.FC<Props> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: palette.bg },
+const createStyles = (palette: PracticePalette) => StyleSheet.create({
+  container: { flex: 1 },
   header: {
     paddingTop: 60,
     padding: 20,
@@ -3173,7 +3176,7 @@ const styles = StyleSheet.create({
   },
   center: { flexGrow: 1, justifyContent: 'center', padding: 22 },
   intro: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30 },
+  introTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 30, color: palette.ink },
   preflightScrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
@@ -3194,12 +3197,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     textAlign: 'center',
-    color: '#17324c',
+    color: palette.ink,
   },
   preflightText: {
     textAlign: 'center',
     lineHeight: 22,
-    color: '#47604f',
+    color: palette.sub,
   },
   preflightStatus: {
     textAlign: 'center',
@@ -3359,7 +3362,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   finishedBox: { alignItems: 'center' },
-  finishedTitle: { fontSize: 20, fontWeight: 'bold' },
+  finishedTitle: { fontSize: 20, fontWeight: 'bold', color: palette.ink },
   box: { paddingVertical: 24, gap: 8, alignItems: 'flex-start' },
   songBox: {
     padding: 28,
@@ -3407,6 +3410,9 @@ const styles = StyleSheet.create({
   },
   songAudioList: {
     gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#fff7e8',
   },
   audioChoiceNotice: {
     padding: 14,
@@ -3512,7 +3518,7 @@ const styles = StyleSheet.create({
   myBox: { backgroundColor: 'transparent' },
   name: { fontSize: 16, fontWeight: '700', marginTop: 12, marginBottom: 8, color: palette.sub },
   myName: { color: palette.plum },
-  acot: { fontStyle: 'italic', color: '#666', marginBottom: 15 },
+  acot: { fontStyle: 'italic', color: palette.sub, marginBottom: 15 },
   text: { fontSize: 30, textAlign: 'left', lineHeight: 41, color: palette.ink },
   myText: { color: palette.ink, fontWeight: '600' },
   myTurnHint: { marginTop: 14, fontSize: 14, lineHeight: 22, color: palette.sub },
@@ -3570,13 +3576,13 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   intelligentTitle: {
-    color: '#15515b',
+    color: palette.plum,
     fontWeight: '900',
     fontSize: 16,
     textAlign: 'center',
   },
   intelligentHint: {
-    color: '#47604f',
+    color: palette.sub,
     lineHeight: 19,
     textAlign: 'center',
     fontSize: 13,
@@ -3584,13 +3590,13 @@ const styles = StyleSheet.create({
   intelligentTranscriptBlock: {
     padding: 12,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    backgroundColor: palette.soft,
     borderWidth: 1,
     borderColor: '#d5edf2',
     gap: 4,
   },
   intelligentLabel: {
-    color: '#15515b',
+    color: palette.plum,
     fontWeight: '800',
     textTransform: 'uppercase',
     fontSize: 11,
@@ -3598,18 +3604,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   intelligentExpectedText: {
-    color: '#17324c',
+    color: palette.ink,
     lineHeight: 22,
     textAlign: 'center',
   },
   intelligentHeardText: {
-    color: '#2b2b2b',
+    color: palette.ink,
     lineHeight: 22,
     textAlign: 'center',
     fontWeight: '600',
   },
   intelligentInterimText: {
-    color: '#6a7d88',
+    color: palette.sub,
     lineHeight: 18,
     textAlign: 'center',
     fontSize: 12,
@@ -3623,22 +3629,22 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   intelligentScoreGood: {
-    color: '#2b9348',
+    color: palette.green,
   },
   intelligentScoreWarning: {
-    color: '#d98a00',
+    color: palette.plum,
   },
   intelligentScoreLow: {
-    color: '#b3261e',
+    color: palette.error,
   },
   intelligentMetaText: {
-    color: '#4f6274',
+    color: palette.sub,
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',
   },
   intelligentFeedbackStatus: {
-    color: '#15515b',
+    color: palette.plum,
     fontWeight: '700',
     textAlign: 'center',
     lineHeight: 18,

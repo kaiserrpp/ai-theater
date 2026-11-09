@@ -25,6 +25,10 @@ El manifiesto compartido pasa a versión 6 con una colección `musicalAuditions`
 
 ## Inicio y ensayo
 
+En **⋯ → Fondo y apariencia** puedes elegir una imagen JPG, PNG o WebP (hasta 20 MB), cambiarla o restaurar el fondo original. El fondo se guarda en este dispositivo y se mantiene al cambiar de obra. La app analiza la luminosidad y los colores de la imagen para adaptar textos y botones; una capa de contraste protege la lectura incluso en zonas de la foto con mucha luz o sombra. En web se reduce la imagen antes de guardarla; no se sube al servidor.
+
+La última obra abierta correctamente se recuerda como predeterminada en este dispositivo. Al volver a entrar se recupera automáticamente, junto con sus personajes y ajustes guardados. Puedes elegir otra en **⋯ → Cambiar obra**. Un enlace compartido abre la obra de ese enlace y pasa a ser la nueva predeterminada si se carga correctamente. Si la obra no se puede abrir, el selector sigue disponible para reintentar o cambiarla.
+
 **Inicio** da acceso a **Ensayar escenas**, **Escuchar y practicar** y al último ensayo pendiente. La navegación inferior mantiene **Inicio / Ensayar / Canciones**. En Ensayar puedes alternar **Audiciones / Obra**, elegir tus personajes y practicar tus escenas o todas.
 
 La cabecera muestra siempre la versión cargada junto a **AI · THEATRE** en Inicio, Ensayar y Canciones, incluso mientras se carga una obra. Se toma de la misma versión del paquete que usa cada publicación. También sigue disponible en **⋯ → Más opciones**.

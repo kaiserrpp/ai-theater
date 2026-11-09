@@ -108,6 +108,7 @@ const normalizeSavedScript = (value: unknown): SavedScript | null => {
 
 export const useLibrary = () => {
   const [savedScripts, setSavedScripts] = useState<SavedScript[]>([]);
+  const [isReady, setIsReady] = useState(false);
   const savedScriptsRef = useRef<SavedScript[]>([]);
 
   useEffect(() => {
@@ -119,15 +120,18 @@ export const useLibrary = () => {
       const jsonValue = await AsyncStorage.getItem(STORAGE_KEY);
       if (jsonValue != null) {
         const parsedScripts = JSON.parse(jsonValue) as unknown[];
-        setSavedScripts(
-          sortScripts(parsedScripts.map(normalizeSavedScript).filter((script): script is SavedScript => Boolean(script)))
-        );
+        const scripts = sortScripts(parsedScripts.map(normalizeSavedScript).filter((script): script is SavedScript => Boolean(script)));
+        savedScriptsRef.current = scripts;
+        setSavedScripts(scripts);
         return;
       }
 
+      savedScriptsRef.current = [];
       setSavedScripts([]);
     } catch (error) {
       console.error('Error cargando biblioteca', error);
+    } finally {
+      setIsReady(true);
     }
   }, []);
 
@@ -138,6 +142,7 @@ export const useLibrary = () => {
   const persistScripts = useCallback(async (nextScripts: SavedScript[]) => {
     const sortedScripts = sortScripts(nextScripts);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(sortedScripts));
+    savedScriptsRef.current = sortedScripts;
     setSavedScripts(sortedScripts);
   }, []);
 
@@ -221,5 +226,5 @@ export const useLibrary = () => {
     [persistScripts]
   );
 
-  return { savedScripts, saveScript, saveScriptConfig, deleteScript, reloadLibrary: loadLibrary };
+  return { savedScripts, isReady, saveScript, saveScriptConfig, deleteScript, reloadLibrary: loadLibrary };
 };

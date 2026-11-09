@@ -17,7 +17,7 @@ import { getSceneTitles } from '../utils/scriptScenes';
 import { getAuditionRehearsalPlan, recordAuditionRehearsalProgress, type AuditionRehearsalMode } from '../utils/auditionRehearsal';
 import { AdminAccessPanel } from './AdminAccessPanel';
 import { RehearsalView } from './RehearsalView';
-import { Button, Chip, Icon, palette, ui } from './PracticeUI';
+import { Button, Chip, Icon, usePracticeTheme } from './PracticeUI';
 
 interface Props {
   practiceOnly?: boolean;
@@ -60,6 +60,7 @@ const Field = ({ label, value, onChangeText, multiline = false, editable = true 
 );
 
 export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, onManifestUpdated, onExit, practiceOnly = false, initialSceneId, initialMode, onRehearsalActiveChange, onPracticeSelected }: Props) => {
+  const { palette, ui } = usePracticeTheme();
   const password = useAdminPassword();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);

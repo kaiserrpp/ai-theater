@@ -1,6 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import {
   fetchSharedScriptList,
@@ -19,7 +20,7 @@ import { ScreenWrapper } from '../components/ScreenWrapper';
 import { SongManagerPanel } from '../components/SongManagerPanel';
 import { VersionBadge } from '../components/VersionBadge';
 import { PracticeHome } from '../components/PracticeHome';
-import { Button, ui } from '../components/PracticeUI';
+import { Button, usePracticeTheme } from '../components/PracticeUI';
 import { SavedScript, useLibrary } from '../hooks/useLibrary';
 import { useGemini } from '../hooks/useGemini';
 import { useScriptRoleMerges } from '../hooks/useScriptRoleMerges';
@@ -32,6 +33,8 @@ import {
   syncSharedSongsWithScript,
 } from '../utils/sharedSongs';
 import { areSceneSelectionsEqual, filterScriptByScenes, getSceneTitles, getScenesForRolesAndSongs } from '../utils/scriptScenes';
+import { LAST_WORK_STORAGE_KEY } from '../store/storageKeys';
+import { parsePreferredWork, resolveStartupWork, type PreferredWork } from '../utils/preferredWork';
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   ALL: null,
@@ -120,6 +123,7 @@ const cloneSavedScriptConfig = (config: SavedScriptConfig): SavedScriptConfig =>
 });
 
 export const HomeScreen = () => {
+  const { ui } = usePracticeTheme();
   const [isManagingWorkspace, setIsManagingWorkspace] = useState(false);
   const adminPassword = useAdminPassword();
   const [isManagingAuditions, setIsManagingAuditions] = useState(false);
@@ -137,7 +141,21 @@ export const HomeScreen = () => {
     loadSavedScript,
     resetScript,
   } = useGemini();
-  const { savedScripts, saveScript, deleteScript } = useLibrary();
+  const { savedScripts, isReady: isLibraryReady, saveScript, deleteScript } = useLibrary();
+  const [preferredWork, setPreferredWork] = useState<PreferredWork | null | undefined>(undefined);
+  const [isRestoringWork, setIsRestoringWork] = useState(true);
+  const [preferenceNotice, setPreferenceNotice] = useState('');
+  const startupAttempted = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void AsyncStorage.getItem(LAST_WORK_STORAGE_KEY).then((stored) => {
+      if (!cancelled) setPreferredWork(parsePreferredWork(stored));
+    }).catch(() => {
+      if (!cancelled) { setPreferredWork(null); setPreferenceNotice('No se pudo recuperar tu última obra. Puedes elegirla de nuevo.'); }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const [currentScriptFileName, setCurrentScriptFileName] = useState<string | null>(null);
   const [myRoles, setMyRoles] = useState<string[]>([]);
@@ -460,6 +478,7 @@ export const HomeScreen = () => {
   };
 
   const handleResetScript = () => {
+    void AsyncStorage.removeItem(LAST_WORK_STORAGE_KEY).catch(() => setPreferenceNotice('No se pudo olvidar la obra anterior.'));
     resetSelectionState();
     setCurrentScriptFileName(null);
     replaceSharedScriptIdInUrl(null);
@@ -526,10 +545,12 @@ export const HomeScreen = () => {
         setRehearsalCheckpoints(resolvedSavedConfig.rehearsalCheckpoints);
       }
       loadSavedScript(manifest.scriptData);
+      return true;
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'No se pudo abrir la obra compartida.';
-      setSharedError(`Error compartiendo: ${message}`);
+      setSharedError(`No se pudo abrir la obra: ${message}`);
       setSharedStatusText('');
+      return false;
     } finally {
       setIsLoadingSharedScript(false);
     }
@@ -655,10 +676,9 @@ export const HomeScreen = () => {
     setMergeTarget(null);
   };
 
-  const handleOpenSavedScript = async (savedScript: SavedScript) => {
+  const handleOpenSavedScript = useCallback(async (savedScript: SavedScript) => {
     if (savedScript.config.sharedScriptId) {
-      await loadRemoteSharedScript(savedScript.config.sharedScriptId, savedScript.config);
-      return;
+      return loadRemoteSharedScript(savedScript.config.sharedScriptId, savedScript.config);
     }
 
     setCurrentScriptFileName(savedScript.fileName);
@@ -681,7 +701,8 @@ export const HomeScreen = () => {
     setSharedError(null);
     replaceSharedScriptIdInUrl(null);
     loadSavedScript(savedScript.data);
-  };
+    return true;
+  }, [loadRemoteSharedScript, loadSavedScript]);
 
   const refreshSharedScriptsCatalog = useCallback(async () => {
     setIsLoadingSharedScriptsCatalog(true);
@@ -717,17 +738,30 @@ export const HomeScreen = () => {
   }, [refreshSharedScriptsCatalog]);
 
   useEffect(() => {
-    if (scriptData || loading || isLoadingSharedScript || isSharingScript) {
-      return;
+    if (startupAttempted.current || !isLibraryReady || preferredWork === undefined) return;
+    startupAttempted.current = true;
+    const work = resolveStartupWork(getSharedScriptIdFromUrl(), preferredWork);
+    if (!work || scriptData) { setIsRestoringWork(false); return; }
+    if (work.kind === 'shared') {
+      void loadRemoteSharedScript(work.id).finally(() => setIsRestoringWork(false));
+    } else {
+      const saved = savedScripts.find((script) => script.scriptId === work.id);
+      if (saved) void handleOpenSavedScript(saved).finally(() => setIsRestoringWork(false));
+      else {
+        setPreferenceNotice('La obra que usabas ya no está guardada. Elige otra obra para continuar.');
+        setIsRestoringWork(false);
+      }
     }
+  }, [handleOpenSavedScript, isLibraryReady, loadRemoteSharedScript, preferredWork, savedScripts, scriptData]);
 
-    const shareId = getSharedScriptIdFromUrl();
-    if (!shareId) {
-      return;
-    }
-
-    void loadRemoteSharedScript(shareId);
-  }, [isLoadingSharedScript, isSharingScript, loadRemoteSharedScript, loading, scriptData]);
+  useEffect(() => {
+    if (isRestoringWork || !scriptData || effectiveLoading) return;
+    const work: PreferredWork = sharedScript?.shareId
+      ? { kind: 'shared', id: sharedScript.shareId }
+      : { kind: 'local', id: getScriptIdentity(scriptData) };
+    void AsyncStorage.setItem(LAST_WORK_STORAGE_KEY, JSON.stringify(work))
+      .catch(() => setPreferenceNotice('La obra está abierta, pero no se pudo guardar como predeterminada en este dispositivo.'));
+  }, [effectiveLoading, isRestoringWork, scriptData, sharedScript?.shareId]);
 
   useEffect(() => {
     if (!sharedScript || !isHydratingSharedMergeMap) {
@@ -907,7 +941,8 @@ export const HomeScreen = () => {
       onMaterials={() => { setIsManagingWorkspace(true); setIsSharedScriptsPanelVisible(true); setIsSavedScriptsPanelVisible(true); }}
       onAuditionMaterials={() => setIsManagingAuditions(true)} onSongMaterials={() => setIsManagingSongs(true)}
       onEnsureShared={handlePublishSharedScript} onManifestUpdated={handleSharedScriptManifestUpdate}
-      loading={effectiveLoading || isLoadingSharedScriptsCatalog} status={progressText} error={effectiveError || sharedScriptsCatalogError}
+      loading={isRestoringWork || effectiveLoading || isLoadingSharedScriptsCatalog} status={progressText} error={effectiveError || sharedScriptsCatalogError}
+      preferenceNotice={preferenceNotice}
       onRefresh={() => void refreshSharedScriptsCatalog()} /></ScreenWrapper>;
   }
 

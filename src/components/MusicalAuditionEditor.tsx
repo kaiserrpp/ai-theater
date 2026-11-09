@@ -8,7 +8,7 @@ import { useAdminPassword } from '../store/adminSession';
 import type { SharedMusicalAudition, SharedScriptManifest, SharedSongAudioKind } from '../types/sharedScript';
 import { AUDITION_MEDIA_PICKER_TYPES, performMusicalAuditionSave, prepareAuditionMedia, resolveAuditionMediaMimeType } from '../utils/saveMusicalAudition';
 import { AdminAccessPanel } from './AdminAccessPanel';
-import { Button, Chip, palette, Sheet, ui } from './PracticeUI';
+import { Button, Chip, Sheet, usePracticeTheme } from './PracticeUI';
 import { UploadActivity, type UploadActivityState } from './UploadActivity';
 
 interface Props { manifest: SharedScriptManifest; initial?: SharedMusicalAudition | null; onUpdated: (manifest: SharedScriptManifest) => void; onClose: () => void; onSaved: () => void; }
@@ -16,6 +16,8 @@ const kinds = [['vocal_guide', 'Con voz'], ['karaoke', 'Karaoke']] as const;
 const newId = () => `musical-audition-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 
 export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, onSaved }: Props) => {
+  const { palette, ui } = usePracticeTheme();
+  const inputStyle = { padding: 13, borderWidth: 1, borderColor: palette.rule, borderRadius: 12, backgroundColor: palette.surface, fontSize: 16, color: palette.ink };
   const password = useAdminPassword();
   const [draft, setDraft] = useState(() => ({ id: initial?.id || newId(), revision: initial?.revision,
     musicalNumberId: initial?.musicalNumberId || '', musicalNumberTitle: '', title: initial?.title || '',
@@ -139,8 +141,8 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
         <Text style={ui.text}>Puedes elegir un audio o un vídeo. Si es un vídeo, extraeremos su sonido al guardar.</Text>
         <Text style={ui.label}>NÚMERO MUSICAL</Text>
         <View style={ui.wrap}>{manifest.musicalNumbers.map((number) => <Chip key={number.id} label={number.title} selected={draft.musicalNumberId === number.id} onPress={() => !busy && change({ musicalNumberId: number.id })} />)}<Chip label="+ Nuevo número" selected={!draft.musicalNumberId} onPress={() => !busy && change({ musicalNumberId: '' })} /></View>
-        {!draft.musicalNumberId ? <TextInput accessibilityLabel="Nombre del número musical" placeholder="Nombre de la canción" value={draft.musicalNumberTitle} editable={!busy} onChangeText={(musicalNumberTitle) => change({ musicalNumberTitle })} style={inputStyle} /> : null}
-        <Text style={ui.label}>FRAGMENTO DE AUDICIÓN</Text><TextInput accessibilityLabel="Nombre del fragmento" placeholder="Ej. Audición de Benny" value={draft.title} editable={!busy} onChangeText={(title) => change({ title })} style={inputStyle} />
+        {!draft.musicalNumberId ? <TextInput accessibilityLabel="Nombre del número musical" placeholder="Nombre de la canción" placeholderTextColor={palette.sub} value={draft.musicalNumberTitle} editable={!busy} onChangeText={(musicalNumberTitle) => change({ musicalNumberTitle })} style={inputStyle} /> : null}
+        <Text style={ui.label}>FRAGMENTO DE AUDICIÓN</Text><TextInput accessibilityLabel="Nombre del fragmento" placeholder="Ej. Audición de Benny" placeholderTextColor={palette.sub} value={draft.title} editable={!busy} onChangeText={(title) => change({ title })} style={inputStyle} />
         <Text style={ui.label}>PERSONAJES QUE CANTAN</Text><View style={ui.wrap}>{availableRoles.map((role) => <Chip key={role} label={role} selected={draft.roles.includes(role)} onPress={() => !busy && change({ roles: draft.roles.includes(role) ? draft.roles.filter((candidate) => candidate !== role) : [...draft.roles, role] })} />)}</View>
         <View style={ui.row}><TextInput accessibilityLabel="Nuevo personaje" placeholder="Añadir personaje" value={newRole} editable={!busy} onChangeText={setNewRole} style={[inputStyle, { flex: 1, minWidth: 0 }]} /><Button label="Añadir" secondary disabled={busy || !newRole.trim()} onPress={() => { const canonical = availableRoles.find((role) => role.toLocaleLowerCase('es') === newRole.trim().toLocaleLowerCase('es')) || newRole.trim(); change({ roles: normalizeRoles([...draft.roles, canonical]) }); setNewRole(''); }} /></View>
         {kinds.map(([kind, label]) => {
@@ -156,4 +158,3 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
       </>}
   </Sheet>;
 };
-const inputStyle = { padding: 13, borderWidth: 1, borderColor: palette.rule, borderRadius: 12, backgroundColor: '#fff', fontSize: 16, color: palette.ink };

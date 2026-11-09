@@ -1,12 +1,14 @@
 import React from 'react';
 import { Switch, Text, TouchableOpacity, View } from 'react-native';
 import { ListenPreference } from '../utils/rehearsalPreferences';
-import { Icon, palette, ui } from './PracticeUI';
+import { Icon, usePracticeTheme } from './PracticeUI';
 
 export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported }: {
   mode: ListenPreference; onModeChange: (mode: ListenPreference) => void;
   showTranscript: boolean; onTranscriptChange: (visible: boolean) => void; supported: boolean;
-}) => <>
+}) => {
+  const { palette, ui } = usePracticeTheme();
+  return <>
   <Text style={ui.text}>La app recuerda tu elección en este dispositivo. Al iniciar un ensayo comprobaremos la escucha.</Text>
   {([
     ['intelligent', 'Inteligente', 'Comprueba tus palabras y avanza al completar la réplica.'],
@@ -26,3 +28,4 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
     <Switch accessibilityLabel="Mostrar transcripción" value={showTranscript} onValueChange={onTranscriptChange} trackColor={{ true: palette.plum }} />
   </View>
 </>;
+};

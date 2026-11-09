@@ -1,11 +1,13 @@
 import React from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import packageInfo from '../../package.json';
+import { useAppearance } from '../store/appearance';
 
 export const VersionBadge = ({ compact = false }: { compact?: boolean }) => {
+  const { palette } = useAppearance();
   return (
     <View style={[styles.container, compact && styles.compactContainer]}>
-      <Text accessibilityLabel={`Versión ${packageInfo.version}`} testID={compact ? 'app-version-header' : 'app-version'} style={[styles.text, compact && styles.compactText]}>v{packageInfo.version}</Text>
+      <Text accessibilityLabel={`Versión ${packageInfo.version}`} testID={compact ? 'app-version-header' : 'app-version'} style={[styles.text, compact && styles.compactText, { color: palette.sub }]}>v{packageInfo.version}</Text>
     </View>
   );
 };

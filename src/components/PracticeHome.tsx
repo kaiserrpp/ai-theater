@@ -11,7 +11,8 @@ import { resolveListenPreference, resolveTranscriptPreference, supportsRecogniti
 import { getScenesForRolesAndSongs } from '../utils/scriptScenes';
 import { AuditionScenesPanel } from './AuditionScenesPanel';
 import { MicrophoneSettings } from './MicrophoneSettings';
-import { Button, Chip, Icon, palette, Sheet, ui } from './PracticeUI';
+import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
+import { AppearanceSettings } from './AppearanceSettings';
 import { SongPracticeLibrary } from './SongPracticeLibrary';
 import { VersionBadge } from './VersionBadge';
 
@@ -21,16 +22,19 @@ interface Props {
   onStart: (mode: RehearsalMode) => void; onStartScene: (scene: string) => void;
   resumeMode: RehearsalMode | null; onResume: () => void; resumeChoice: React.ReactNode;
   sharedWorks: SharedScriptListItem[]; savedWorks: SavedScript[];
-  onOpenShared: (id: string) => Promise<void>; onOpenSaved: (saved: SavedScript) => Promise<void>;
+  onOpenShared: (id: string) => Promise<boolean>; onOpenSaved: (saved: SavedScript) => Promise<boolean>;
   onMaterials: () => void; onAuditionMaterials: () => void; onSongMaterials: () => void;
   onEnsureShared: () => Promise<SharedScriptManifest | undefined>;
   onManifestUpdated: (manifest: SharedScriptManifest) => void;
   loading: boolean; status: string; error: string | null; onRefresh: () => void;
+  preferenceNotice: string;
 }
 
 export const PracticeHome = (props: Props) => {
+  const { palette, ui } = usePracticeTheme();
   const [tab, setTab] = useState<'home' | 'scenes' | 'songs'>('home');
-  const [sheet, setSheet] = useState<'menu' | 'mic' | 'works' | 'materials' | 'roles' | 'share' | null>(null);
+  const [sheet, setSheet] = useState<'menu' | 'mic' | 'works' | 'materials' | 'roles' | 'share' | 'appearance' | null>(null);
+  const [appearanceBusy, setAppearanceBusy] = useState(false);
   const [scope, setScope] = useState<'auditions' | 'work'>('auditions');
   const [mine, setMine] = useState(true);
   const [inRehearsal, setInRehearsal] = useState(false);
@@ -88,6 +92,7 @@ export const PracticeHome = (props: Props) => {
       <View style={{ gap: 8, paddingTop: 12 }}><Text style={ui.label}>A ESCENA</Text><Text style={ui.title}>¿Qué quieres preparar?</Text><Text style={ui.text}>Un rato para tus escenas y tus canciones.</Text></View>
       {props.loading ? <Text accessibilityLiveRegion="polite" style={ui.text}>{props.status || 'Cargando obra…'}</Text> : null}
       {props.error ? <Text accessibilityRole="alert" style={ui.error}>{props.error}</Text> : null}
+      {props.preferenceNotice ? <Text accessibilityLiveRegion="polite" style={ui.text}>{props.preferenceNotice}</Text> : null}
       {!props.script ? <View style={ui.card}><Text style={ui.subtitle}>Elige una obra para empezar</Text><Text style={ui.text}>Abre una obra del grupo o una que ya tengas guardada.</Text><Button label="Elegir obra" onPress={() => setSheet('works')} /></View> : <>
         {canResume ? <TouchableOpacity accessibilityRole="button" onPress={() => { if (canResumeAudition && lastScene) openAuditions(lastScene.id); else props.onResume(); }} style={[ui.card, { backgroundColor: palette.soft, borderColor: palette.soft }]}>
           <View style={ui.row}><Icon name="play-circle" /><Text style={[ui.subtitle, { flex: 1 }]}>Continuar ensayo</Text><Icon name="arrow-right" /></View>
@@ -121,9 +126,13 @@ export const PracticeHome = (props: Props) => {
 
     <Sheet title="Más opciones" visible={sheet === 'menu'} onClose={() => setSheet(null)}>
       <Button label="Micrófono y voz" secondary onPress={() => setSheet('mic')} />
+      <Button label="Fondo y apariencia" secondary onPress={() => setSheet('appearance')} />
       <Button label="Materiales y gestión" secondary onPress={() => setSheet('materials')} />
       <Button label="Compartir obra" secondary disabled={!props.manifest} onPress={() => setSheet('share')} />
       <Button label="Cambiar obra" secondary onPress={() => setSheet('works')} /><VersionBadge />
+    </Sheet>
+    <Sheet title="Fondo y apariencia" visible={sheet === 'appearance'} closeDisabled={appearanceBusy} onClose={() => setSheet(null)}>
+      <AppearanceSettings onBusyChange={setAppearanceBusy} />
     </Sheet>
     <Sheet title="Micrófono y voz" visible={sheet === 'mic'} onClose={() => setSheet(null)}>
       <MicrophoneSettings mode={mode} supported={supportsRecognition()} onModeChange={(next) => { setMode(next); savePreference(REHEARSAL_LISTEN_MODE_STORAGE_KEY, next); }} showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
@@ -136,13 +145,15 @@ export const PracticeHome = (props: Props) => {
       <Button label="Gestionar obra e importar PDF" secondary onPress={() => openMaterials(props.onMaterials)} />
     </Sheet>
     <Sheet title="Elegir obra" visible={sheet === 'works'} onClose={() => setSheet(null)}>
+      <Text style={ui.text}>La obra que elijas se abrirá automáticamente la próxima vez en este dispositivo. Puedes cambiarla aquí cuando quieras.</Text>
+      {props.script ? <Text style={ui.label}>ACTUAL · {props.script.obra}</Text> : null}
       {props.loading ? <Text style={ui.text}>{props.status || 'Cargando…'}</Text> : null}
       {props.error ? <Text style={ui.error}>{props.error}</Text> : null}
       <Text style={ui.label}>OBRAS DEL GRUPO</Text>
-      {props.sharedWorks.map((work) => <Button key={work.shareId} secondary label={work.obra} disabled={props.loading} onPress={() => { void props.onOpenShared(work.shareId).then(() => { setSheet(null); chooseTab('home'); }); }} />)}
+      {props.sharedWorks.map((work) => <Button key={work.shareId} secondary label={`${props.manifest?.shareId === work.shareId ? '✓ ' : ''}${work.obra}`} disabled={props.loading} onPress={() => { void props.onOpenShared(work.shareId).then((opened) => { if (opened) { setSheet(null); chooseTab('home'); } }); }} />)}
       {!props.sharedWorks.length ? <Text style={ui.text}>Todavía no hay obras compartidas.</Text> : null}
       <Button label="Actualizar obras" secondary onPress={props.onRefresh} />
-      {props.savedWorks.filter((work) => !work.config.sharedScriptId).map((work) => <Button key={work.scriptId} secondary label={`Guardada · ${work.data.obra}`} disabled={props.loading} onPress={() => { void props.onOpenSaved(work).then(() => { setSheet(null); chooseTab('home'); }); }} />)}
+      {props.savedWorks.filter((work) => !work.config.sharedScriptId).map((work) => <Button key={work.scriptId} secondary label={`Guardada · ${work.data.obra}`} disabled={props.loading} onPress={() => { void props.onOpenSaved(work).then((opened) => { if (opened) { setSheet(null); chooseTab('home'); } }); }} />)}
       <Button label="Crear o importar una obra" secondary onPress={() => openMaterials(props.onMaterials)} />
     </Sheet>
     <Sheet title="Mis personajes" visible={sheet === 'roles'} onClose={() => setSheet(null)}>
