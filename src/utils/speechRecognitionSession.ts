@@ -249,6 +249,9 @@ export const createSpeechRecognitionSession = (
       usage.started = true;
       current.start();
     } catch (error) {
+      // A synchronous start failure never opened a native capture. Waiting for
+      // its end event would leave every explicit retry stuck behind that handle.
+      if (options.naturalEnd) detach(false);
       const code = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
       const detail = error instanceof Error ? error.message : '';
       fail(recognitionErrorMessage(code === 'NotAllowedError' ? 'not-allowed' : undefined, detail), code || null, detail || null);

@@ -171,3 +171,25 @@ test('waiting for a stuck native end has a deadline without poisoning the servic
   assert.equal(await ended, false);
   assert.equal(f.handles[0].aborted, undefined);
 });
+
+test('a synchronous Safari start rejection leaves no phantom capture blocking the explicit retry', () => {
+  const handles = [];
+  let allowed = false;
+  let aborts = 0;
+  class Recognition {
+    constructor() { handles.push(this); }
+    start() { if (!allowed) throw Object.assign(new Error('denied'), { name: 'NotAllowedError' }); }
+    abort() { aborts += 1; }
+  }
+  const session = createSession(Recognition, () => {}, { naturalEnd: true, usage: { started: false } });
+  session.activate({ lang: 'es-ES', lineKey: 'prepare' });
+  assert.equal(session.getSnapshot().status, 'error');
+  assert.equal(aborts, 0);
+  allowed = true;
+  session.restart();
+  assert.equal(handles.length, 2);
+  handles[1].onresult({ results: [result('prueba de micro')] });
+  assert.equal(session.getSnapshot().hasReceivedTranscript, true);
+  assert.equal(session.getSnapshot().transcript, 'prueba de micro');
+  session.dispose();
+});
