@@ -49,6 +49,8 @@ Al llegar a un cambio de escena, la app anuncia **Siguiente escena: [título]** 
 
 La calibración activa la voz y el audio desde el toque en **Empezar ensayo** o **Reintentar calibración**, también en audiciones sin canciones. Primero dice **Vamos a preparar el micrófono. Guarda silencio**; después mide el ruido, indica qué decir, reproduce el pitido y mide la voz. Un fallo o bloqueo de la voz o del pitido detiene la calibración con un mensaje específico para reintentar; no se continúa como si el audio hubiera sonado.
 
+Si hay sonido en las canciones pero fallan la voz o el pitido, abre `/prueba-audio.html` en Safari con el ensayo pausado. Ofrece pruebas independientes de voz, pitido y nivel del micrófono, además de un pitido generado como comparación. Cada salida permite indicar si realmente se ha oído: los eventos del navegador no demuestran que el altavoz haya sonado. La captura se detiene tras diez segundos, al cambiar de prueba o al ocultar la página. El informe incluye los resultados y la versión de iOS que se introduzca manualmente; no se envía ni guarda una grabación.
+
 ## Audiciones de escenas
 
 Cada obra compartida puede contener mini-guiones de audición independientes del guion completo.

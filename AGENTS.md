@@ -22,3 +22,4 @@ Instrucción expresa del usuario, 10 de noviembre de 2026: **publicar la versió
 
 - Los cambios de escena deben anunciar por voz el título y esperar a «adelante» o al botón «Siguiente escena»; nunca avanzar solo por tiempo, silencio o fin de un audio.
 - El usuario ensaya en iPhone con Safari. La calibración debe activar el audio desde el toque inicial y distinguir los fallos de voz, pitido y micrófono. Las pruebas automatizadas no sustituyen la comprobación en un iPhone real.
+- El 10 de noviembre de 2026 el usuario indicó que, tras actualizar a iOS 27.2, se oye la música pero no la voz ni el pitido, sin mensaje de error. La causa no está confirmada. `/prueba-audio.html` permite probar voz, pitido y entrada del micro por separado y copiar un informe. Los eventos de reproducción del navegador no prueban que el usuario haya oído sonido; conservar su confirmación independiente.

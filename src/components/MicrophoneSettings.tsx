@@ -1,5 +1,5 @@
 import React, { useState, useSyncExternalStore } from 'react';
-import { Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { ListenPreference } from '../utils/rehearsalPreferences';
 import { rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
 import { Button, Icon, usePracticeTheme } from './PracticeUI';
@@ -42,6 +42,9 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
       setRepeatRequested(true);
       onRepeatPreparation?.();
     }} />
+    {Platform.OS === 'web' ? <Button label="Comprobar voz, pitido y micrófono" secondary onPress={() => {
+      if (typeof window !== 'undefined') window.location.assign('/prueba-audio.html');
+    }} /> : null}
   </View>
 </>;
 };
