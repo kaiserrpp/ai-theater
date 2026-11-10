@@ -5,6 +5,8 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 
 import { submitIntelligentLineFeedback } from '../api/sharedScripts';
 import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { usePageVisibility } from '../hooks/usePageVisibility';
+import { isPageVisible } from '../utils/pageVisibility';
 import { SpeechRecognitionErrorPanel } from './SpeechRecognitionErrorPanel';
 import { MicrophoneSettings } from './MicrophoneSettings';
 import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
@@ -37,7 +39,7 @@ import {
 } from '../types/sharedScript';
 import {
   INTELLIGENT_AUTO_ADVANCE_THRESHOLD,
-  type AutomaticLineMatchReason,
+  getAutomaticLineAdvanceDelay,
   getAutomaticLineMatchReason,
   getGoodLineCommandAcceptedText,
   hashLineText,
@@ -92,13 +94,8 @@ const MOBILE_MIN_TIMED_REHEARSAL_SPEECH_RATE = 0.78;
 const DESKTOP_MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.55;
 const MOBILE_MAX_TIMED_REHEARSAL_SPEECH_RATE = 1.18;
 const TIMELINE_CUE_SAFETY_MS = 260;
-const APP_LINE_ADVANCE_DELAY_MS = 220;
+const APP_LINE_ADVANCE_DELAY_MS = 60;
 const USER_LINE_RESPONSE_BUFFER_MS = 550;
-const INTERIM_SAFE_AUTO_ADVANCE_REASONS = new Set<AutomaticLineMatchReason>([
-  'global_score',
-  'high_final_confidence',
-  'strong_coverage',
-]);
 const APP_SPEECH_WORDS_PER_SECOND = 2.65;
 const USER_SPEECH_WORDS_PER_SECOND = 2.35;
 const isSharedSongAudioKind = (value: unknown): value is SharedSongAudioKind =>
@@ -485,6 +482,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [showMicrophoneMenu, setShowMicrophoneMenu] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const pageVisible = usePageVisibility();
   const [isExitingRehearsal, setIsExitingRehearsal] = useState(false);
   const exitRequestedRef = useRef(false);
   const [sceneCommandReadyKey, setSceneCommandReadyKey] = useState<string | null>(null);
@@ -784,6 +782,7 @@ export const RehearsalView: React.FC<Props> = ({
   const recognitionPreparationKey = `prepare:${resolvedScriptId}`;
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
   const canRunRehearsalLinePlayback =
+    pageVisible &&
     !isPaused &&
     hasConfirmedRehearsalSetup &&
     isRehearsalMediaReady &&
@@ -842,6 +841,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, []);
 
   const advanceLine = useCallback(() => {
+    if (!isPageVisible()) return;
     setCurrentIndex((previousIndex) =>
       getAutomaticRehearsalTargetIndex(filteredGuion, previousIndex)
     );
@@ -897,6 +897,7 @@ export const RehearsalView: React.FC<Props> = ({
   });
 
   const startCurrentScene = useCallback(() => {
+    if (!isPageVisible()) return;
     stopRehearsalSpeech();
     resetSpeechRecognitionTranscript();
     setSceneCommandReadyKey(null);
@@ -1213,20 +1214,17 @@ export const RehearsalView: React.FC<Props> = ({
       speechRecognitionTranscript,
       intelligentLineMatch
     );
-    const hasBlockingInterimTranscript =
-      speechRecognitionInterimTranscript.trim() &&
-      intelligentLineMatch.score < 0.95 &&
-      (
-        !automaticReason ||
-        !INTERIM_SAFE_AUTO_ADVANCE_REASONS.has(automaticReason)
-      );
+    const advanceDelay = getAutomaticLineAdvanceDelay(
+      speakableLineText, speechRecognitionTranscript,
+      speechRecognitionInterimTranscript, intelligentLineMatch
+    );
 
     if (
       !shouldUseIntelligentRecognition ||
       !currentLineVariantKey ||
       !currentLine ||
       currentLineIndexInScript < 0 ||
-      hasBlockingInterimTranscript ||
+      advanceDelay === null ||
       !speechRecognitionTranscript.trim() ||
       !automaticReason
     ) {
@@ -1239,6 +1237,7 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     const autoAdvanceTimeout = setTimeout(() => {
+      if (!isPageVisible()) return;
       if (processedAutoAdvanceLineKeyRef.current === autoAdvanceKey) {
         return;
       }
@@ -1254,7 +1253,7 @@ export const RehearsalView: React.FC<Props> = ({
       }
       resetSpeechRecognitionTranscript();
       advanceLine();
-    }, 90);
+    }, advanceDelay);
 
     return () => {
       clearTimeout(autoAdvanceTimeout);
@@ -1969,7 +1968,7 @@ export const RehearsalView: React.FC<Props> = ({
         if (!isCancelled) setSpeechStatusMessage('Safari no ha cerrado la escucha anterior. Pulsa siguiente para continuar.');
         return;
       }
-      if (isCancelled) return;
+      if (isCancelled || !isPageVisible()) return;
       if (temporarilySuspendingAutoListen) {
         await stopListening();
         if (isCancelled) {
@@ -1985,6 +1984,7 @@ export const RehearsalView: React.FC<Props> = ({
       );
 
       speechStartTimeout = setTimeout(() => {
+        if (isCancelled || !isPageVisible()) return;
         setSpeechStatusMessage('Lanzando la linea con Siri...');
         const speechRate = getAdaptiveRehearsalSpeechRate();
         speakRehearsalSpeech(speakableLineText, {
@@ -2062,6 +2062,7 @@ export const RehearsalView: React.FC<Props> = ({
       releaseInput: async () => {
         await releaseListeningInput();
         if (!await waitForRecognitionEnd()) throw new Error('recognition-did-not-end');
+        if (!isPageVisible()) throw new Error('page-hidden');
       },
       speak: speakRehearsalSpeech,
       stop: stopRehearsalSpeech,
@@ -2797,7 +2798,9 @@ export const RehearsalView: React.FC<Props> = ({
     return (
       <View style={styles.intelligentPanel}>
         <Text style={styles.intelligentLabel}>
-          {isPaused ? 'Ensayo en pausa' : speechRecognitionStatus === 'error'
+          {isPaused ? 'Ensayo en pausa' : !pageVisible || speechRecognitionStatus === 'suspended'
+            ? 'Ensayo en espera. La escucha se recuperará al volver a esta pestaña.'
+            : speechRecognitionStatus === 'error'
             ? 'La escucha necesita tu atención'
             : speechRecognitionStatus === 'preparing' || speechRecognitionStatus === 'finishing'
               ? 'Preparando la escucha…'
@@ -2808,16 +2811,6 @@ export const RehearsalView: React.FC<Props> = ({
                 : 'Esperando la entrada del micrófono'}
         </Text>
         {renderRecognitionError(handleRetryIntelligentLine, 'Activar micrófono')}
-        {!isPaused && !speechRecognitionError && !isRecognitionAudioActive ? <TouchableOpacity
-          accessibilityRole="button"
-          style={[styles.intelligentButton, styles.intelligentRetryButton]}
-          onPress={handleRetryIntelligentLine}
-          accessibilityLabel={hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
-        >
-          <Text style={styles.intelligentRetryText}>
-            {hasTranscript ? 'Reiniciar escucha' : 'Activar micrófono'}
-          </Text>
-        </TouchableOpacity> : null}
         {showTranscript ? <View testID="rehearsal-transcript" style={{ gap: 6, marginTop: 10 }}>
           <Text style={ui.label}>HE OÍDO</Text>
           <Text style={[ui.text, { color: palette.ink }]}>{speechRecognitionTranscript || 'Tu transcripción aparecerá aquí…'}</Text>
@@ -3195,7 +3188,9 @@ export const RehearsalView: React.FC<Props> = ({
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Línea anterior" disabled={!canGoBack} onPress={goBackLine} style={[ui.icon, !canGoBack && { opacity: 0.3 }]}><Icon name="skip-previous" size={28} /></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel={isPaused ? 'Reanudar ensayo' : 'Pausar ensayo'} onPress={() => {
           if (isPaused) {
-            if (listenModeSelection === 'intelligent') activateRecognition({ lang: intelligentRecognitionLanguage, lineKey: recognitionLineKey || recognitionPreparationKey });
+            if (listenModeSelection === 'intelligent' && isMyTurn && !isCurrentMusicalSongBlock && !isSceneMarker(currentLine)) {
+              activateRecognition({ lang: intelligentRecognitionLanguage, lineKey: recognitionLineKey || recognitionPreparationKey });
+            }
             setIsPaused(false);
           } else {
             setIsPaused(true); stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition(); void releaseListening();

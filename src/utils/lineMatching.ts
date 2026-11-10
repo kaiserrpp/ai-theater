@@ -839,6 +839,31 @@ export const getAutomaticLineMatchReason = (
   return passesReplicaClosure ? 'replica_closure' : null;
 };
 
+// A strong complete ending can be used while Safari still calls it interim.
+// An incomplete/repeated ending must wait for a final result, otherwise a pause
+// in the middle of a replica could cut the actor off.
+export const getAutomaticLineAdvanceDelay = (
+  expectedText: string,
+  heardText: string,
+  interimText: string,
+  result: LineMatchResult
+): number | null => {
+  const reason = getAutomaticLineMatchReason(expectedText, heardText, result);
+  if (!reason) return null;
+  if (!interimText.trim()) return 0;
+  if (result.score >= 0.95 || reason === 'global_score' ||
+      reason === 'high_final_confidence' || reason === 'strong_coverage') return 60;
+
+  const reference = result.referenceText || expectedText;
+  const ending = getTailTokens(tokenize(reference), FLUENT_FINAL_WORD_COUNT);
+  const heardEnding = getTailTokens(tokenize(heardText), ending.length);
+  const hasCompleteEnding = ending.length >= 4 && heardEnding.length === ending.length &&
+    ending.every((token, index) => tokensMatch(token, heardEnding[index]));
+  return !result.negationPenaltyApplied && hasCompleteEnding &&
+    !finalPhraseAppearsBeforeEnding(reference) && result.coverageScore >= 0.5 &&
+    result.precisionScore >= 0.65 && result.orderScore >= 0.45 ? 120 : null;
+};
+
 export const isNextLineCommand = (heardText: string) => {
   const normalizedText = normalizeSpeechText(heardText);
   const tokens = normalizedText.split(' ').filter(Boolean);

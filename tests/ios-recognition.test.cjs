@@ -28,6 +28,11 @@ const fixture = (t, extra = {}) => {
       if (!poisoned) this.onresult?.({ results: [result(text, isFinal)] });
     }
     end() { this.ended = true; active = null; this.onend?.(); }
+    interrupt(delivery = 'end') {
+      this.ended = true; active = null;
+      if (delivery === 'end') this.onend?.();
+      if (delivery === 'error') this.onerror?.({ error: 'aborted', message: 'Page is no longer visible' });
+    }
   }
   const session = createSession(Recognition, () => {}, {
     naturalEnd: true, usage: { started: false },
@@ -192,4 +197,103 @@ test('a synchronous Safari start rejection leaves no phantom capture blocking th
   assert.equal(session.getSnapshot().hasReceivedTranscript, true);
   assert.equal(session.getSnapshot().transcript, 'prueba de micro');
   session.dispose();
+});
+
+for (const delivery of ['end', 'error', 'none']) {
+  test(`returning from a locked/background page restores words after native ${delivery} callbacks`, (t) => {
+    const f = fixture(t);
+    f.session.configure(options());
+    f.handles[0].receive('Voy a', false);
+    const staleError = f.handles[0].onerror;
+    const staleResult = f.handles[0].onresult;
+    const staleEnd = f.handles[0].onend;
+    f.session.setPageVisible(false);
+    f.handles[0].interrupt(delivery);
+    f.session.configure(options({ enabled: false }));
+    t.mock.timers.tick(120000);
+    assert.equal(f.session.getSnapshot().error, null);
+    assert.equal(f.handles.length, 1);
+    assert.equal(f.cues.length, 0);
+    f.session.setPageVisible(true);
+    f.session.configure(options());
+    assert.equal(f.session.getSnapshot().status, 'preparing');
+    f.cues[0].onDone();
+    staleError({ error: 'not-allowed', message: 'Page is not visible to user' });
+    staleResult({ results: [result('NO DEBE APARECER')] });
+    staleEnd();
+    f.handles[1].receive('buscarla');
+    assert.equal(f.session.getSnapshot().transcript, 'Voy a buscarla');
+    assert.equal(f.session.getSnapshot().error, null);
+    assert.equal(f.handles.length, 2);
+    assert.equal(f.poisoned(), false);
+    assert.equal(f.handles[0].aborted, undefined);
+  });
+}
+
+test('backgrounding during a restart cue cancels it and cannot open a hidden capture later', (t) => {
+  const f = fixture(t);
+  f.session.configure(options()); f.handles[0].end();
+  t.mock.timers.tick(250);
+  f.session.setPageVisible(false);
+  assert.equal(f.cues[0].cancelled, true);
+  f.cues[0].onDone();
+  t.mock.timers.tick(30000);
+  assert.equal(f.handles.length, 1);
+  assert.equal(f.session.getSnapshot().status, 'suspended');
+  f.session.setPageVisible(true);
+  f.cues[1].onDone();
+  f.handles[1].receive('Sigo aquí');
+  assert.equal(f.session.getSnapshot().transcript, 'Sigo aquí');
+});
+
+test('WebKit can report page invisibility before the DOM visibility event without blocking recovery', (t) => {
+  const f = fixture(t);
+  f.session.configure(options());
+  f.handles[0].receive('Sigo', false);
+  f.handles[0].interrupt('none');
+  f.handles[0].onerror({ error: 'not-allowed', message: 'Page is not visible to user' });
+  assert.equal(f.session.getSnapshot().status, 'suspended');
+  assert.equal(f.session.getSnapshot().error, null);
+  f.session.setPageVisible(false);
+  t.mock.timers.tick(30000);
+  f.session.setPageVisible(true);
+  f.cues[0].onDone();
+  f.handles[1].receive('ensayando');
+  assert.equal(f.session.getSnapshot().transcript, 'Sigo ensayando');
+  assert.equal(f.poisoned(), false);
+});
+
+test('returning to Safari does not undo a manual pause or a real permission failure', (t) => {
+  const f = fixture(t);
+  f.session.configure(options());
+  f.handles[0].onerror({ error: 'not-allowed', message: 'Microphone permission check has failed' });
+  f.session.setPageVisible(false); f.handles[0].interrupt('error');
+  f.session.setPageVisible(true);
+  assert.equal(f.session.getSnapshot().errorCode, 'not-allowed');
+  assert.equal(f.cues.length, 0);
+  f.session.configure(options({ enabled: false }));
+  f.session.setPageVisible(false); f.session.setPageVisible(true);
+  assert.equal(f.handles.length, 1);
+  f.session.configure(options());
+  assert.equal(f.cues.length, 0);
+  f.session.restart(); f.cues[0].onDone();
+  f.handles[1].receive('Ahora sí');
+  assert.equal(f.session.getSnapshot().transcript, 'Ahora sí');
+  f.session.stop(); f.handles[1].end();
+  f.session.setPageVisible(false); f.session.setPageVisible(true);
+  t.mock.timers.tick(30000);
+  assert.equal(f.handles.length, 2);
+  assert.equal(f.cues.length, 1);
+});
+
+test('an initially hidden page cannot start recognition until it is shown', (t) => {
+  const f = fixture(t, { pageVisible: false });
+  f.session.activate({ lang: 'es-ES', lineKey: 'my-line-1' });
+  t.mock.timers.tick(30000);
+  assert.equal(f.handles.length, 0);
+  assert.equal(f.session.getSnapshot().error, null);
+  f.session.setPageVisible(true);
+  assert.equal(f.handles.length, 1);
+  f.handles[0].receive('Hola');
+  assert.equal(f.session.getSnapshot().transcript, 'Hola');
 });

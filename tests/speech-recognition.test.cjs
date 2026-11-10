@@ -231,12 +231,12 @@ test('service availability, service authorization and microphone permission keep
 test('recognition preparation retries in place and preserves the exact native error across renders', (t) => {
   const { session, handles } = fixture(t);
   session.activate({ lang: 'es-ES', lineKey: 'prepare' });
-  const message = 'Page is not visible to user';
-  handles[0].onerror({ error: 'not-allowed', message });
+  const message = 'Recognition server connection was lost';
+  handles[0].onerror({ error: 'network', message });
   session.configure(options({ lineKey: 'prepare' }));
   session.resetTranscript();
   assert.equal(session.getSnapshot().errorDetail, message);
-  assert.match(session.getSnapshot().error, /página no estaba visible/);
+  assert.match(session.getSnapshot().error, /conexión/);
   session.activate({ lang: 'es-ES', lineKey: 'prepare' });
   assert.equal(handles.length, 2);
   assert.equal(session.getSnapshot().errorCode, null);

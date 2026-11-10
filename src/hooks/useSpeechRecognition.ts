@@ -6,6 +6,7 @@ import {
 } from '../utils/speechRecognitionSession';
 import { needsNaturalRecognitionEnd } from '../utils/speechRecognitionCompatibility';
 import { prepareRecognitionRestart } from '../utils/rehearsalSpeech';
+import { isPageVisible, observePageVisibility } from '../utils/pageVisibility';
 
 type UseSpeechRecognitionOptions = {
   enabled: boolean;
@@ -30,8 +31,10 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey }: UseSpeechRecogn
     interimTranscript: '', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null,
   });
   const session = useMemo(() => createSpeechRecognitionSession(Constructor, setSnapshot, {
-    naturalEnd, prepareRestart: prepareRecognitionRestart,
+    naturalEnd, prepareRestart: prepareRecognitionRestart, pageVisible: isPageVisible(),
   }), [Constructor, naturalEnd]);
+
+  useEffect(() => observePageVisibility(session.setPageVisible), [session]);
 
   useEffect(() => {
     session.configure({ enabled, lang, lineKey });

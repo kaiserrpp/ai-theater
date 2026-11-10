@@ -1,4 +1,4 @@
-export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'preparing' | 'finishing' | 'starting' | 'listening' | 'error';
+export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'suspended' | 'preparing' | 'finishing' | 'starting' | 'listening' | 'error';
 
 type RecognitionResult = {
   readonly isFinal: boolean;
@@ -35,6 +35,7 @@ export type SpeechRecognitionSnapshot = {
 
 type RecognitionOptions = {
   naturalEnd?: boolean;
+  pageVisible?: boolean;
   prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
   usage?: { started: boolean };
 };
@@ -78,6 +79,7 @@ export const createSpeechRecognitionSession = (
   };
   let recognition: SpeechRecognitionHandle | null = null;
   let enabled = false;
+  let pageVisible = options.pageVisible ?? true;
   let blocked = false;
   let language = 'es-ES';
   let lineKey: string | null = null;
@@ -138,21 +140,28 @@ export const createSpeechRecognitionSession = (
     update({ transcript: '', finalTranscript: '', interimTranscript: '', hasReceivedTranscript: false });
   };
   const armEvidence = () => {
-    if (!options.naturalEnd || evidenceTimer !== null || !enabled || blocked) return;
+    if (!options.naturalEnd || evidenceTimer !== null || !enabled || !pageVisible || blocked) return;
     evidenceTimer = setTimeout(() => {
       evidenceTimer = null;
       fail('Safari ha abierto la escucha, pero no ha entregado palabras. Pulsa Reintentar escucha y di «prueba de micro».', 'no-recognition-results');
     }, 20000);
   };
+  const suspendForPageHide = () => {
+    pageVisible = false;
+    clearTimers(); clearEvidence(); cancelCue();
+    committedTranscript = snapshot.transcript;
+    closingForChange = true;
+    update({ status: blocked ? 'error' : 'suspended', isAudioActive: false });
+  };
   const start = () => {
-    if (!Constructor || !enabled || blocked || recognition || preparing) return;
+    if (!Constructor || !enabled || !pageVisible || blocked || recognition || preparing) return;
     if (options.naturalEnd && needsCue && options.prepareRestart) {
       const version = ++preparationVersion;
       preparing = true;
       update({ status: 'preparing', isAudioActive: false });
       const cancel = options.prepareRestart({
         onDone: () => {
-          if (version !== preparationVersion || !enabled || blocked) return;
+          if (version !== preparationVersion || !enabled || !pageVisible || blocked) return;
           preparing = false; cancelPreparation = null; needsCue = false; start();
         },
         onError: (error) => {
@@ -179,10 +188,10 @@ export const createSpeechRecognitionSession = (
       closingForChange = false;
       update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null });
       current.onstart = () => {
-        if (recognition === current && enabled && !blocked && !closingForChange) update({ status: 'listening' });
+        if (recognition === current && enabled && pageVisible && !blocked && !closingForChange) update({ status: 'listening' });
       };
       current.onaudiostart = () => {
-        if (recognition !== current || !enabled || blocked || closingForChange) return;
+        if (recognition !== current || !enabled || !pageVisible || blocked || closingForChange) return;
         hadAudioInput = true;
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
@@ -192,11 +201,20 @@ export const createSpeechRecognitionSession = (
         if (recognition === current) update({ isAudioActive: false });
       };
       current.onerror = (event) => {
-        if (recognition !== current || !enabled || closingForChange || event.error === 'no-speech') return;
+        if (recognition !== current) return;
+        if (!pageVisible || /page.*(not visible|no longer visible|became invisible)/i.test(event.message ?? '')) {
+          // WebKit stops capture when the page is hidden. This is a lifecycle
+          // interruption, not a revoked microphone permission. Some versions
+          // report only error, without the matching end event.
+          if (pageVisible) suspendForPageHide();
+          detach(false); closingForChange = false; needsCue = true;
+          return;
+        }
+        if (!enabled || closingForChange || event.error === 'no-speech') return;
         fail(recognitionErrorMessage(event.error, event.message), event.error ?? null, event.message?.trim() || null);
       };
       current.onresult = (event) => {
-        if (recognition !== current || !enabled || blocked || closingForChange) return;
+        if (recognition !== current || !enabled || !pageVisible || blocked || closingForChange) return;
         hadAudioInput = true;
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
@@ -222,6 +240,10 @@ export const createSpeechRecognitionSession = (
       };
       current.onend = () => {
         if (recognition !== current) return;
+        if (!pageVisible) {
+          detach(false); closingForChange = false; needsCue = true;
+          return;
+        }
         if (options.naturalEnd) {
           // Calling abort() even after a normal end can poison later iOS runs.
           committedTranscript = snapshot.transcript;
@@ -262,14 +284,30 @@ export const createSpeechRecognitionSession = (
     clearEvidence(); cancelCue();
     if (options.naturalEnd && recognition) {
       clearTimers(); closingForChange = true;
-      update({ status: blocked ? 'error' : 'finishing' });
+      update({ status: blocked ? 'error' : pageVisible ? 'finishing' : 'suspended' });
       return;
     }
     detach();
-    update({ status: blocked ? 'error' : Constructor ? 'idle' : 'unsupported', isAudioActive: false });
+    update({ status: blocked ? 'error' : !pageVisible ? 'suspended' : Constructor ? 'idle' : 'unsupported', isAudioActive: false });
   };
   return {
     getSnapshot: () => snapshot,
+    setPageVisible: (visible: boolean) => {
+      if (pageVisible === visible) return;
+      if (!visible) { suspendForPageHide(); return; }
+      pageVisible = visible;
+      clearTimers(); clearEvidence(); cancelCue();
+      committedTranscript = snapshot.transcript;
+      // The browser owns the interruption on hide. Detach its obsolete handle
+      // without calling abort/stop, even if it omitted the terminal callbacks.
+      // Late events must never mutate the new foreground session.
+      detach(false); closingForChange = false;
+      needsCue = Boolean(options.naturalEnd && usage.started);
+      if (!blocked) {
+        update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false });
+        start();
+      }
+    },
     // The ordinary Start button can open the real recognizer immediately.
     // Volume calibration is not evidence that this separate service works.
     activate: (next: { lang: string; lineKey: string }) => {
