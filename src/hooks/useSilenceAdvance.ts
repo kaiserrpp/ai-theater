@@ -414,8 +414,9 @@ export const useSilenceAdvance = ({
     if (calibrationRun) {
       if (calibrationRun.mode === 'voice' && calibrationRun.sampleStartedAt === 0) {
         const voiceStartThreshold = Math.max(
-          MIN_VOICE_THRESHOLD,
-          microphoneNoiseFloorRef.current * THRESHOLD_MULTIPLIER
+          MIN_VOICE_THRESHOLD * 0.12,
+          microphoneNoiseFloorRef.current + VOICE_CALIBRATION_MIN_DELTA,
+          microphoneNoiseFloorRef.current * VOICE_CALIBRATION_MIN_SIGNAL_FACTOR
         );
 
         if (rms >= voiceStartThreshold) {
@@ -708,7 +709,7 @@ export const useSilenceAdvance = ({
         calibrationRunRef.current = {
           mode,
           startedAt,
-          sampleStartedAt: startedAt,
+          sampleStartedAt: mode === 'voice' ? 0 : startedAt,
           durationMs,
           maxWaitMs,
           samples: [],

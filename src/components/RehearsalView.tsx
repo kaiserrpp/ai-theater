@@ -67,6 +67,7 @@ interface Props {
 type RehearsalPreflightPhase =
   | 'audio-check'
   | 'micro-calibration'
+  | 'ready-to-calibrate'
   | 'ready-to-listen'
   | 'intelligent-check'
   | 'recognition-audio-check'
@@ -527,6 +528,7 @@ export const RehearsalView: React.FC<Props> = ({
     timelineCues?: MusicalTimelineCue[];
   } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const calibrationAudioRef = useRef<HTMLAudioElement | null>(null);
   const songAudioContextRef = useRef<AudioContext | null>(null);
   const songAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const songAudioGainRef = useRef<GainNode | null>(null);
@@ -1383,6 +1385,16 @@ export const RehearsalView: React.FC<Props> = ({
     activeAudioPlaybackRef.current = null;
   }, []);
 
+  const disposeCalibrationAudio = useCallback(() => {
+    const player = calibrationAudioRef.current;
+    calibrationAudioRef.current = null;
+    if (!player) return;
+    player.onended = player.onerror = null;
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+  }, []);
+
   const disposeSongAudio = useCallback(() => {
     const player = audioRef.current;
     if (player) {
@@ -1547,8 +1559,21 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, [getSongAudioPlayer, prepareSongAudioOutput]);
 
+  const getCalibrationAudioPlayer = useCallback(() => {
+    if (typeof Audio === 'undefined') return null;
+    if (!calibrationAudioRef.current) {
+      const player = new Audio();
+      player.preload = 'auto';
+      player.setAttribute('playsinline', 'true');
+      calibrationAudioRef.current = player;
+    }
+    return calibrationAudioRef.current;
+  }, []);
+
   const playMicroCalibrationBeep = useCallback(async () => {
-    const player = getSongAudioPlayer();
+    // Keep the cue outside the song player's MediaElementAudioSource/GainNode.
+    // Its audio context can be interrupted when the microphone changes route.
+    const player = getCalibrationAudioPlayer();
     const toneObjectUrl = createMicroCalibrationToneObjectUrl();
 
     if (!player || !toneObjectUrl) {
@@ -1557,12 +1582,12 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     try {
-      setSongAudioVolume(1);
-      await playCalibrationBeep(player, toneObjectUrl, prepareSongAudioOutput);
+      player.volume = 1;
+      await playCalibrationBeep(player, toneObjectUrl, async () => {});
     } finally {
       URL.revokeObjectURL(toneObjectUrl);
     }
-  }, [getSongAudioPlayer, prepareSongAudioOutput, setSongAudioVolume]);
+  }, [getCalibrationAudioPlayer]);
 
   const goBackLine = useCallback(() => {
     stopRehearsalSpeech();
@@ -2041,12 +2066,14 @@ export const RehearsalView: React.FC<Props> = ({
 
   useEffect(() => () => {
     disposeSongAudio();
-  }, [disposeSongAudio]);
+    disposeCalibrationAudio();
+  }, [disposeCalibrationAudio, disposeSongAudio]);
 
   const handleExit = () => {
     preparationRunRef.current += 1;
     stopRehearsalSpeech();
     disposeSongAudio();
+    disposeCalibrationAudio();
     stopRecognition();
     void releaseListening();
     onExit();
@@ -2057,7 +2084,7 @@ export const RehearsalView: React.FC<Props> = ({
 
   const prepareRehearsalMedia = useCallback((withRecognition = false) => {
     const run = ++preparationRunRef.current;
-    stopRehearsalSpeech(); stopStandaloneSongAudio();
+    stopRehearsalSpeech(); stopSongAudio();
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
     setRehearsalMediaStatus('Escucha la frase de prueba.');
@@ -2079,31 +2106,36 @@ export const RehearsalView: React.FC<Props> = ({
       onStart: () => { if (preparationRunRef.current === run) setRehearsalMediaStatus('Sonando: «Hola, hola, dime si me oyes».'); },
       onDone: () => finish(), onError: () => finish(true),
     });
-    if (!spokenOnly) void primeSongPlayback();
-  }, [primeSongPlayback, spokenOnly, stopStandaloneSongAudio]);
+  }, [stopSongAudio]);
 
   const calibrateRehearsalMicrophone = useCallback(async () => {
     const run = ++preparationRunRef.current;
     const isCurrent = () => preparationRunRef.current === run;
-    stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition();
+    stopRehearsalSpeech(); stopSongAudio(); disposeCalibrationAudio(); stopRecognition();
     setIsPreparingRehearsalMedia(true); setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false); setIsRehearsalMediaReady(false);
     setRehearsalPreflightPhase('micro-calibration'); setAutoListenEnabled(false);
-    setRehearsalMediaStatus('Escucha la indicación de la app. Después mediremos el ruido de fondo.');
-    setSpeakerConfirmed(false); setMicrophoneCalibrated(false);
+    setRehearsalMediaStatus('Guarda silencio: vamos a medir el ruido de fondo.');
+    setSpeakerConfirmed(rehearsalPreparationSession.getSnapshot().speakerConfirmed);
+    setMicrophoneCalibrated(false);
     resetMicrophoneCalibration();
     try {
       const result = await runRehearsalMicrophoneCalibration({
         isCurrent,
         prepareOutput: async () => {
-          // Unlock media and synthesis directly in Empezar/Reintentar, also in
-          // spoken-only auditions. Neither may wait for microphone permission.
-          const audioReady = primeSongPlayback();
-          const voiceReady = playCalibrationVoice('Vamos a preparar el micrófono. Guarda silencio.', {
-            speak: speakRehearsalSpeech, stop: () => { if (isCurrent()) stopRehearsalSpeech(); },
-          });
-          const [unlocked] = await Promise.all([audioReady, voiceReady]);
-          if (!unlocked) throw new Error('calibration-beep-unavailable');
+          // The actor already heard and confirmed the voice, with no microphone
+          // open. This tap only unlocks the separate native cue player.
+          const player = getCalibrationAudioPlayer();
+          const silentUrl = createSilentWavObjectUrl();
+          if (!player || !silentUrl) {
+            if (silentUrl) URL.revokeObjectURL(silentUrl);
+            throw new Error('calibration-beep-unavailable');
+          }
+          try {
+            if (!await primeRehearsalAudioPlayer(player, silentUrl, async () => {})) {
+              throw new Error('calibration-beep-unavailable');
+            }
+          } finally { URL.revokeObjectURL(silentUrl); }
         },
         start: startListening, measureNoise: calibrateAmbientNoise,
         prompt: () => playCalibrationVoice('Di prueba de micro después del pitido.', {
@@ -2130,6 +2162,7 @@ export const RehearsalView: React.FC<Props> = ({
     } catch (error) {
       if (!isCurrent()) return;
       stopRehearsalSpeech();
+      disposeCalibrationAudio();
       setRehearsalMediaStatus(error instanceof Error && error.message === 'calibration-voice-unavailable'
         ? 'No se ha podido reproducir la voz. Pulsa Reintentar calibración para activar el audio.'
         : error instanceof Error && error.message === 'calibration-beep-unavailable'
@@ -2140,8 +2173,9 @@ export const RehearsalView: React.FC<Props> = ({
     } finally {
       if (isCurrent()) setIsPreparingRehearsalMedia(false);
     }
-  }, [calibrateAmbientNoise, calibrateVoiceLevel, listenModeSelection, playMicroCalibrationBeep, primeSongPlayback,
-    releaseListeningInput, resetMicrophoneCalibration, startListening, stopRecognition, stopStandaloneSongAudio]);
+  }, [calibrateAmbientNoise, calibrateVoiceLevel, disposeCalibrationAudio, getCalibrationAudioPlayer,
+    listenModeSelection, playMicroCalibrationBeep, releaseListeningInput, resetMicrophoneCalibration,
+    startListening, stopRecognition, stopSongAudio]);
 
   const advancePastMusicalNumber = useCallback((musicalNumberId: string | null) => {
     const musicalNumber = musicalNumberId
@@ -2479,12 +2513,12 @@ export const RehearsalView: React.FC<Props> = ({
         onModeChange={(mode) => {
           if (mode === listenModeSelection) return;
           preparationRunRef.current += 1; setSpeakerConfirmed(false); setMicrophoneCalibrated(false);
-          stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition(); void releaseListening();
+          stopRehearsalSpeech(); stopSongAudio(); disposeCalibrationAudio(); stopRecognition(); void releaseListening();
           setIsPaused(false); setHasConfirmedRehearsalSetup(false); setRehearsalPreflightPhase(null);
           handleSelectListenMode(mode);
         }} onRepeatPreparation={() => {
           preparationRunRef.current += 1;
-          stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition(); void releaseListening();
+          stopRehearsalSpeech(); stopSongAudio(); disposeCalibrationAudio(); stopRecognition(); void releaseListening();
           setSpeakerConfirmed(false); setMicrophoneCalibrated(false);
           setAutoListenEnabled(false); setIsPreparingRehearsalMedia(false); setHasPreparedRehearsalMedia(false);
           setHasCompletedRehearsalPreflight(false); setIsRehearsalMediaReady(false);
@@ -2880,29 +2914,36 @@ export const RehearsalView: React.FC<Props> = ({
   if (!isRehearsalMediaReady) {
     const isDuplexCheck = rehearsalPreflightPhase === 'recognition-audio-check';
     const isCalibrating = rehearsalPreflightPhase === 'micro-calibration';
+    const isReadyToCalibrate = rehearsalPreflightPhase === 'ready-to-calibrate';
     const isReadyToListen = rehearsalPreflightPhase === 'ready-to-listen';
     const isReadyToStart = rehearsalPreflightPhase === 'ready-to-start';
     return <View style={styles.container}>
       {renderHeader(listenModeSelection === 'manual' ? 'Preparar altavoz' : 'Preparar audio y micrófono')}
       <ScrollView contentContainerStyle={ui.page} keyboardShouldPersistTaps="handled">
-        <View style={ui.wrap}>{[listenModeSelection === 'manual' ? 'Sin micro' : `${microphoneCalibrated ? '✓' : '1'} Micro`, `${speakerConfirmed ? '✓' : listenModeSelection === 'manual' ? '1' : '2'} Altavoz`, '3 Ensayo'].map((label) => <View key={label} style={[ui.chip, { backgroundColor: palette.soft }]}><Text style={[ui.chipText, { color: palette.plum }]}>{label}</Text></View>)}</View>
+        <View style={ui.wrap}>{[`${speakerConfirmed ? '✓' : '1'} Altavoz`, ...(listenModeSelection === 'manual' ? [] : [`${microphoneCalibrated ? '✓' : '2'} Micro`]), `${listenModeSelection === 'manual' ? '2' : '3'} Ensayo`].map((label) => <View key={label} style={[ui.chip, { backgroundColor: palette.soft }]}><Text style={[ui.chipText, { color: palette.plum }]}>{label}</Text></View>)}</View>
         <View style={ui.card}>
-          <Icon name={isCalibrating || isReadyToListen ? 'microphone-outline' : 'volume-high'} size={34} />
-          <Text style={ui.title}>{isCalibrating ? 'Calibrar micrófono' : isReadyToListen ? 'Activar la escucha' : isReadyToStart ? 'Todo preparado' : isDuplexCheck ? 'Última prueba de voz' : '¿Oyes a la app?'}</Text>
-          <Text style={ui.text}>{isCalibrating ? 'Guarda silencio. Cuando aparezca «Habla ahora», di «prueba de micro».' : isReadyToListen ? 'La calibración ya está hecha. Ahora abriremos el reconocimiento de palabras.' : isDuplexCheck ? 'Comprueba que oyes a la app también con el reconocimiento abierto.' : isReadyToStart ? listenModeSelection === 'manual' ? 'El altavoz está preparado. Ensayarás sin activar el micrófono.' : 'El altavoz y el micrófono ya están comprobados.' : 'Sube el volumen y escucha la frase. No entraremos al ensayo hasta que confirmes que la oyes.'}</Text>
+          <Icon name={isCalibrating || isReadyToCalibrate || isReadyToListen ? 'microphone-outline' : 'volume-high'} size={34} />
+          <Text style={ui.title}>{isCalibrating || isReadyToCalibrate ? 'Calibrar micrófono' : isReadyToListen ? 'Activar la escucha' : isReadyToStart ? 'Todo preparado' : isDuplexCheck ? 'Última prueba de voz' : '¿Oyes a la app?'}</Text>
+          <Text style={ui.text}>{isCalibrating ? 'Guarda silencio. Después del pitido, di «prueba de micro». Esperaremos a que empieces a hablar.' : isReadyToCalibrate ? 'Ya has comprobado la voz de la app. Ahora mediremos el ruido de fondo y tu voz.' : isReadyToListen ? 'La calibración ya está hecha. Ahora abriremos el reconocimiento de palabras.' : isDuplexCheck ? 'Comprueba que oyes a la app también con el reconocimiento abierto.' : isReadyToStart ? listenModeSelection === 'manual' ? 'El altavoz está preparado. Ensayarás sin activar el micrófono.' : 'El altavoz y el micrófono ya están comprobados.' : 'Sube el volumen y escucha la frase. No entraremos al ensayo hasta que confirmes que la oyes.'}</Text>
           {rehearsalMediaStatus ? <Text accessibilityLiveRegion="polite" style={[ui.text, { color: palette.plum }]}>{rehearsalMediaStatus}</Text> : null}
           {isCalibrating ? <>
             <View style={styles.microCalibrationMeterTrack}><View style={[styles.microCalibrationMeterFill, { width: `${Math.max(4, Math.round(signalLevel * 100))}%`, backgroundColor: palette.plum }]} /></View>
             <Text style={ui.text}>Nivel de entrada: {Math.round(rawLevel * 100)}% · {Math.round(microphoneCalibrationProgress * 100)}%</Text>
             {listeningError ? <Text style={ui.error}>{listeningError}</Text> : null}
             <Button label={isPreparingRehearsalMedia ? 'Calibrando…' : 'Reintentar calibración'} disabled={isPreparingRehearsalMedia} onPress={() => void calibrateRehearsalMicrophone()} />
-          </> : isReadyToListen ? <Button label="Comprobar escucha" onPress={enableIntelligentListenForDevice} />
+          </> : isReadyToCalibrate ? <Button label="Calibrar micrófono" onPress={() => void calibrateRehearsalMicrophone()} />
+            : isReadyToListen ? <Button label="Comprobar escucha" onPress={enableIntelligentListenForDevice} />
             : isReadyToStart ? <Button label="Empezar ensayo" onPress={() => finishRehearsalPreparation()} />
             : <>
               <Button label={isPreparingRehearsalMedia ? 'Reproduciendo prueba…' : hasPreparedRehearsalMedia ? 'Repetir prueba de voz' : 'Probar voz'} disabled={isPreparingRehearsalMedia} secondary onPress={() => prepareRehearsalMedia(isDuplexCheck)} />
               {hasPreparedRehearsalMedia ? <Button label={isDuplexCheck ? 'Sí, la oigo. Empezar ensayo' : 'Sí, la oigo. Continuar'} onPress={() => {
                 if (isDuplexCheck) finishRehearsalPreparation(true);
-                else { rehearsalPreparationSession.confirmSpeaker(); setSpeakerConfirmed(true); setRehearsalPreflightPhase(listenModeSelection === 'intelligent' ? 'ready-to-listen' : 'ready-to-start'); setRehearsalMediaStatus(null); }
+                else {
+                  rehearsalPreparationSession.confirmSpeaker(); setSpeakerConfirmed(true);
+                  const needsCalibration = listenModeSelection !== 'manual' && !rehearsalPreparationSession.getSnapshot().calibration;
+                  setRehearsalPreflightPhase(needsCalibration ? 'ready-to-calibrate' : listenModeSelection === 'intelligent' ? 'ready-to-listen' : 'ready-to-start');
+                  setRehearsalMediaStatus(null);
+                }
               }} /> : null}
               {isDuplexCheck ? renderRecognitionError(enableIntelligentListenForDevice, 'Reintentar escucha') : null}
               {isDuplexCheck && !isRecognitionAudioActive && !speechRecognitionError ? <Button label="Reabrir escucha" secondary onPress={enableIntelligentListenForDevice} /> : null}

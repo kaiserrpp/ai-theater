@@ -43,8 +43,8 @@ export const createRehearsalPreparationSession = () => {
 };
 
 export const getRehearsalPreparationStep = (mode: ListenPreference, snapshot: RehearsalPreparationSnapshot) => {
-  if (mode !== 'manual' && !snapshot.calibration) return 'microphone';
   if (!snapshot.speakerConfirmed) return 'speaker';
+  if (mode !== 'manual' && !snapshot.calibration) return 'microphone';
   // Recognition must be activated again and report live audio in each rehearsal.
   if (mode === 'intelligent') return 'recognition';
   return 'ready';

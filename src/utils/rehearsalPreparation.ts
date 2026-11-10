@@ -39,10 +39,16 @@ export const runRehearsalMicrophoneCalibration = async (operations: {
     const noise = await operations.measureNoise();
     checkCurrent();
     if (noise.status !== 'ready' && noise.status !== 'weak') throw new Error('microphone-unavailable');
+    // Do not play speech or the cue through an active capture session. On
+    // mobile it can change the output route and leave that input muted.
+    await operations.release();
+    checkCurrent();
     operations.onStage('prompt');
     await operations.prompt();
     checkCurrent();
     await operations.beep();
+    checkCurrent();
+    await operations.start();
     checkCurrent();
     operations.onStage('voice');
     const voice = await operations.measureVoice();

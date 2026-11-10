@@ -23,6 +23,9 @@ const evidence = (session, recognition) => ({
 test('one successful calibration and speaker check cover the first rehearsal and five more', async () => {
   const session = createSession();
   const events = [];
+  assert.equal(nextStep('auto', session.getSnapshot()), 'speaker');
+  assert.equal(nextStep('intelligent', session.getSnapshot()), 'speaker');
+  session.confirmSpeaker();
   assert.equal(nextStep('auto', session.getSnapshot()), 'microphone');
   session.rememberCalibration(await calibrate({
     isCurrent: () => true,
@@ -35,8 +38,6 @@ test('one successful calibration and speaker check cover the first rehearsal and
     release: async () => { events.push('release'); },
     onStage: () => {},
   }));
-  assert.equal(nextStep('auto', session.getSnapshot()), 'speaker');
-  session.confirmSpeaker();
   for (let rehearsal = 0; rehearsal < 6; rehearsal += 1) {
     assert.equal(nextStep('auto', session.getSnapshot()), 'ready');
     assert.equal(canStart('auto', evidence(session)), true);
@@ -44,7 +45,7 @@ test('one successful calibration and speaker check cover the first rehearsal and
     assert.equal(canStart('manual', evidence(session)), true);
     assert.deepEqual(session.getSnapshot().calibration, calibration);
   }
-  assert.deepEqual(events, ['output', 'open', 'noise', 'prompt', 'beep', 'voice', 'release']);
+  assert.deepEqual(events, ['output', 'open', 'noise', 'release', 'prompt', 'beep', 'open', 'voice', 'release']);
 });
 
 test('six intelligent rehearsals reuse output checks but require a new real audio-start event each time', () => {
@@ -106,7 +107,7 @@ test('repeat clears every check; a newly opened app starts with no prior evidenc
   const confirmed = session.getSnapshot();
   session.reset();
   assert.equal(nextStep('manual', session.getSnapshot()), 'speaker');
-  assert.equal(nextStep('intelligent', session.getSnapshot()), 'microphone');
+  assert.equal(nextStep('intelligent', session.getSnapshot()), 'speaker');
   assert.equal(session.getSnapshot().recognitionOutputConfirmed, false);
   assert.equal(confirmed.speakerConfirmed, true);
   assert.equal(Object.isFrozen(confirmed.calibration), true);
