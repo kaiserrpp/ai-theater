@@ -1,4 +1,4 @@
-export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'starting' | 'listening' | 'error';
+export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'preparing' | 'finishing' | 'starting' | 'listening' | 'error';
 
 type RecognitionResult = {
   readonly isFinal: boolean;
@@ -27,10 +27,18 @@ export type SpeechRecognitionSnapshot = {
   finalTranscript: string;
   interimTranscript: string;
   isAudioActive: boolean;
+  hasReceivedTranscript: boolean;
   error: string | null;
   errorCode: string | null;
   errorDetail: string | null;
 };
+
+type RecognitionOptions = {
+  naturalEnd?: boolean;
+  prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
+  usage?: { started: boolean };
+};
+const documentRecognitionUsage = { started: false };
 
 const recognitionErrorMessage = (code?: string, detail = '') => {
   switch (code) {
@@ -61,11 +69,12 @@ const recognitionErrorMessage = (code?: string, detail = '') => {
 // blocked until an explicit tap; an `end` event must not erase the error.
 export const createSpeechRecognitionSession = (
   Constructor: SpeechRecognitionConstructor | null,
-  onChange: (snapshot: SpeechRecognitionSnapshot) => void
+  onChange: (snapshot: SpeechRecognitionSnapshot) => void,
+  options: RecognitionOptions = {}
 ) => {
   let snapshot: SpeechRecognitionSnapshot = {
     status: Constructor ? 'idle' : 'unsupported', transcript: '', finalTranscript: '',
-    interimTranscript: '', isAudioActive: false, error: null, errorCode: null, errorDetail: null,
+    interimTranscript: '', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null,
   };
   let recognition: SpeechRecognitionHandle | null = null;
   let enabled = false;
@@ -77,6 +86,14 @@ export const createSpeechRecognitionSession = (
   let latestResults: { readonly length: number; [index: number]: RecognitionResult | undefined } = { length: 0 };
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let startTimer: ReturnType<typeof setTimeout> | null = null;
+  let evidenceTimer: ReturnType<typeof setTimeout> | null = null;
+  const usage = options.usage || documentRecognitionUsage;
+  let needsCue = Boolean(options.naturalEnd && usage.started);
+  let closingForChange = false;
+  let preparing = false;
+  let preparationVersion = 0;
+  let cancelPreparation: (() => void) | null = null;
+  const endWaiters = new Set<(ended: boolean) => void>();
 
   const update = (change: Partial<SpeechRecognitionSnapshot>) => {
     snapshot = { ...snapshot, ...change };
@@ -88,45 +105,84 @@ export const createSpeechRecognitionSession = (
     restartTimer = null;
     startTimer = null;
   };
-  const detach = () => {
+  const cancelCue = () => {
+    preparationVersion += 1; preparing = false;
+    const cancel = cancelPreparation; cancelPreparation = null; cancel?.();
+  };
+  const clearEvidence = () => {
+    if (evidenceTimer !== null) clearTimeout(evidenceTimer);
+    evidenceTimer = null;
+  };
+  const finishWaiters = () => { [...endWaiters].forEach((finish) => finish(true)); };
+  const detach = (abort = true) => {
     clearTimers();
     const previous = recognition;
     recognition = null;
     if (!previous) return;
     previous.onstart = previous.onaudiostart = previous.onaudioend = previous.onend = null;
     previous.onerror = previous.onresult = null;
-    try { previous.abort(); } catch { /* Already stopped. */ }
+    if (abort) { try { previous.abort(); } catch { /* Already stopped. */ } }
+    finishWaiters();
   };
   const fail = (message: string, code: string | null = null, detail: string | null = null) => {
     blocked = true;
-    detach();
+    clearEvidence(); cancelCue();
+    if (options.naturalEnd && recognition) {
+      clearTimers(); closingForChange = true;
+    } else detach();
     update({ status: 'error', isAudioActive: false, error: message, errorCode: code, errorDetail: detail });
   };
   const resetTranscript = () => {
     committedTranscript = '';
     ignoredResultCount = latestResults.length;
-    update({ transcript: '', finalTranscript: '', interimTranscript: '' });
+    update({ transcript: '', finalTranscript: '', interimTranscript: '', hasReceivedTranscript: false });
+  };
+  const armEvidence = () => {
+    if (!options.naturalEnd || evidenceTimer !== null || !enabled || blocked) return;
+    evidenceTimer = setTimeout(() => {
+      evidenceTimer = null;
+      fail('Safari ha abierto la escucha, pero no ha entregado palabras. Pulsa Reintentar escucha y di «prueba de micro».', 'no-recognition-results');
+    }, 20000);
   };
   const start = () => {
-    if (!Constructor || !enabled || blocked || recognition) return;
+    if (!Constructor || !enabled || blocked || recognition || preparing) return;
+    if (options.naturalEnd && needsCue && options.prepareRestart) {
+      const version = ++preparationVersion;
+      preparing = true;
+      update({ status: 'preparing', isAudioActive: false });
+      const cancel = options.prepareRestart({
+        onDone: () => {
+          if (version !== preparationVersion || !enabled || blocked) return;
+          preparing = false; cancelPreparation = null; needsCue = false; start();
+        },
+        onError: (error) => {
+          if (version !== preparationVersion || !enabled) return;
+          fail('No se pudo preparar la escucha. Pulsa Reintentar escucha.', 'recognition-cue-error', error.message);
+        },
+      });
+      if (preparing && version === preparationVersion) cancelPreparation = cancel;
+      return;
+    }
     clearTimers();
+    armEvidence();
     ignoredResultCount = 0;
     latestResults = { length: 0 };
     let current: SpeechRecognitionHandle;
     try {
       current = new Constructor();
       recognition = current;
-      current.continuous = true;
+      current.continuous = !options.naturalEnd;
       current.interimResults = true;
       current.lang = language;
       current.maxAlternatives = 1;
       let hadAudioInput = false;
-      update({ status: 'starting', isAudioActive: false, error: null, errorCode: null, errorDetail: null });
+      closingForChange = false;
+      update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null });
       current.onstart = () => {
-        if (recognition === current) update({ status: 'listening' });
+        if (recognition === current && enabled && !blocked && !closingForChange) update({ status: 'listening' });
       };
       current.onaudiostart = () => {
-        if (recognition !== current) return;
+        if (recognition !== current || !enabled || blocked || closingForChange) return;
         hadAudioInput = true;
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
@@ -136,11 +192,11 @@ export const createSpeechRecognitionSession = (
         if (recognition === current) update({ isAudioActive: false });
       };
       current.onerror = (event) => {
-        if (recognition !== current || event.error === 'no-speech') return;
+        if (recognition !== current || !enabled || closingForChange || event.error === 'no-speech') return;
         fail(recognitionErrorMessage(event.error, event.message), event.error ?? null, event.message?.trim() || null);
       };
       current.onresult = (event) => {
-        if (recognition !== current) return;
+        if (recognition !== current || !enabled || blocked || closingForChange) return;
         hadAudioInput = true;
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
@@ -155,21 +211,32 @@ export const createSpeechRecognitionSession = (
           all.push(text);
           (result?.isFinal ? finals : interims).push(text);
         }
+        if (all.length) clearEvidence();
         update({
           status: 'listening', isAudioActive: true, error: null,
           transcript: [committedTranscript, ...all].filter(Boolean).join(' '),
           finalTranscript: [committedTranscript, ...finals].filter(Boolean).join(' '),
           interimTranscript: interims.join(' '),
+          hasReceivedTranscript: all.length > 0,
         });
       };
       current.onend = () => {
         if (recognition !== current) return;
+        if (options.naturalEnd) {
+          // Calling abort() even after a normal end can poison later iOS runs.
+          committedTranscript = snapshot.transcript;
+          detach(false); closingForChange = false; needsCue = true;
+          if (blocked) return;
+          update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false });
+          if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(); }, 250);
+          return;
+        }
         if (!hadAudioInput) {
           fail('El reconocimiento terminó sin abrir el micrófono. Pulsa Activar micrófono para iniciar la escucha.');
           return;
         }
         committedTranscript = snapshot.transcript;
-        detach();
+        detach(false);
         update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false });
         if (enabled && !blocked) {
           restartTimer = setTimeout(() => { restartTimer = null; start(); }, 250);
@@ -179,6 +246,7 @@ export const createSpeechRecognitionSession = (
       startTimer = setTimeout(() => {
         if (recognition === current) fail('El reconocimiento no ha abierto el micrófono. Pulsa Activar micrófono para iniciar la escucha.');
       }, 15000);
+      usage.started = true;
       current.start();
     } catch (error) {
       const code = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
@@ -188,6 +256,12 @@ export const createSpeechRecognitionSession = (
   };
   const stop = () => {
     enabled = false;
+    clearEvidence(); cancelCue();
+    if (options.naturalEnd && recognition) {
+      clearTimers(); closingForChange = true;
+      update({ status: blocked ? 'error' : 'finishing' });
+      return;
+    }
     detach();
     update({ status: blocked ? 'error' : Constructor ? 'idle' : 'unsupported', isAudioActive: false });
   };
@@ -196,13 +270,18 @@ export const createSpeechRecognitionSession = (
     // The ordinary Start button can open the real recognizer immediately.
     // Volume calibration is not evidence that this separate service works.
     activate: (next: { lang: string; lineKey: string }) => {
-      detach();
+      cancelCue(); clearEvidence();
+      if (!options.naturalEnd) detach();
       enabled = true;
       blocked = false;
       language = next.lang;
       lineKey = next.lineKey;
       latestResults = { length: 0 };
       resetTranscript();
+      armEvidence();
+      if (options.naturalEnd && recognition) {
+        closingForChange = true; needsCue = true; update({ status: 'finishing' }); return;
+      }
       start();
     },
     configure: (next: { enabled: boolean; lang: string; lineKey: string | null }) => {
@@ -214,10 +293,16 @@ export const createSpeechRecognitionSession = (
       // result index can hide the first words of the actor's next turn.
       const hadPartialResult = Array.from({ length: latestResults.length }, (_, index) => latestResults[index])
         .some((result) => result && !result.isFinal);
-      if (lineChanged) resetTranscript();
+      if (lineChanged) { resetTranscript(); clearEvidence(); }
       if (!next.enabled || !next.lineKey) { stop(); return; }
       enabled = true;
-      if (languageChanged || (lineChanged && hadPartialResult)) detach();
+      armEvidence();
+      if (languageChanged || (lineChanged && hadPartialResult)) {
+        if (options.naturalEnd && recognition) {
+          closingForChange = true; update({ status: 'finishing' }); return;
+        }
+        detach();
+      }
       start();
     },
     // Called directly in the tap handler, before any promise or timer, so the
@@ -225,13 +310,28 @@ export const createSpeechRecognitionSession = (
     restart: () => {
       if (!enabled) return;
       blocked = false;
+      cancelCue(); clearEvidence();
+      if (options.naturalEnd && recognition) {
+        closingForChange = true; needsCue = true;
+        resetTranscript(); armEvidence(); update({ status: 'finishing' }); return;
+      }
       detach();
       latestResults = { length: 0 };
       resetTranscript();
+      armEvidence();
       start();
     },
     resetTranscript,
     stop,
-    dispose: () => { enabled = false; detach(); },
+    waitForEnd: () => {
+      if (!recognition) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        const finish = (ended: boolean) => { clearTimeout(timeout); endWaiters.delete(finish); resolve(ended); };
+        const timeout = setTimeout(() => finish(false), 12000);
+        endWaiters.add(finish);
+      });
+    },
+    notifyPlaybackEnd: () => { if (!recognition) needsCue = false; },
+    dispose: () => { enabled = false; clearEvidence(); cancelCue(); detach(); },
   };
 };

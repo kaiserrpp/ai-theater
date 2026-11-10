@@ -4,6 +4,8 @@ import {
   type SpeechRecognitionConstructor,
   type SpeechRecognitionSnapshot,
 } from '../utils/speechRecognitionSession';
+import { needsNaturalRecognitionEnd } from '../utils/speechRecognitionCompatibility';
+import { prepareRecognitionRestart } from '../utils/rehearsalSpeech';
 
 type UseSpeechRecognitionOptions = {
   enabled: boolean;
@@ -22,11 +24,14 @@ const getSpeechRecognitionConstructor = () => {
 
 export const useSpeechRecognition = ({ enabled, lang, lineKey }: UseSpeechRecognitionOptions) => {
   const Constructor = useMemo(getSpeechRecognitionConstructor, []);
+  const naturalEnd = useMemo(() => needsNaturalRecognitionEnd(typeof navigator === 'undefined' ? null : navigator), []);
   const [snapshot, setSnapshot] = useState<SpeechRecognitionSnapshot>({
     status: Constructor ? 'idle' : 'unsupported', transcript: '', finalTranscript: '',
-    interimTranscript: '', isAudioActive: false, error: null, errorCode: null, errorDetail: null,
+    interimTranscript: '', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null,
   });
-  const session = useMemo(() => createSpeechRecognitionSession(Constructor, setSnapshot), [Constructor]);
+  const session = useMemo(() => createSpeechRecognitionSession(Constructor, setSnapshot, {
+    naturalEnd, prepareRestart: prepareRecognitionRestart,
+  }), [Constructor, naturalEnd]);
 
   useEffect(() => {
     session.configure({ enabled, lang, lineKey });
@@ -41,5 +46,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey }: UseSpeechRecogn
     activateRecognition: session.activate,
     restartRecognition: session.restart,
     stopRecognition: session.stop,
+    waitForRecognitionEnd: session.waitForEnd,
+    notifyRecognitionPlaybackEnd: session.notifyPlaybackEnd,
   };
 };

@@ -1,5 +1,6 @@
 import type { MicrophoneCalibrationSnapshot } from '../hooks/useSilenceAdvance';
 import type { ListenPreference } from './rehearsalPreferences';
+import { hasRecognizedMicrophoneCheck } from './speechRecognitionCompatibility';
 
 export interface RehearsalPreparationSnapshot {
   readonly speakerConfirmed: boolean;
@@ -33,8 +34,8 @@ export const createRehearsalPreparationSession = () => {
         !Number.isFinite(calibration.voiceThreshold) || calibration.voiceThreshold <= 0) return;
       update({ ...snapshot, calibration: Object.freeze({ ...calibration }) });
     },
-    confirmRecognitionOutput: () => {
-      if (snapshot.speakerConfirmed && snapshot.calibration) {
+    confirmRecognitionOutput: (heardText = '') => {
+      if (snapshot.speakerConfirmed && snapshot.calibration && hasRecognizedMicrophoneCheck(heardText)) {
         update({ ...snapshot, recognitionOutputConfirmed: true });
       }
     },

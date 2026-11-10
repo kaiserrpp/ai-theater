@@ -65,7 +65,10 @@ test('six intelligent rehearsals reuse output checks but require a new real audi
     handles.at(-1).onaudiostart();
     if (rehearsal === 0) {
       assert.equal(canStart('intelligent', evidence(session, recognition)), false);
-      session.confirmRecognitionOutput();
+      session.confirmRecognitionOutput('');
+      assert.equal(session.getSnapshot().recognitionOutputConfirmed, false);
+      handles.at(-1).onresult({ results: [{ isFinal: true, 0: { transcript: 'Prueba de micro' } }] });
+      session.confirmRecognitionOutput(recognition.getSnapshot().transcript);
     }
     assert.equal(canStart('intelligent', evidence(session, recognition)), true);
     recognition.dispose();
@@ -103,7 +106,7 @@ test('repeat clears every check; a newly opened app starts with no prior evidenc
   const session = createSession();
   const updates = [];
   const unsubscribe = session.subscribe(() => updates.push(session.getSnapshot()));
-  session.confirmSpeaker(); session.rememberCalibration(calibration); session.confirmRecognitionOutput();
+  session.confirmSpeaker(); session.rememberCalibration(calibration); session.confirmRecognitionOutput('prueba de micro');
   const confirmed = session.getSnapshot();
   session.reset();
   assert.equal(nextStep('manual', session.getSnapshot()), 'speaker');
@@ -119,7 +122,7 @@ test('repeat clears every check; a newly opened app starts with no prior evidenc
 
 test('a denied recognition session cannot use prior checks to pretend audio is live', () => {
   const session = createSession();
-  session.confirmSpeaker(); session.rememberCalibration(calibration); session.confirmRecognitionOutput();
+  session.confirmSpeaker(); session.rememberCalibration(calibration); session.confirmRecognitionOutput('prueba de micro');
   let handle;
   class Recognition {
     constructor() { handle = this; }

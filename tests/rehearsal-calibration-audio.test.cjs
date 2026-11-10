@@ -14,7 +14,7 @@ Module._load = function (name, ...args) {
 };
 const { playCalibrationVoice: voice, playCalibrationBeep: beep,
   primeRehearsalAudioPlayer: prime } = require('../src/utils/rehearsalCalibrationAudio.ts');
-const { speakRehearsalSpeech: speak, stopRehearsalSpeech: stop } = require('../src/utils/rehearsalSpeech.ts');
+const { speakRehearsalSpeech: speak, stopRehearsalSpeech: stop, prepareRecognitionRestart } = require('../src/utils/rehearsalSpeech.ts');
 Module._load = previousLoad;
 if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
@@ -180,4 +180,17 @@ test('a speech startup timeout retries once and then reports one actionable erro
   t.mock.timers.tick(1800);
   t.mock.timers.tick(10000);
   assert.deepEqual(errors, ['speech-start-timeout']);
+});
+
+test('cancelling an old recognition cue cannot interrupt the next actor speech', (t) => {
+  const { utterances } = speechBrowser(t);
+  let ready = 0;
+  const cancel = prepareRecognitionRestart({ onDone: () => { ready += 1; }, onError() {} });
+  const oldDone = utterances[0].onend;
+  speak('La frase del compañero.', {});
+  cancel();
+  oldDone();
+  assert.equal(ready, 0);
+  assert.equal(typeof utterances[1].onstart, 'function');
+  utterances[1].onstart();
 });

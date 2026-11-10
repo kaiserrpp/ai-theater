@@ -182,3 +182,9 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
 
   attemptSpeak(0);
 };
+
+export const prepareRecognitionRestart = (callbacks: { onDone: () => void; onError: (error: Error) => void }) => {
+  speakRehearsalSpeech('Te escucho.', callbacks);
+  const cueRun = speechRun;
+  return () => { if (speechRun === cueRun) stopRehearsalSpeech(); };
+};
