@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.11.203",
+  "version": "2026.11.204",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
     "version:bump": "node increment-version.js",

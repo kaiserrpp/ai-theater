@@ -47,7 +47,7 @@ import {
   isNextLineCommand,
   scoreLineMatch,
 } from '../utils/lineMatching';
-import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
+import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getAutomaticRehearsalTargetIndex, isSceneAdvanceCommand, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
@@ -1931,7 +1931,6 @@ export const RehearsalView: React.FC<Props> = ({
     stopStandaloneSongAudio();
     let isCancelled = false;
     let advanceTimeout: ReturnType<typeof setTimeout> | null = null;
-    let speechStartTimeout: ReturnType<typeof setTimeout> | null = null;
 
     if (isFinished || !currentLine || isSceneMarker(currentLine) || isSongCue(currentLine) || isMyTurn) {
       return () => {
@@ -1962,6 +1961,27 @@ export const RehearsalView: React.FC<Props> = ({
       return;
     }
 
+    const requestedAt = Date.now();
+    let inputReadyAt = requestedAt;
+    let speechRequestedAt = requestedAt;
+    const preparedSpeech = prepareRehearsalSpeech(speakableLineText, {
+      onStart: () => {
+        if (isCancelled) return;
+        setSpeechStatusMessage(
+          `Reproduciendo la linea. Cierre de micro: ${inputReadyAt - requestedAt} ms. Inicio de voz: ${Date.now() - speechRequestedAt} ms.`
+        );
+      },
+      onDone: () => {
+        if (isCancelled) return;
+        notifyRecognitionPlaybackEnd();
+        setSpeechStatusMessage('Linea reproducida. Avanzando...');
+        advanceTimeout = setTimeout(advanceLine, APP_LINE_ADVANCE_DELAY_MS);
+      },
+      onError: (error) => {
+        if (!isCancelled) setSpeechStatusMessage(`Siri ha fallado al reproducir esta linea (${error.message}).`);
+      },
+    });
+
     const playOtherLine = async () => {
       stopRecognition();
       if (!await waitForRecognitionEnd()) {
@@ -1976,43 +1996,11 @@ export const RehearsalView: React.FC<Props> = ({
         }
       }
 
-      const speechDelayMs = temporarilySuspendingAutoListen ? 0 : autoListenEnabled ? 120 : 0;
-      setSpeechStatusMessage(
-        temporarilySuspendingAutoListen || autoListenEnabled
-          ? 'Micro liberado. Preparando la voz de Siri para la siguiente linea...'
-          : 'Preparando la voz de Siri para la siguiente linea...'
-      );
-
-      speechStartTimeout = setTimeout(() => {
-        if (isCancelled || !isPageVisible()) return;
-        setSpeechStatusMessage('Lanzando la linea con Siri...');
-        const speechRate = getAdaptiveRehearsalSpeechRate();
-        speakRehearsalSpeech(speakableLineText, {
-          rate: speechRate,
-          onStart: () => {
-            if (isCancelled) {
-              return;
-            }
-            setSpeechStatusMessage('Reproduciendo la linea con Siri...');
-          },
-          onDone: () => {
-            if (isCancelled) {
-              return;
-            }
-            notifyRecognitionPlaybackEnd();
-            setSpeechStatusMessage('Linea reproducida. Avanzando...');
-            advanceTimeout = setTimeout(advanceLine, APP_LINE_ADVANCE_DELAY_MS);
-          },
-          onError: (error) => {
-            if (isCancelled) {
-              return;
-            }
-            setSpeechStatusMessage(
-              `Siri ha fallado al reproducir esta linea (${error.message}).`
-            );
-          },
-        });
-      }, speechDelayMs);
+      if (isCancelled || !isPageVisible()) return;
+      inputReadyAt = Date.now();
+      setSpeechStatusMessage(`Micro liberado en ${inputReadyAt - requestedAt} ms. Lanzando la linea...`);
+      speechRequestedAt = Date.now();
+      preparedSpeech.start(getAdaptiveRehearsalSpeechRate());
     };
 
     void playOtherLine();
@@ -2022,11 +2010,8 @@ export const RehearsalView: React.FC<Props> = ({
       if (advanceTimeout) {
         clearTimeout(advanceTimeout);
       }
-      if (speechStartTimeout) {
-        clearTimeout(speechStartTimeout);
-      }
       void stopListening();
-      stopRehearsalSpeech();
+      preparedSpeech.cancel();
       stopStandaloneSongAudio();
     };
   }, [

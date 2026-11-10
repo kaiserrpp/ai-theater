@@ -7,6 +7,11 @@ type SpeechCallbacks = {
   rate?: number;
 };
 
+type PreparedSpeech = {
+  start: (rate?: number) => void;
+  cancel: () => void;
+};
+
 type WindowWithSpeech = Window & typeof globalThis & {
   speechSynthesis?: SpeechSynthesis;
   SpeechSynthesisUtterance?: typeof SpeechSynthesisUtterance;
@@ -66,6 +71,7 @@ const getPreferredVoice = (synth: SpeechSynthesis) => {
 };
 
 export const stopRehearsalSpeech = () => {
+  const hadUtterance = activeUtterance !== null;
   speechRun += 1;
   clearSpeechTimers();
   detachUtterance();
@@ -73,7 +79,9 @@ export const stopRehearsalSpeech = () => {
   if (typeof window !== 'undefined') {
     const synth = getSpeechSynthesisHandle();
     if (synth) {
-      synth.cancel();
+      // Completed utterances already released their ownership. Resetting an
+      // idle engine in every effect cleanup/start adds work between replicas.
+      if (hadUtterance || synth.pending || synth.speaking) synth.cancel();
       return;
     }
   }
@@ -81,38 +89,54 @@ export const stopRehearsalSpeech = () => {
   void Speech.stop();
 };
 
-export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) => {
-  const speechRate = callbacks.rate ?? 0.96;
+// Construct/select the voice while recognition is closing, without playing
+// anything or touching its audio session. start() is called only after input
+// has ended; calibration can still call the wrapper directly in its tap.
+export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks): PreparedSpeech => {
+  let speechRate = callbacks.rate ?? 0.96;
+  let launched = false;
+  let finished = false;
+  let cancelled = false;
+  let run: number | null = null;
 
   if (typeof window === 'undefined') {
-    Speech.speak(text, {
-      language: 'es-ES',
-      rate: speechRate,
-      onStart: callbacks.onStart,
-      onDone: callbacks.onDone,
-      onError: (error) => callbacks.onError?.(error instanceof Error ? error : new Error('speech-error')),
-    });
-    return;
+    return {
+      start: (rate = speechRate) => {
+        if (launched || cancelled) return;
+        run = ++speechRun;
+        launched = true;
+        Speech.speak(text, {
+          language: 'es-ES', rate,
+          onStart: () => { if (!cancelled && speechRun === run) callbacks.onStart?.(); },
+          onDone: () => { finished = true; if (!cancelled && speechRun === run) callbacks.onDone?.(); },
+          onError: (error) => {
+            finished = true;
+            if (!cancelled && speechRun === run) callbacks.onError?.(error instanceof Error ? error : new Error('speech-error'));
+          },
+        });
+      },
+      cancel: () => { cancelled = true; if (launched && !finished && speechRun === run) stopRehearsalSpeech(); },
+    };
   }
 
   const synth = getSpeechSynthesisHandle();
   const Utterance = getUtteranceConstructor();
 
   if (!synth || !Utterance) {
-    callbacks.onError?.(new Error('speech-synthesis-unavailable'));
-    return;
+    return {
+      start: () => {
+        if (launched || cancelled) return;
+        launched = true;
+        callbacks.onError?.(new Error('speech-synthesis-unavailable'));
+      },
+      cancel: () => { cancelled = true; },
+    };
   }
 
-  stopRehearsalSpeech();
-  const run = speechRun;
-  let finished = false;
-  const isCurrent = () => speechRun === run && !finished;
+  const isCurrent = () => launched && speechRun === run && !finished && !cancelled;
 
-  const attemptSpeak = (attempt: number) => {
-    if (!isCurrent()) return;
-    let started = false;
+  const createUtterance = () => {
     const utterance = new Utterance(text);
-    activeUtterance = utterance;
     utterance.lang = 'es-ES';
     utterance.rate = speechRate;
     utterance.pitch = 1;
@@ -123,6 +147,16 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
       utterance.voice = preferredVoice;
       utterance.lang = preferredVoice.lang || 'es-ES';
     }
+    return utterance;
+  };
+  const preparedUtterance = createUtterance();
+
+  const attemptSpeak = (attempt: number) => {
+    if (!isCurrent()) return;
+    let started = false;
+    const utterance = attempt === 0 ? preparedUtterance : createUtterance();
+    utterance.rate = speechRate;
+    activeUtterance = utterance;
 
     utterance.onstart = () => {
       if (!isCurrent()) return;
@@ -175,13 +209,28 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
       callbacks.onError?.(new Error('speech-start-timeout'));
     }, 1800);
 
-    synth.cancel();
     synth.resume();
     synth.speak(utterance);
   };
 
-  attemptSpeak(0);
+  return {
+    start: (rate = speechRate) => {
+      if (launched || cancelled) return;
+      speechRate = rate;
+      stopRehearsalSpeech();
+      run = speechRun;
+      launched = true;
+      attemptSpeak(0);
+    },
+    cancel: () => {
+      cancelled = true;
+      if (launched && speechRun === run) stopRehearsalSpeech();
+    },
+  };
 };
+
+export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =>
+  prepareRehearsalSpeech(text, callbacks).start();
 
 export const prepareRecognitionRestart = (callbacks: { onDone: () => void; onError: (error: Error) => void }) => {
   speakRehearsalSpeech('Te escucho.', callbacks);
