@@ -6,7 +6,7 @@ const previousLoader = require.extensions['.ts'];
 require.extensions['.ts'] = (loadedModule, filename) => loadedModule._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, filename);
-const { scoreLineMatch, getAutomaticLineAdvanceDelay: advanceDelay, getAutomaticLineMatchReason: reason } = require('../src/utils/lineMatching.ts');
+const { normalizeSpeechText, scoreLineMatch, getAutomaticLineAdvanceDelay: advanceDelay, getAutomaticLineMatchReason: reason } = require('../src/utils/lineMatching.ts');
 if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
 
@@ -52,4 +52,30 @@ test('a repeated closing phrase or a negation mismatch cannot trigger the new in
 test('accepted variants still use their own ending for prompt advancement', () => {
   const variant = 'Cada mañana preparo todo y mis vecinos pasan a comprar antes del trabajo.';
   assert.equal(delay(expected, variant, variant, [variant]), 60);
+});
+
+test('the actual Usnavi screenshot advances despite ASR spelling, tense and one extra name', () => {
+  const reference = 'Abuela, que pasó? Porque gritas? Pasó algo malo?';
+  const heard = 'Abuela qué pasó por qué gritas pasa algo malo Philip';
+  const match = scoreLineMatch(reference, heard);
+  assert.equal(reason(reference, heard, match), 'global_score');
+  assert.equal(advanceDelay(reference, heard, heard, match), 60);
+  assert.equal(advanceDelay(reference, heard, '', match), 0);
+});
+
+test('because/why orthography cannot distinguish otherwise identical spoken Spanish', () => {
+  for (const text of ['¿Por qué gritas?', 'Porque gritas', 'Porqué gritas', 'Por que gritas']) {
+    assert.equal(normalizeSpeechText(text), normalizeSpeechText('porque gritas'));
+  }
+  assert.equal(delay('No voy porque gritas', 'No voy por qué gritas', ''), 0);
+  // Preserve the existing longer phrase equivalence before joining por + que.
+  assert.equal(delay('¿Por qué no nos vamos?', '¿Qué os parece si nos vamos?', ''), 0);
+});
+
+test('normalizing why does not advance Usnavi at the first question or unrelated speech', () => {
+  const reference = 'Abuela, que pasó? Porque gritas? Pasó algo malo?';
+  for (const heard of ['Abuela qué pasó', 'Abuela qué pasó por qué gritas', 'No grites porque todavía estoy hablando']) {
+    assert.equal(delay(reference, heard), null);
+    assert.equal(delay(reference, heard, ''), null);
+  }
 });

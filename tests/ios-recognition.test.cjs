@@ -9,12 +9,14 @@ require.extensions['.ts'] = (loadedModule, filename) => loadedModule._compile(ts
 const { createSpeechRecognitionSession: createSession } = require('../src/utils/speechRecognitionSession.ts');
 const { needsNaturalRecognitionEnd: naturalEnd, hasRecognizedMicrophoneCheck: verified } = require('../src/utils/speechRecognitionCompatibility.ts');
 const { createRehearsalPreparationSession } = require('../src/utils/rehearsalPreparationSession.ts');
+const { scoreLineMatch, getAutomaticLineAdvanceDelay: advanceDelay } = require('../src/utils/lineMatching.ts');
 if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
 
 const options = (overrides = {}) => ({ enabled: true, lang: 'es-ES', lineKey: 'my-line-1', ...overrides });
 const result = (text, isFinal = true) => ({ isFinal, 0: { transcript: text } });
 const fixture = (t, extra = {}) => {
+  const { onChange = () => {}, ...sessionOptions } = extra;
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const handles = [];
   const cues = [];
@@ -34,7 +36,7 @@ const fixture = (t, extra = {}) => {
       if (delivery === 'error') this.onerror?.({ error: 'aborted', message: 'Page is no longer visible' });
     }
   }
-  const session = createSession(Recognition, () => {}, {
+  const session = createSession(Recognition, onChange, {
     naturalEnd: true, usage: { started: false },
     prepareRestart: (callbacks) => {
       // A speech prompt with a live recognizer reproduces another failure
@@ -44,7 +46,7 @@ const fixture = (t, extra = {}) => {
       cues.push(cue);
       return () => { cue.cancelled = true; };
     },
-    ...extra,
+    ...sessionOptions,
   });
   t.after(() => session.dispose());
   return { session, handles, cues, poisoned: () => poisoned };
@@ -296,4 +298,73 @@ test('an initially hidden page cannot start recognition until it is shown', (t) 
   assert.equal(f.handles.length, 1);
   f.handles[0].receive('Hola');
   assert.equal(f.session.getSnapshot().transcript, 'Hola');
+});
+
+test('the photographed complete Usnavi turn advances before the restart cue instead of waiting for more words', async (t) => {
+  const reference = 'Abuela, que pasó? Porque gritas? Pasó algo malo?';
+  const heard = 'Abuela qué pasó por qué gritas pasa algo malo Philip';
+  let advances = 0;
+  let pending = null;
+  const f = fixture(t, { onChange: (snapshot) => {
+    if (advances) return;
+    if (pending !== null) clearTimeout(pending);
+    const delay = advanceDelay(reference, snapshot.transcript, snapshot.interimTranscript,
+      scoreLineMatch(reference, snapshot.transcript));
+    if (delay !== null) pending = setTimeout(() => {
+      advances += 1; f.session.stop();
+    }, delay);
+  } });
+  f.session.configure(options());
+  f.handles[0].receive(heard, false);
+  f.handles[0].end();
+  t.mock.timers.tick(250);
+  assert.equal(advances, 1);
+  assert.equal(f.cues.length, 0);
+  assert.equal(f.handles.length, 1);
+  assert.equal(await f.session.waitForEnd(), true);
+  f.session.notifyPlaybackEnd();
+  f.session.configure(options({ lineKey: 'next-actor-turn' }));
+  assert.equal(f.handles.length, 2);
+  assert.equal(f.cues.length, 0);
+  assert.equal(f.poisoned(), false);
+});
+
+test('natural end settles the last provisional words so a complete ending is evaluated before restarting', (t) => {
+  const reference = 'Cada mañana abro la tienda, preparo el café y reviso todos los encargos antes de que mis vecinos salgan hacia el trabajo.';
+  const heard = 'Siempre preparo un café y reviso los encargos antes de que mis vecinos salgan hacia el trabajo Philip';
+  const f = fixture(t);
+  f.session.configure(options());
+  f.handles[0].receive(heard, false);
+  const partial = f.session.getSnapshot();
+  assert.equal(advanceDelay(reference, partial.transcript, partial.interimTranscript,
+    scoreLineMatch(reference, partial.transcript)), null);
+  f.handles[0].end();
+  const settled = f.session.getSnapshot();
+  assert.equal(settled.transcript, heard);
+  assert.equal(settled.finalTranscript, heard);
+  assert.equal(settled.interimTranscript, '');
+  assert.equal(advanceDelay(reference, settled.transcript, settled.interimTranscript,
+    scoreLineMatch(reference, settled.transcript)), 0);
+  f.session.stop();
+  t.mock.timers.tick(250);
+  assert.equal(f.cues.length, 0);
+});
+
+test('a real pause before finishing the replica still resumes listening instead of skipping the remaining words', (t) => {
+  const reference = 'Abuela, que pasó? Porque gritas? Pasó algo malo?';
+  const f = fixture(t);
+  f.session.configure(options());
+  f.handles[0].receive('Abuela qué pasó', false);
+  f.handles[0].end();
+  const settled = f.session.getSnapshot();
+  assert.equal(advanceDelay(reference, settled.transcript, settled.interimTranscript,
+    scoreLineMatch(reference, settled.transcript)), null);
+  t.mock.timers.tick(250);
+  assert.equal(f.cues.length, 1);
+  f.cues[0].onDone();
+  f.handles[1].receive('Por qué gritas pasó algo malo');
+  const completed = f.session.getSnapshot();
+  assert.notEqual(advanceDelay(reference, completed.transcript, completed.interimTranscript,
+    scoreLineMatch(reference, completed.transcript)), null);
+  assert.equal(f.poisoned(), false);
 });

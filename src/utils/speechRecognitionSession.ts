@@ -249,7 +249,11 @@ export const createSpeechRecognitionSession = (
           committedTranscript = snapshot.transcript;
           detach(false); closingForChange = false; needsCue = true;
           if (blocked) return;
-          update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false });
+          // Safari can end a one-shot session without marking its last result
+          // final. Those words can no longer change. Settle them now so the
+          // actor's completed line is evaluated before the restart cue runs.
+          update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false,
+            finalTranscript: committedTranscript, interimTranscript: '' });
           if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(); }, 250);
           return;
         }

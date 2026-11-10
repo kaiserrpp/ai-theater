@@ -292,6 +292,9 @@ const PHRASE_ALIASES: [RegExp, string][] = [
   [/\bvamos\s+a\s+la\s+huelga\b/g, ' hacemos huelga '],
   [/\bun\s+vete\s+a\s+dormir\b/g, ' vuelve dormir '],
   [/\bvete\s+a\s+dormir\b/g, ' vuelve dormir '],
+  // The recognizer chooses spelling and punctuation; these sound the same.
+  // Keep this after longer aliases such as "por que no nos".
+  [/\bpor\s+que\b/g, ' porque '],
 ];
 
 export const INTELLIGENT_AUTO_ADVANCE_THRESHOLD = 0.86;
