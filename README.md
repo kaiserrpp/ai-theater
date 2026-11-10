@@ -45,6 +45,10 @@ El modo inteligente es la opción inicial en navegadores con reconocimiento. Una
 
 La transcripción se muestra por defecto. **Mostrar transcripción** recuerda una desactivación expresa en este dispositivo; ocultarla no detiene la escucha ni la comprobación de palabras. Los detalles de coincidencia e informes quedan dentro de las opciones del micro. El ensayo ofrece controles inferiores de anterior, pausa/reanudar y siguiente.
 
+Al llegar a un cambio de escena, la app anuncia **Siguiente escena: [título]** y deja el título visible hasta que digas **adelante** o pulses **Siguiente escena**. Terminar el anuncio, guardar silencio o finalizar una canción no inicia la escena. La orden se escucha después del anuncio en los modos con micrófono y reconocimiento disponible; en manual se usa el botón.
+
+La calibración activa la voz y el audio desde el toque en **Empezar ensayo** o **Reintentar calibración**, también en audiciones sin canciones. Primero dice **Vamos a preparar el micrófono. Guarda silencio**; después mide el ruido, indica qué decir, reproduce el pitido y mide la voz. Un fallo o bloqueo de la voz o del pitido detiene la calibración con un mensaje específico para reintentar; no se continúa como si el audio hubiera sonado.
+
 ## Audiciones de escenas
 
 Cada obra compartida puede contener mini-guiones de audición independientes del guion completo.

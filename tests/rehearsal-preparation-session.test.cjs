@@ -26,6 +26,7 @@ test('one successful calibration and speaker check cover the first rehearsal and
   assert.equal(nextStep('auto', session.getSnapshot()), 'microphone');
   session.rememberCalibration(await calibrate({
     isCurrent: () => true,
+    prepareOutput: async () => { events.push('output'); },
     start: async () => { events.push('open'); },
     measureNoise: async () => { events.push('noise'); return calibration; },
     prompt: async () => { events.push('prompt'); },
@@ -43,7 +44,7 @@ test('one successful calibration and speaker check cover the first rehearsal and
     assert.equal(canStart('manual', evidence(session)), true);
     assert.deepEqual(session.getSnapshot().calibration, calibration);
   }
-  assert.deepEqual(events, ['open', 'noise', 'prompt', 'beep', 'voice', 'release']);
+  assert.deepEqual(events, ['output', 'open', 'noise', 'prompt', 'beep', 'voice', 'release']);
 });
 
 test('six intelligent rehearsals reuse output checks but require a new real audio-start event each time', () => {

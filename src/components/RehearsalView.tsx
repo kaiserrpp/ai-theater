@@ -11,6 +11,7 @@ import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
 import type { PracticePalette } from '../utils/appearance';
 import { resolveListenPreference, resolveTranscriptPreference, supportsRecognition } from '../utils/rehearsalPreferences';
 import { canBeginPreparedRehearsal, runRehearsalMicrophoneCalibration } from '../utils/rehearsalPreparation';
+import { playCalibrationBeep, playCalibrationVoice, primeRehearsalAudioPlayer } from '../utils/rehearsalCalibrationAudio';
 import { getRehearsalPreparationStep, rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
 import {
   INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX,
@@ -44,6 +45,7 @@ import {
   scoreLineMatch,
 } from '../utils/lineMatching';
 import { speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
+import { getAutomaticRehearsalTargetIndex, isSceneAdvanceCommand, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
 
@@ -122,11 +124,6 @@ const INTELLIGENT_FALSE_POSITIVE_ISSUES: {
     hint: 'Anota cualquier pista util para revisar el caso.',
   },
 ];
-
-const wait = (durationMs: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, durationMs);
-  });
 
 const createSessionId = () => {
   const randomPart =
@@ -487,6 +484,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [showMicrophoneMenu, setShowMicrophoneMenu] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [sceneCommandReadyKey, setSceneCommandReadyKey] = useState<string | null>(null);
+  const [sceneAnnouncementError, setSceneAnnouncementError] = useState<string | null>(null);
   const [preferenceNotice, setPreferenceNotice] = useState('');
   const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
@@ -694,6 +693,7 @@ export const RehearsalView: React.FC<Props> = ({
   );
   const canStartRehearsalAudio =
     !isPaused &&
+    !isSceneMarker(currentLine) &&
     hasConfirmedRehearsalSetup &&
     isRehearsalMediaReady &&
     hasCompletedRehearsalPreflight &&
@@ -759,6 +759,7 @@ export const RehearsalView: React.FC<Props> = ({
     : null;
   const currentDialogueKey =
     !isFinished && currentLine ? `${currentIndex}:${currentLine.p}:${currentLine.t}` : null;
+  const currentSceneTransitionKey = isSceneMarker(currentLine) ? currentDialogueKey : null;
   const currentLineVariantKey =
     !isFinished && currentLine && currentLineIndexInScript >= 0
       ? buildLineVariantKey(currentLineIndexInScript, currentLine.t)
@@ -768,6 +769,7 @@ export const RehearsalView: React.FC<Props> = ({
     [currentLineVariantKey, lineVariants]
   );
   const intelligentRecognitionLanguage = useMemo(() => {
+    if (isSceneMarker(filteredGuion[currentIndex])) return 'es-ES';
     const nextActorLine = filteredGuion.slice(currentIndex).find((line) =>
       !isSceneMarker(line) && !isSongCue(line) && lineMatchesRoles(line, myRoles)
     );
@@ -802,10 +804,16 @@ export const RehearsalView: React.FC<Props> = ({
     !isCurrentMusicalSongBlock &&
     isMyTurn &&
     speakableLineText.length > 0;
+  const shouldListenForSceneCommand =
+    canRunRehearsalLinePlayback &&
+    currentSceneTransitionKey !== null &&
+    sceneCommandReadyKey === currentSceneTransitionKey &&
+    (listenModeSelection === 'intelligent' || listenModeSelection === 'auto');
   const shouldKeepIntelligentRecognitionWarm =
     isCheckingIntelligentRecognition ||
     (isIntelligentListenMode && rehearsalPreflightPhase === 'recognition-audio-check') ||
     shouldUseIntelligentRecognition ||
+    shouldListenForSceneCommand ||
     (
       isMobileSpeechDevice &&
       isIntelligentListenMode &&
@@ -840,15 +848,9 @@ export const RehearsalView: React.FC<Props> = ({
 
   const advanceLine = useCallback(() => {
     setCurrentIndex((previousIndex) =>
-      previousIndex < filteredGuion.length ? previousIndex + 1 : previousIndex
+      getAutomaticRehearsalTargetIndex(filteredGuion, previousIndex)
     );
-  }, [filteredGuion.length]);
-
-  useEffect(() => {
-    if (!canRunRehearsalLinePlayback || !isSceneMarker(currentLine)) return;
-    const timer = setTimeout(advanceLine, 600);
-    return () => clearTimeout(timer);
-  }, [advanceLine, canRunRehearsalLinePlayback, currentLine]);
+  }, [filteredGuion]);
 
   const {
     listeningStatus,
@@ -880,6 +882,7 @@ export const RehearsalView: React.FC<Props> = ({
     isSupported: isSpeechRecognitionSupported,
     status: speechRecognitionStatus,
     transcript: speechRecognitionTranscript,
+    finalTranscript: speechRecognitionFinalTranscript,
     interimTranscript: speechRecognitionInterimTranscript,
     isAudioActive: isRecognitionAudioActive,
     error: speechRecognitionError,
@@ -894,6 +897,28 @@ export const RehearsalView: React.FC<Props> = ({
     lang: intelligentRecognitionLanguage,
     lineKey: recognitionLineKey,
   });
+
+  const startCurrentScene = useCallback(() => {
+    stopRehearsalSpeech();
+    resetSpeechRecognitionTranscript();
+    setSceneCommandReadyKey(null);
+    setCurrentIndex((previousIndex) =>
+      previousIndex === currentIndex && isSceneMarker(filteredGuion[previousIndex])
+        ? previousIndex + 1
+        : previousIndex
+    );
+  }, [currentIndex, filteredGuion, resetSpeechRecognitionTranscript]);
+
+  useEffect(() => {
+    if (!shouldListenForSceneCommand || !speechRecognitionFinalTranscript.trim()) return;
+    if (isSceneAdvanceCommand(speechRecognitionFinalTranscript)) {
+      startCurrentScene();
+    } else if (!speechRecognitionInterimTranscript.trim()) {
+      // Discard conversation while waiting, so a later "adelante" stands alone.
+      resetSpeechRecognitionTranscript();
+    }
+  }, [resetSpeechRecognitionTranscript, shouldListenForSceneCommand, speechRecognitionFinalTranscript,
+    speechRecognitionInterimTranscript, startCurrentScene]);
 
   const intelligentLineMatch = useMemo(
     () =>
@@ -1514,25 +1539,9 @@ export const RehearsalView: React.FC<Props> = ({
     }
 
     try {
-      player.pause();
-      player.currentTime = 0;
-      player.onended = null;
-      player.onerror = null;
-      player.muted = true;
-      player.src = silentObjectUrl;
-      player.load();
-      await prepareSongAudioOutput();
-      await player.play();
-      player.pause();
-      player.currentTime = 0;
-      player.removeAttribute('src');
-      player.load();
-      player.muted = false;
-      setIsSongPlaybackUnlocked(true);
-      return true;
-    } catch {
-      player.muted = false;
-      return false;
+      const unlocked = await primeRehearsalAudioPlayer(player, silentObjectUrl, prepareSongAudioOutput);
+      if (unlocked) setIsSongPlaybackUnlocked(true);
+      return unlocked;
     } finally {
       URL.revokeObjectURL(silentObjectUrl);
     }
@@ -1543,33 +1552,17 @@ export const RehearsalView: React.FC<Props> = ({
     const toneObjectUrl = createMicroCalibrationToneObjectUrl();
 
     if (!player || !toneObjectUrl) {
-      await wait(320);
-      return;
+      if (toneObjectUrl) URL.revokeObjectURL(toneObjectUrl);
+      throw new Error('calibration-beep-unavailable');
     }
 
-    await new Promise<void>((resolve) => {
-      let isResolved = false;
-
-      const finish = () => {
-        if (isResolved) {
-          return;
-        }
-        isResolved = true;
-        player.onended = null;
-        player.onerror = null;
-        URL.revokeObjectURL(toneObjectUrl);
-        resolve();
-      };
-
-      player.pause();
-      player.currentTime = 0;
-      player.src = toneObjectUrl;
-      player.onended = finish;
-      player.onerror = finish;
-      void player.play().catch(finish);
-      setTimeout(finish, 900);
-    });
-  }, [getSongAudioPlayer]);
+    try {
+      setSongAudioVolume(1);
+      await playCalibrationBeep(player, toneObjectUrl, prepareSongAudioOutput);
+    } finally {
+      URL.revokeObjectURL(toneObjectUrl);
+    }
+  }, [getSongAudioPlayer, prepareSongAudioOutput, setSongAudioVolume]);
 
   const goBackLine = useCallback(() => {
     stopRehearsalSpeech();
@@ -1910,7 +1903,7 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
-    if (!canRunRehearsalLinePlayback) {
+    if (!canRunRehearsalLinePlayback || isSceneMarker(currentLine)) {
       return;
     }
 
@@ -2024,6 +2017,28 @@ export const RehearsalView: React.FC<Props> = ({
     stopStandaloneSongAudio,
   ]);
 
+  useEffect(() => {
+    setSceneCommandReadyKey(null);
+    setSceneAnnouncementError(null);
+    if (!canRunRehearsalLinePlayback || !currentSceneTransitionKey || !currentLine) return;
+
+    stopRehearsalSpeech();
+    stopSongAudio();
+    resetSpeechRecognitionTranscript();
+    return startRehearsalSceneAnnouncement({
+      title: currentLine.t,
+      releaseInput: releaseListeningInput,
+      speak: speakRehearsalSpeech,
+      stop: stopRehearsalSpeech,
+      onReady: (error) => {
+        resetSpeechRecognitionTranscript();
+        setSceneAnnouncementError(error ? 'No se ha podido anunciar la escena por voz.' : null);
+        setSceneCommandReadyKey(currentSceneTransitionKey);
+      },
+    });
+  }, [canRunRehearsalLinePlayback, currentLine, currentSceneTransitionKey, releaseListeningInput,
+    resetSpeechRecognitionTranscript, stopSongAudio]);
+
   useEffect(() => () => {
     disposeSongAudio();
   }, [disposeSongAudio]);
@@ -2074,16 +2089,25 @@ export const RehearsalView: React.FC<Props> = ({
     setIsPreparingRehearsalMedia(true); setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false); setIsRehearsalMediaReady(false);
     setRehearsalPreflightPhase('micro-calibration'); setAutoListenEnabled(false);
+    setRehearsalMediaStatus('Escucha la indicación de la app. Después mediremos el ruido de fondo.');
     setSpeakerConfirmed(false); setMicrophoneCalibrated(false);
     resetMicrophoneCalibration();
     try {
       const result = await runRehearsalMicrophoneCalibration({
-        isCurrent, start: startListening, measureNoise: calibrateAmbientNoise,
-        prompt: () => new Promise<void>((resolve) => {
-          let finished = false;
-          const finish = () => { if (!finished) { finished = true; clearTimeout(timeout); resolve(); } };
-          const timeout = setTimeout(finish, 5200);
-          speakRehearsalSpeech('Di prueba de micro después del pitido.', { onDone: finish, onError: finish });
+        isCurrent,
+        prepareOutput: async () => {
+          // Unlock media and synthesis directly in Empezar/Reintentar, also in
+          // spoken-only auditions. Neither may wait for microphone permission.
+          const audioReady = primeSongPlayback();
+          const voiceReady = playCalibrationVoice('Vamos a preparar el micrófono. Guarda silencio.', {
+            speak: speakRehearsalSpeech, stop: () => { if (isCurrent()) stopRehearsalSpeech(); },
+          });
+          const [unlocked] = await Promise.all([audioReady, voiceReady]);
+          if (!unlocked) throw new Error('calibration-beep-unavailable');
+        },
+        start: startListening, measureNoise: calibrateAmbientNoise,
+        prompt: () => playCalibrationVoice('Di prueba de micro después del pitido.', {
+          speak: speakRehearsalSpeech, stop: () => { if (isCurrent()) stopRehearsalSpeech(); },
         }),
         beep: playMicroCalibrationBeep, measureVoice: () => calibrateVoiceLevel(2200),
         release: releaseListeningInput,
@@ -2105,13 +2129,18 @@ export const RehearsalView: React.FC<Props> = ({
         : 'Micro calibrado. Ahora pulsa Probar voz para comprobar el altavoz.');
     } catch (error) {
       if (!isCurrent()) return;
-      setRehearsalMediaStatus(error instanceof Error && error.message === 'voice-not-detected'
+      stopRehearsalSpeech();
+      setRehearsalMediaStatus(error instanceof Error && error.message === 'calibration-voice-unavailable'
+        ? 'No se ha podido reproducir la voz. Pulsa Reintentar calibración para activar el audio.'
+        : error instanceof Error && error.message === 'calibration-beep-unavailable'
+        ? 'No se ha podido reproducir el pitido. Pulsa Reintentar calibración para activar el audio.'
+        : error instanceof Error && error.message === 'voice-not-detected'
         ? 'No se ha detectado suficiente voz. Repite la calibración y habla después del pitido.'
         : 'No se pudo calibrar el micrófono. Comprueba el permiso del navegador y vuelve a intentarlo.');
     } finally {
       if (isCurrent()) setIsPreparingRehearsalMedia(false);
     }
-  }, [calibrateAmbientNoise, calibrateVoiceLevel, listenModeSelection, playMicroCalibrationBeep,
+  }, [calibrateAmbientNoise, calibrateVoiceLevel, listenModeSelection, playMicroCalibrationBeep, primeSongPlayback,
     releaseListeningInput, resetMicrophoneCalibration, startListening, stopRecognition, stopStandaloneSongAudio]);
 
   const advancePastMusicalNumber = useCallback((musicalNumberId: string | null) => {
@@ -2137,7 +2166,9 @@ export const RehearsalView: React.FC<Props> = ({
         (line) => guion.indexOf(line) > musicalNumber.endLineIndex
       );
 
-      return nextLineIndex >= 0 ? nextLineIndex : filteredGuion.length;
+      return getAutomaticRehearsalTargetIndex(
+        filteredGuion, previousIndex, nextLineIndex >= 0 ? nextLineIndex : filteredGuion.length
+      );
     });
   }, [advanceLine, filteredGuion, guion, musicalNumbers]);
 
@@ -2154,7 +2185,7 @@ export const RehearsalView: React.FC<Props> = ({
         return previousIndex;
       }
 
-      return fallbackTargetIndex;
+      return getAutomaticRehearsalTargetIndex(filteredGuion, previousIndex, fallbackTargetIndex);
     });
   }, [filteredGuion, guion]);
 
@@ -2523,7 +2554,7 @@ export const RehearsalView: React.FC<Props> = ({
     setIsRehearsalMediaReady(false); setAutoListenEnabled(false); setCompatibilityMessage(null);
     stopRecognition();
     // Unlock song playback in this gesture even when no audible test is needed.
-    if (!spokenOnly && step !== 'speaker') void primeSongPlayback();
+    if (!spokenOnly && step !== 'speaker' && step !== 'microphone') void primeSongPlayback();
     if (step === 'microphone') void calibrateRehearsalMicrophone();
     else if (step === 'speaker') prepareRehearsalMedia();
     else if (step === 'recognition') enableIntelligentListenForDevice();
@@ -2888,7 +2919,16 @@ export const RehearsalView: React.FC<Props> = ({
         {renderHeader('Cambio de escena')}
         <View style={styles.intro}>
           <Text style={styles.introTitle}>Escena: {currentLine.t}</Text>
-          <Button label="Empezar esta escena" onPress={advanceLine} />
+          <Text style={ui.text}>{listenModeSelection === 'manual' || !isSpeechRecognitionSupported
+            ? 'Pulsa «Siguiente escena» cuando quieras empezar.'
+            : 'Di «adelante» o pulsa «Siguiente escena» cuando quieras empezar.'}</Text>
+          {sceneAnnouncementError ? <Text style={ui.error}>{sceneAnnouncementError}</Text> : null}
+          {shouldListenForSceneCommand && isSpeechRecognitionSupported ? <>
+            <Text accessibilityLiveRegion="polite" style={ui.text}>{isRecognitionAudioActive
+              ? 'Escuchando «adelante»…' : 'Preparando la escucha…'}</Text>
+            {renderRecognitionError(restartRecognition, 'Activar micrófono')}
+          </> : null}
+          <Button label="Siguiente escena" onPress={startCurrentScene} />
         </View>
       </View>
     );

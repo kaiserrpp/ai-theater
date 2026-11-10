@@ -13,6 +13,7 @@ else delete require.extensions['.ts'];
 const result = (status = 'ready', voiceLevel = 0.2) => ({ status, voiceLevel, noiseFloor: 0.01, voiceThreshold: 0.04, voiceToNoiseRatio: 20 });
 const operations = (events, overrides = {}) => ({
   isCurrent: () => true,
+  prepareOutput: async () => { events.push('output'); },
   start: async () => { events.push('open'); },
   measureNoise: async () => { events.push('noise'); return result(); },
   prompt: async () => { events.push('prompt'); },
@@ -26,7 +27,7 @@ test('every calibration measures noise and voice, then releases the capture befo
   const events = [];
   await calibrate(operations(events));
   await calibrate(operations(events));
-  assert.deepEqual(events, ['open','noise','prompt','beep','voice','release','open','noise','prompt','beep','voice','release']);
+  assert.deepEqual(events, ['output','open','noise','prompt','beep','voice','release','output','open','noise','prompt','beep','voice','release']);
 });
 test('a failed microphone or denied permission releases input without speaking or measuring voice', async () => {
   for (const failure of ['denied', 'noise']) {
@@ -50,7 +51,36 @@ test('a cancelled calibration cannot start later steps or close the new session 
     isCurrent: () => current,
     measureNoise: async () => { current = false; return result(); },
   })), /preparation-cancelled/);
-  assert.deepEqual(events, ['open']);
+  assert.deepEqual(events, ['output', 'open']);
+});
+
+test('audio activation runs in the original tap and must succeed before opening the microphone', async () => {
+  const events = [];
+  let inTap = true;
+  let finishOutput;
+  const pending = calibrate(operations(events, {
+    prepareOutput: () => {
+      assert.equal(inTap, true);
+      events.push('output');
+      return new Promise((resolve) => { finishOutput = resolve; });
+    },
+  }));
+  inTap = false;
+  assert.deepEqual(events, ['output']);
+  finishOutput();
+  await pending;
+  assert.deepEqual(events, ['output', 'open', 'noise', 'prompt', 'beep', 'voice', 'release']);
+});
+
+test('silent output failures stop calibration and never count as successful microphone measurements', async () => {
+  for (const failedStage of ['prepareOutput', 'prompt', 'beep']) {
+    const events = [];
+    const error = new Error(failedStage === 'beep' ? 'calibration-beep-unavailable' : 'calibration-voice-unavailable');
+    await assert.rejects(calibrate(operations(events, { [failedStage]: async () => { throw error; } })), error);
+    assert.ok(!events.includes('voice'));
+    if (failedStage === 'prepareOutput') assert.ok(!events.includes('open'));
+    assert.equal(events.at(-1), 'release');
+  }
 });
 test('intelligent mode requires speaker, calibration, live recognition and the final output confirmation', () => {
   const complete = { speakerConfirmed: true, microphoneCalibrated: true, recognitionAudioActive: true, speakerWithRecognitionConfirmed: true };

@@ -14,6 +14,13 @@ type WindowWithSpeech = Window & typeof globalThis & {
 
 let activeStartWatchdog: ReturnType<typeof setTimeout> | null = null;
 let activeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let speechRun = 0;
+let activeUtterance: SpeechSynthesisUtterance | null = null;
+const detachUtterance = () => {
+  if (!activeUtterance) return;
+  activeUtterance.onstart = activeUtterance.onend = activeUtterance.onerror = null;
+  activeUtterance = null;
+};
 const clearSpeechTimers = () => {
   if (activeStartWatchdog) {
     clearTimeout(activeStartWatchdog);
@@ -59,7 +66,9 @@ const getPreferredVoice = (synth: SpeechSynthesis) => {
 };
 
 export const stopRehearsalSpeech = () => {
+  speechRun += 1;
   clearSpeechTimers();
+  detachUtterance();
 
   if (typeof window !== 'undefined') {
     const synth = getSpeechSynthesisHandle();
@@ -95,10 +104,15 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
   }
 
   stopRehearsalSpeech();
+  const run = speechRun;
+  let finished = false;
+  const isCurrent = () => speechRun === run && !finished;
 
   const attemptSpeak = (attempt: number) => {
+    if (!isCurrent()) return;
     let started = false;
     const utterance = new Utterance(text);
+    activeUtterance = utterance;
     utterance.lang = 'es-ES';
     utterance.rate = speechRate;
     utterance.pitch = 1;
@@ -111,18 +125,24 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
     }
 
     utterance.onstart = () => {
+      if (!isCurrent()) return;
       started = true;
       clearSpeechTimers();
       callbacks.onStart?.();
     };
 
     utterance.onend = () => {
+      if (!isCurrent()) return;
+      finished = true;
       clearSpeechTimers();
+      detachUtterance();
       callbacks.onDone?.();
     };
 
     utterance.onerror = () => {
+      if (!isCurrent()) return;
       clearSpeechTimers();
+      detachUtterance();
 
       if (!started && attempt === 0) {
         activeRetryTimer = setTimeout(() => {
@@ -131,14 +151,17 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
         return;
       }
 
+      finished = true;
       callbacks.onError?.(new Error(started ? 'speech-playback-error' : 'speech-start-error'));
     };
 
     activeStartWatchdog = setTimeout(() => {
-      if (started) {
+      if (!isCurrent() || started) {
         return;
       }
 
+      clearSpeechTimers();
+      detachUtterance();
       synth.cancel();
 
       if (attempt === 0) {
@@ -148,6 +171,7 @@ export const speakRehearsalSpeech = (text: string, callbacks: SpeechCallbacks) =
         return;
       }
 
+      finished = true;
       callbacks.onError?.(new Error('speech-start-timeout'));
     }, 1800);
 

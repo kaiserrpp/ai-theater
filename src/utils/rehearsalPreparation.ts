@@ -17,6 +17,7 @@ export const canBeginPreparedRehearsal = (mode: ListenPreference, evidence: Rehe
 
 export const runRehearsalMicrophoneCalibration = async (operations: {
   isCurrent: () => boolean;
+  prepareOutput: () => Promise<void>;
   start: () => Promise<void>;
   measureNoise: () => Promise<MicrophoneCalibrationResult>;
   prompt: () => Promise<void>;
@@ -29,6 +30,8 @@ export const runRehearsalMicrophoneCalibration = async (operations: {
     if (!operations.isCurrent()) throw new Error('preparation-cancelled');
   };
   try {
+    checkCurrent();
+    await operations.prepareOutput();
     checkCurrent();
     await operations.start();
     checkCurrent();
