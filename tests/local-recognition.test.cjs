@@ -16,7 +16,7 @@ else delete require.extensions['.ts'];
 const reference = 'Abuela, que pasó? Porque gritas? Pasó algo malo?';
 const options = (lineKey = 'actor-1') => ({ enabled: true, lang: 'es-ES', lineKey });
 const nextDelay = (snapshot) => delay(reference, snapshot.transcript, snapshot.interimTranscript,
-  scoreLineMatch(reference, snapshot.transcript), { requireCompleteEnding: true });
+  scoreLineMatch(reference, snapshot.transcript));
 const fixture = (t, overrides = {}) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
   const streams = [], contexts = [], decoders = [];
@@ -67,21 +67,53 @@ test('local word recognition releases capture immediately and never waits for a 
   assert.equal(Date.now(), 0, 'even a pending AudioContext.close must not delay the reply');
 });
 
-test('multi-second pauses keep the words and never finish an incomplete actor replica', async (t) => {
+test('local recognition accepts a strong score with extra words inside the ending', async (t) => {
+  const f = fixture(t);
+  f.recognition.configure(options()); await settle();
+  const heard = 'Abuela qué pasó porque gritas pasó algo realmente malo';
+  f.decoders[0].partial(heard);
+  assert.ok(scoreLineMatch(reference, heard).score >= 0.86);
+  assert.equal(nextDelay(f.recognition.getSnapshot()), 60);
+  f.decoders[0].final(heard);
+  assert.equal(nextDelay(f.recognition.getSnapshot()), 0);
+});
+
+test('local recognition uses the same tolerant threshold when the last word changes', async (t) => {
+  const f = fixture(t);
+  const expected = 'Cada mañana abro la tienda, preparo el café y reviso todos los encargos antes de que mis vecinos salgan hacia el trabajo.';
+  const heard = 'Cada mañana abro la tienda preparo el café y reviso todos los encargos antes de que mis vecinos salgan hacia el empleo';
+  f.recognition.configure(options()); await settle();
+  for (const emit of ['partial', 'final']) {
+    f.decoders[0][emit](heard);
+    const snapshot = f.recognition.getSnapshot();
+    const match = scoreLineMatch(expected, snapshot.transcript);
+    assert.ok(match.score >= 0.86 && match.score < 1, `expected a sufficient non-exact score, got ${match.score}`);
+    assert.equal(delay(expected, snapshot.transcript, snapshot.interimTranscript, match), emit === 'partial' ? 60 : 0);
+  }
+});
+
+test('multi-second pauses keep the words without advancing before a sufficient match', async (t) => {
   const f = fixture(t);
   f.recognition.configure(options()); await settle();
   f.decoders[0].final('abuela qué pasó');
   t.mock.timers.tick(5000);
   assert.equal(nextDelay(f.recognition.getSnapshot()), null);
   assert.equal(f.streams[0].getTracks()[0].readyState, 'live');
-  f.decoders[0].partial('porque gritas pasó algo');
+  f.decoders[0].partial('porque gritas');
   assert.equal(nextDelay(f.recognition.getSnapshot()), null);
-  f.decoders[0].final('porque gritas pasó algo');
+  f.decoders[0].final('porque gritas');
   t.mock.timers.tick(3000);
-  assert.equal(nextDelay(f.recognition.getSnapshot()), null, 'a final decoder result is not a complete script line');
-  f.decoders[0].partial('malo');
+  assert.equal(nextDelay(f.recognition.getSnapshot()), null, 'silence and a final decoder event cannot replace a sufficient word match');
+  f.decoders[0].partial('pasó algo realmente malo');
   assert.notEqual(nextDelay(f.recognition.getSnapshot()), null);
   assert.equal(f.decoders.length, 1);
+});
+
+test('an accepted shorter replica is not vetoed for omitting a literal last word', async (t) => {
+  const f = fixture(t);
+  f.recognition.configure(options()); await settle();
+  f.decoders[0].partial('abuela qué pasó porque gritas pasó algo');
+  assert.equal(nextDelay(f.recognition.getSnapshot()), 60);
 });
 
 test('six actor/app cycles reopen our own input without poisoning or repeating old transcripts', async (t) => {

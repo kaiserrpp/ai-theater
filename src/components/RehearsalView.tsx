@@ -1225,8 +1225,7 @@ export const RehearsalView: React.FC<Props> = ({
     );
     const advanceDelay = getAutomaticLineAdvanceDelay(
       speakableLineText, speechRecognitionTranscript,
-      speechRecognitionInterimTranscript, intelligentLineMatch,
-      { requireCompleteEnding: isLocalSpeechRecognition }
+      speechRecognitionInterimTranscript, intelligentLineMatch
     );
 
     if (
@@ -1276,7 +1275,6 @@ export const RehearsalView: React.FC<Props> = ({
     currentLineVariantKey,
     filteredGuion.length,
     intelligentLineMatch,
-    isLocalSpeechRecognition,
     recordIntelligentFeedback,
     resetSpeechRecognitionTranscript,
     shouldUseIntelligentRecognition,

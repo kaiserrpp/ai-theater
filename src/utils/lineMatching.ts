@@ -849,18 +849,10 @@ export const getAutomaticLineAdvanceDelay = (
   expectedText: string,
   heardText: string,
   interimText: string,
-  result: LineMatchResult,
-  options: { requireCompleteEnding?: boolean } = {}
+  result: LineMatchResult
 ): number | null => {
   const reason = getAutomaticLineMatchReason(expectedText, heardText, result);
   if (!reason) return null;
-  if (options.requireCompleteEnding) {
-    const ending = getTailTokens(tokenize(result.referenceText || expectedText), 2);
-    const heardTail = getTailTokens(tokenize(heardText), ending.length + 2);
-    const heardEnding = heardTail.some((_, index) => ending.every((token, offset) =>
-      heardTail[index + offset] && tokensMatch(token, heardTail[index + offset])));
-    if (!heardEnding) return null;
-  }
   if (!interimText.trim()) return 0;
   if (result.score >= 0.95 || reason === 'global_score' ||
       reason === 'high_final_confidence' || reason === 'strong_coverage') return 60;
