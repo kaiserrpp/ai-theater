@@ -3227,7 +3227,7 @@ export const RehearsalView: React.FC<Props> = ({
             setIsPaused(true); stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition(); void releaseListening();
           }
         }} style={[ui.button, ui.row, { minWidth: 140 }]}><Icon name={isPaused ? 'play' : 'pause'} color="#fff" /><Text style={ui.buttonText}>{isPaused ? 'Reanudar' : 'Pausa'}</Text></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Siguiente línea" onPress={advanceLine} style={ui.icon}><Icon name="skip-next" size={28} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Siguiente línea" onPress={isIntelligentListenMode && isMyTurn ? handleSkipIntelligentLine : advanceLine} style={ui.icon}><Icon name="skip-next" size={28} /></TouchableOpacity>
       </View> : null}
     </View>
   );
