@@ -107,6 +107,16 @@ Las obras antiguas se cargan sin migración manual. Republicar la obra conserva 
 
 ## Verificación
 
+La **2026.11.211** incorpora `/comparar-transcripcion.html`, también accesible desde **⋯ → Comparar Whisper y Vosk** y **Micrófono y voz**. Es una prueba separada del ensayo: no cambia el modo elegido ni el reconocimiento habitual. Graba una réplica y sus pausas hasta pulsar **Terminar grabación**, con un máximo de 45 segundos. También acepta un archivo de audio local. No hay avance de frase por silencio, fin del audio o temporizador.
+
+La misma muestra mono a 16 kHz se procesa secuencialmente con Vosk español 0.42 y Whisper Tiny multilingüe q8, en WebAssembly de un solo hilo. Se puede invertir el orden e indicar el idioma de Whisper o dejarlo automático. La opción automática compara los logits de idioma español/inglés del primer paso del decodificador sobre el audio: Transformers.js 3.8.1 todavía asumiría inglés si se omitiera el idioma. No usa el guion para esa elección y conserva el idioma realmente usado en el informe. Cada motor libera sus recursos antes de abrir el siguiente. Whisper usa Transformers.js 3.8.1 y la conversión ONNX `Xenova/whisper-tiny`, revisión `5332fcc35e32a33b86612b9a57a89be7906102b1`. Las bibliotecas y los pesos se descargan desde jsDelivr y Hugging Face; no hay API de transcripción ni clave de pago. La descarga de cada modelo ronda los 40 MB, más las bibliotecas y el runtime.
+
+Los resultados conservan las transcripciones originales y muestran **Carga**, **Procesado**, coincidencia inteligente y diferencia literal con el guion. La aceptación usa exactamente `src/utils/lineMatching.ts`, incluidas sus equivalencias y umbrales. La diferencia literal no aplica esas equivalencias: no se debe confundir una coincidencia corregida del 100 % con una transcripción literal perfecta, ni una variación al interpretar con un error de ASR. **Procesado no mide la demora entre la última palabra del actor y la voz de la app**; tampoco evalúa el avance durante una pausa. La integración de Whisper en el ensayo en vivo queda pendiente de los resultados en el iPhone.
+
+Al ocultar la página se cierra el micrófono, se cancela el cálculo y se conserva la muestra en memoria para reintentar explícitamente. Se recuerdan hasta 12 comparaciones de texto por obra en el navegador, sin audio. **Enviar informe sin audio** guarda los resultados mediante el endpoint de informes existente, con `result: comparacion_local` y metadatos `recognitionComparison`: motor, modelo, revisión, tiempos separados, identificador común de muestra y valoración del usuario. Cada envío crea un informe distinto. No mezclar esas entradas diagnósticas con autoavances reales del ensayo. El botón de copiar permite compartir el mismo informe manualmente.
+
+`npm run comparison:build` regenera la copia ESM de las reglas y la versión de la prueba. `npm test` comprueba que ambas estén sincronizadas. Las pruebas de navegador con los modelos reales y audio sintetizado comprueban la ejecución e interfaz; no demuestran la precisión, consumo o latencia en el iPhone físico.
+
 ```sh
 npm test
 npm run lint

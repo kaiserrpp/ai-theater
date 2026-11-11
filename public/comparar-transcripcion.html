@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#faf9f7">
+  <title>Whisper frente a Vosk · AI-Theatre</title>
+  <link rel="stylesheet" href="/asr/comparison.css">
+  <script type="module" src="/asr/comparison-page.mjs"></script>
+</head>
+<body><main>
+  <header><span>AI · THEATRE <span id="version"></span></span><a id="back" href="/">Volver a la obra</a></header>
+  <h1>Whisper frente a Vosk</h1>
+  <p class="lead">Una grabación. Dos transcripciones locales. Las mismas reglas del modo Inteligente.</p>
+  <p>Pausa la música antes de grabar y prueba con el iPhone en la posición que usas al ensayar.</p>
+  <div class="note">Puedes hacer pausas: la muestra termina al pulsar <strong>Terminar grabación</strong>. Esta prueba no cambia tu modo de ensayo ni avanza escenas.</div>
+  <section class="card">
+    <h2>1. Elige una réplica</h2>
+    <label for="phrase">Frases de prueba</label><select id="phrase"></select>
+    <label for="expected">Réplica del guion</label><textarea id="expected" rows="3" maxlength="1000"></textarea>
+    <details><summary>Opciones de la comparación</summary>
+      <label for="language">Idioma de Whisper</label><select id="language"><option value="auto">Automático · español e inglés</option><option value="spanish">Español</option><option value="english">Inglés</option></select>
+      <label for="order">Orden de ejecución</label><select id="order"><option value="vosk,whisper">Vosk y después Whisper</option><option value="whisper,vosk">Whisper y después Vosk</option></select>
+      <p>Vosk usa el modelo español actual. Whisper usa Tiny multilingüe, cuantizado, en WebAssembly. El guion no se entrega a los motores para dictarles qué deben oír.</p>
+    </details>
+  </section>
+  <section class="card">
+    <h2>2. Graba tu voz</h2>
+    <p id="microphone-status" role="status">Pulsa Grabar y espera a ver «Grabando» antes de hablar.</p>
+    <div class="row"><button id="record">Grabar muestra</button><button id="stop" class="secondary" disabled>Terminar grabación</button></div>
+    <div id="meter" class="meter" role="progressbar" aria-label="Nivel del micrófono" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="level"></span></div>
+    <p id="duration" class="muted">Sin muestra. Máximo 45 segundos; alcanzar el límite no inicia ninguna réplica.</p>
+    <audio id="playback" controls hidden></audio>
+    <details><summary>Usar una grabación guardada</summary><label for="audio-file">Archivo de audio, hasta 30 MB y 45 segundos</label><input id="audio-file" type="file" accept="audio/*"><p>Se abre en este dispositivo y no se sube al servidor.</p></details>
+  </section>
+  <section class="card">
+    <h2>3. Compara la misma muestra</h2>
+    <p>Se descargan los modelos la primera vez: unos 40 MB por motor, más sus bibliotecas. Safari puede conservarlos en caché. Se ejecutan por turnos para reducir la memoria necesaria.</p>
+    <div class="row"><button id="compare" disabled>Comparar muestra</button><button id="cancel" class="secondary" disabled>Detener comparación</button></div>
+    <p id="status" role="status">Graba o elige una muestra para empezar.</p>
+    <p class="muted">Carga y procesado se miden por separado. El procesado de una grabación no mide la demora entre tu última palabra y la voz del siguiente personaje.</p>
+    <div id="results" aria-live="polite"></div>
+  </section>
+  <section class="card">
+    <h2>Compartir los resultados</h2>
+    <p>El informe contiene textos, tiempos, errores y tu valoración. El audio permanece en memoria en este dispositivo y no se incluye en el informe.</p>
+    <label for="ios">Versión de iOS (opcional)</label><input id="ios" placeholder="La que aparece en Ajustes → General → Información" maxlength="40">
+    <p id="history-count">Sin comparaciones guardadas.</p>
+    <div class="row"><button id="send" disabled>Enviar informe sin audio</button><button id="copy" class="secondary" disabled>Copiar informe</button></div>
+    <p id="report-status" role="status"></p>
+    <details><summary>Ver informe</summary><textarea id="report" rows="10" readonly aria-label="Informe de comparación"></textarea></details>
+  </section>
+  <p class="muted">La prueba no solicita claves ni utiliza servicios de transcripción de pago. Las conexiones externas descargan las bibliotecas y el modelo; el reconocimiento se ejecuta aquí.</p>
+</main></body></html>

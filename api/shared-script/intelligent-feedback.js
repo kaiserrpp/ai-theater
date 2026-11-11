@@ -1,4 +1,5 @@
 const { head, list, put } = require('@vercel/blob');
+const { normalizeRecognitionComparison } = require('../../shared/recognitionComparison');
 const {
   getSongAdminPasswordFromRequest,
   getStorageNamespace,
@@ -46,6 +47,7 @@ const normalizeEntry = (entry) => {
 
   const expectedText = clampText(entry.expectedText);
   const heardText = clampText(entry.heardText);
+  const recognitionComparison = normalizeRecognitionComparison(entry.recognitionComparison);
 
   if (!expectedText && !heardText) {
     return null;
@@ -57,6 +59,7 @@ const normalizeEntry = (entry) => {
     sceneTitle: typeof entry.sceneTitle === 'string' ? clampText(entry.sceneTitle).slice(0, 180) : null,
     expectedText,
     heardText,
+    ...(recognitionComparison ? { recognitionComparison } : {}),
     score: typeof entry.score === 'number' ? Math.max(0, Math.min(1, entry.score)) : 0,
     coverageScore: clampScore(entry.coverageScore),
     orderScore: clampScore(entry.orderScore),

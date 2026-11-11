@@ -235,6 +235,7 @@ export interface SharedMusicalNumberAudioDeleteInput {
 }
 
 export type IntelligentLineFeedbackResult =
+  | 'comparacion_local'
   | 'linea_buena'
   | 'reintentar'
   | 'siguiente_linea'
@@ -248,6 +249,14 @@ export type IntelligentLineFeedbackIssueType =
   | 'otro';
 
 export interface IntelligentLineFeedbackEntry {
+  recognitionComparison?: {
+    sampleId: string | null; engine: 'vosk' | 'whisper'; status: 'done' | 'error';
+    model: string | null; modelRevision: string | null; backend: 'wasm';
+    languageUsed: 'english' | 'spanish' | null;
+    sampleDurationMs: number | null; loadMs: number | null; processingMs: number | null;
+    accepted: boolean; literalDifference: number | null; verdict: 'correct' | 'incorrect' | null;
+    error: string | null; order: string | null; timingKind: 'offline_processing'; audioUploaded: false;
+  };
   lineIndex: number;
   character: string;
   sceneTitle: string | null;

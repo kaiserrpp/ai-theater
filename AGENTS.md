@@ -20,6 +20,8 @@ Instrucción expresa del usuario, 10 de noviembre de 2026: **publicar la versió
 
 ## Ensayo
 
+- La **2026.11.211** añade `/comparar-transcripcion.html` para comparar Vosk español y Whisper Tiny multilingüe local con una misma muestra, por turnos para reducir memoria. Es un laboratorio separado: el reconocimiento del ensayo y la preferencia de modo permanecen iguales. Mantener las pausas y las reglas de `lineMatching.ts`; `npm run comparison:build` sincroniza su copia ESM y la versión (comprobadas por `npm test`). Los informes `comparacion_local` incluyen motor, identificador de muestra, carga y procesado, sin audio. No tratar el procesado de una grabación como latencia de avance en vivo ni las coincidencias normalizadas como precisión literal del ASR. La prueba en el iPhone físico y la integración de Whisper en el ensayo siguen pendientes.
+
 - Los cambios de escena deben anunciar por voz el título y esperar a «adelante» o al botón «Siguiente escena»; nunca avanzar solo por tiempo, silencio o fin de un audio.
 - El usuario exige mantener el modo Inteligente y poder hacer pausas al hablar sin que avance la réplica. No proponer ni activar el modo por silencio como solución a la latencia del reconocimiento.
 - El modo Inteligente debe aceptar frases no literales mediante el algoritmo de grado de coincidencia y sus umbrales existentes. No añadir palabras finales obligatorias ni una segunda condición literal que invalide una coincidencia ya suficiente. Una pausa no dispara el avance: lo decide la coincidencia, que puede aceptar omisiones o variaciones.

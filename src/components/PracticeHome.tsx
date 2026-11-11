@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SavedScript } from '../hooks/useLibrary';
 import { resolveAuditionPreferences } from '../../shared/auditionScenes';
 import { getAuditionRehearsalPlan, type AuditionRehearsalMode } from '../utils/auditionRehearsal';
@@ -46,6 +46,13 @@ export const PracticeHome = (props: Props) => {
   const [storageNotice, setStorageNotice] = useState('');
   const [auditionUploadRequest, setAuditionUploadRequest] = useState(0);
   const shareId = props.manifest?.shareId;
+  const openRecognitionComparison = () => {
+    const web = typeof window !== 'undefined' && Boolean(window.location?.origin);
+    const url = new URL('/comparar-transcripcion.html', web ? window.location.origin : 'https://ai-theater.vercel.app');
+    if (shareId) url.searchParams.set('share', shareId);
+    if (web) window.location.assign(url.href);
+    else void Linking.openURL(url.href).catch(() => setStorageNotice('No se pudo abrir la comparación en el navegador.'));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +133,7 @@ export const PracticeHome = (props: Props) => {
 
     <Sheet title="Más opciones" visible={sheet === 'menu'} onClose={() => setSheet(null)}>
       <Button label="Micrófono y voz" secondary onPress={() => setSheet('mic')} />
+      <Button label="Comparar Whisper y Vosk" secondary onPress={openRecognitionComparison} />
       <Button label="Fondo y apariencia" secondary onPress={() => setSheet('appearance')} />
       <Button label="Materiales y gestión" secondary onPress={() => setSheet('materials')} />
       <Button label="Compartir obra" secondary disabled={!props.manifest} onPress={() => setSheet('share')} />
@@ -136,6 +144,7 @@ export const PracticeHome = (props: Props) => {
     </Sheet>
     <Sheet title="Micrófono y voz" visible={sheet === 'mic'} onClose={() => setSheet(null)}>
       <MicrophoneSettings mode={mode} supported={supportsRecognition()} onModeChange={(next) => { setMode(next); savePreference(REHEARSAL_LISTEN_MODE_STORAGE_KEY, next); }} showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
+      <Button label="Comparar Whisper y Vosk" secondary onPress={openRecognitionComparison} />
       {storageNotice ? <Text style={ui.error}>{storageNotice}</Text> : null}
     </Sheet>
     <Sheet title="Materiales y gestión" visible={sheet === 'materials'} onClose={() => setSheet(null)}>
