@@ -1800,7 +1800,15 @@ export const RehearsalView: React.FC<Props> = ({
 
     if (shouldArmListeningForCurrentLine) {
       if (!isListeningActive && listeningStatus !== 'requesting' && listeningStatus !== 'error') {
-        void startListening();
+        let cancelled = false;
+        // Switching from Intelligent can leave its last native request
+        // finishing. Never open getUserMedia on top of that recognizer.
+        void waitForRecognitionEnd().then((ended) => {
+          if (cancelled || !isPageVisible()) return;
+          if (ended) void startListening();
+          else setCompatibilityMessage('La escucha anterior de Safari aún no ha terminado. Vuelve a iniciar el ensayo para reintentarlo.');
+        });
+        return () => { cancelled = true; };
       }
       return;
     }
@@ -1824,6 +1832,7 @@ export const RehearsalView: React.FC<Props> = ({
     shouldSuspendListeningDuringSong,
     shouldArmListeningForCurrentLine,
     startListening,
+    waitForRecognitionEnd,
     stopListening,
   ]);
 
