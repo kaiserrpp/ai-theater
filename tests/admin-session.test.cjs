@@ -66,7 +66,11 @@ test('tampering, duplicate cookies, missing cookies and frontend flags cannot gr
   const [name, token] = valid.split('=');
   const [payload, signature] = token.split('.');
   const changed = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(payload, 'base64url')), exp: 9999999999 })).toString('base64url');
-  for (const cookie of ['', `${name}=bad`, `${name}=${changed}.${signature}`, `${valid}; ${valid}`, `${name}=${payload}.${signature.slice(0, -2)}aa`]) {
+  // Change a signed byte: replacing the last Base64 characters can leave
+  // the decoded signature identical when only unused padding bits change.
+  const changedSignature = Buffer.from(signature, 'base64url');
+  changedSignature[0] ^= 1;
+  for (const cookie of ['', `${name}=bad`, `${name}=${changed}.${signature}`, `${valid}; ${valid}`, `${name}=${payload}.${changedSignature.toString('base64url')}`]) {
     assert.equal(auth.readAdminSession(request('GET', {}, { cookie }), 'production'), null);
     assert.equal(shared.isAuthorizedSongAdminRequest(request('POST', { authenticated: true }, { cookie })), false);
   }
