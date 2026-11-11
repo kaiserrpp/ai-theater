@@ -45,6 +45,11 @@ const fixture = (t) => {
     start() { capturing = true; }
     abort() { aborts += 1; capturing = false; }
     end() { capturing = false; this.onend?.(); }
+    finishInput() {
+      capturing = false;
+      this.onresult?.({ results: [{ isFinal: true, 0: { transcript: 'Frase terminada' } }] });
+      this.onspeechend?.();
+    }
   }
   global.window = { speechSynthesis: synth, SpeechSynthesisUtterance: Utterance };
   const session = createSession(Recognition, () => {}, { naturalEnd: true, usage: { started: false } });
@@ -147,4 +152,47 @@ test('a genuinely stuck browser queue is cleared once, while calibration still s
   assert.equal(startedInTap, true);
   assert.equal(f.count('cancel'), 1);
   f.finish();
+});
+
+test('the app speaks at natural input completion instead of waiting for delayed native service end', async (t) => {
+  const f = fixture(t);
+  f.session.configure({ enabled: true, lang: 'es-ES', lineKey: 'actor' });
+  const prepared = prepare('¡No! Tengo tu sanguchito.', {});
+  f.session.stop();
+  const pending = f.session.waitForInputEnd().then((ended) => { if (ended) prepared.start(); });
+  t.mock.timers.tick(200);
+  f.captures[0].finishInput(); await pending;
+  assert.deepEqual(f.events.filter((event) => event.kind === 'speak'), [{ kind: 'speak', at: 200 }]);
+  assert.equal(f.aborts(), 0);
+  t.mock.timers.tick(2000);
+  f.captures[0].end();
+  assert.equal(f.count('speak'), 1);
+  assert.equal(f.aborts(), 0);
+  f.finish();
+});
+
+test('a short early reply keeps the next actor turn closed until the previous native service has ended', async (t) => {
+  const f = fixture(t);
+  f.session.configure({ enabled: true, lang: 'es-ES', lineKey: 'actor' });
+  let nextTurnOpened = false, nextInputReady;
+  const prepared = prepare('¡No!', { onDone: () => {
+    f.session.notifyPlaybackEnd();
+    nextInputReady = f.session.waitForEnd().then((ended) => {
+      if (!ended) return;
+      nextTurnOpened = true;
+      f.session.configure({ enabled: true, lang: 'es-ES', lineKey: 'next-actor' });
+    });
+  } });
+  f.session.stop();
+  f.captures[0].finishInput();
+  assert.equal(await f.session.waitForInputEnd(), true);
+  prepared.start();
+  t.mock.timers.tick(200); f.finish();
+  await Promise.resolve();
+  assert.equal(nextTurnOpened, false);
+  assert.equal(f.captures.length, 1);
+  t.mock.timers.tick(1000); f.captures[0].end(); await nextInputReady;
+  assert.equal(nextTurnOpened, true);
+  assert.equal(f.captures.length, 2);
+  assert.equal(f.aborts(), 0);
 });

@@ -889,6 +889,8 @@ export const RehearsalView: React.FC<Props> = ({
     restartRecognition,
     stopRecognition,
     waitForRecognitionEnd,
+    waitForRecognitionInputEnd,
+    getRecognitionInputEndReason,
     notifyRecognitionPlaybackEnd,
   } = useSpeechRecognition({
     enabled: shouldKeepIntelligentRecognitionWarm,
@@ -1964,18 +1966,35 @@ export const RehearsalView: React.FC<Props> = ({
     const requestedAt = Date.now();
     let inputReadyAt = requestedAt;
     let speechRequestedAt = requestedAt;
+    let inputEndReason = '';
     const preparedSpeech = prepareRehearsalSpeech(speakableLineText, {
       onStart: () => {
         if (isCancelled) return;
         setSpeechStatusMessage(
-          `Reproduciendo la linea. Cierre de micro: ${inputReadyAt - requestedAt} ms. Inicio de voz: ${Date.now() - speechRequestedAt} ms.`
+          `Reproduciendo la linea. Fin de entrada: ${inputReadyAt - requestedAt} ms (${inputEndReason}). Inicio de voz: ${Date.now() - speechRequestedAt} ms.`
         );
       },
       onDone: () => {
         if (isCancelled) return;
         notifyRecognitionPlaybackEnd();
-        setSpeechStatusMessage('Linea reproducida. Avanzando...');
-        advanceTimeout = setTimeout(advanceLine, APP_LINE_ADVANCE_DELAY_MS);
+        const finishLine = () => {
+          if (isCancelled || !isPageVisible()) return;
+          setSpeechStatusMessage('Linea reproducida. Avanzando...');
+          advanceTimeout = setTimeout(advanceLine, APP_LINE_ADVANCE_DELAY_MS);
+        };
+        const nextLine = filteredGuion[currentIndex + 1];
+        const nextLineNeedsInput = listenModeSelection !== 'manual' && nextLine &&
+          !isSceneMarker(nextLine) && !isSongCue(nextLine) && lineMatchesRoles(nextLine, myRoles);
+        if (nextLineNeedsInput) {
+          // A very short reply may finish before the old service does. Keep
+          // the next actor turn closed until it is safe to open a fresh input.
+          setSpeechStatusMessage('Replica reproducida. Preparando tu escucha...');
+          void waitForRecognitionEnd().then((ended) => {
+            if (isCancelled) return;
+            if (ended) finishLine();
+            else setSpeechStatusMessage('Safari no ha terminado la escucha anterior. Pulsa siguiente para continuar.');
+          });
+        } else finishLine();
       },
       onError: (error) => {
         if (!isCancelled) setSpeechStatusMessage(`Siri ha fallado al reproducir esta linea (${error.message}).`);
@@ -1984,8 +2003,8 @@ export const RehearsalView: React.FC<Props> = ({
 
     const playOtherLine = async () => {
       stopRecognition();
-      if (!await waitForRecognitionEnd()) {
-        if (!isCancelled) setSpeechStatusMessage('Safari no ha cerrado la escucha anterior. Pulsa siguiente para continuar.');
+      if (!await waitForRecognitionInputEnd()) {
+        if (!isCancelled) setSpeechStatusMessage('Safari no ha indicado el final de la entrada anterior. Pulsa siguiente para continuar.');
         return;
       }
       if (isCancelled || !isPageVisible()) return;
@@ -1998,7 +2017,8 @@ export const RehearsalView: React.FC<Props> = ({
 
       if (isCancelled || !isPageVisible()) return;
       inputReadyAt = Date.now();
-      setSpeechStatusMessage(`Micro liberado en ${inputReadyAt - requestedAt} ms. Lanzando la linea...`);
+      inputEndReason = getRecognitionInputEndReason();
+      setSpeechStatusMessage(`Entrada finalizada en ${inputReadyAt - requestedAt} ms. Lanzando la linea...`);
       speechRequestedAt = Date.now();
       preparedSpeech.start(getAdaptiveRehearsalSpeechRate());
     };
@@ -2019,6 +2039,10 @@ export const RehearsalView: React.FC<Props> = ({
     autoListenEnabled,
     canRunRehearsalLinePlayback,
     currentLine,
+    currentIndex,
+    filteredGuion,
+    listenModeSelection,
+    myRoles,
     temporarilySuspendingAutoListen,
     isFinished,
     isListeningActive,
@@ -2028,7 +2052,9 @@ export const RehearsalView: React.FC<Props> = ({
     speakableLineText,
     stopListening,
     stopRecognition,
+    waitForRecognitionInputEnd,
     waitForRecognitionEnd,
+    getRecognitionInputEndReason,
     notifyRecognitionPlaybackEnd,
     stopStandaloneSongAudio,
   ]);

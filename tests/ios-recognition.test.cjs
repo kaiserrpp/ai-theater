@@ -30,6 +30,13 @@ const fixture = (t, extra = {}) => {
       if (!poisoned) this.onresult?.({ results: [result(text, isFinal)] });
     }
     end() { this.ended = true; active = null; this.onend?.(); }
+    finishInput(text, speechFirst = false) {
+      active = null;
+      if (speechFirst) this.onspeechend?.();
+      this.receive(text);
+      if (!speechFirst) this.onspeechend?.();
+    }
+    audioEnd() { active = null; this.onaudioend?.(); }
     interrupt(delivery = 'end') {
       this.ended = true; active = null;
       if (delivery === 'end') this.onend?.();
@@ -367,4 +374,102 @@ test('a real pause before finishing the replica still resumes listening instead 
   assert.notEqual(advanceDelay(reference, completed.transcript, completed.interimTranscript,
     scoreLineMatch(reference, completed.transcript)), null);
   assert.equal(f.poisoned(), false);
+});
+
+for (const speechFirst of [false, true]) {
+  test(`one-shot playback readiness requires final result AND speechend (${speechFirst ? 'speech' : 'result'} first)`, async (t) => {
+    const f = fixture(t);
+    f.session.configure(options());
+    const current = f.handles[0];
+    current.receive('Mi frase', false);
+    f.session.stop();
+    let inputReady = false, serviceEnded = false;
+    const input = f.session.waitForInputEnd().then((ended) => { inputReady = ended; });
+    const service = f.session.waitForEnd().then((ended) => { serviceEnded = ended; });
+    if (speechFirst) current.onspeechend();
+    else current.receive('Mi frase');
+    await Promise.resolve();
+    assert.equal(inputReady, false, 'one signal alone must not start playback');
+    assert.equal(serviceEnded, false);
+    if (speechFirst) current.receive('Mi frase');
+    else current.onspeechend();
+    await input;
+    assert.equal(inputReady, true);
+    assert.equal(f.session.getInputEndReason(), 'frase definitiva');
+    assert.equal(serviceEnded, false, 'input completion must not detach or abort the finishing service');
+    assert.equal(current.aborted, undefined);
+    current.end(); await service;
+    assert.equal(serviceEnded, true);
+    assert.equal(f.poisoned(), false);
+  });
+}
+
+test('a short app reply can finish before the native service without an extra cue or overlapping the next recognition', async (t) => {
+  const f = fixture(t);
+  for (let turn = 0; turn < 6; turn += 1) {
+    f.session.configure(options({ lineKey: `actor-${turn}` }));
+    const current = f.handles.at(-1);
+    current.receive('Mi frase completa', false);
+    f.session.stop(); f.session.resetTranscript();
+    current.finishInput('Mi frase completa');
+    assert.equal(await f.session.waitForInputEnd(), true);
+    assert.equal(f.session.getSnapshot().transcript, '', 'late final results must not reappear on the next line');
+    // "¡No!" has finished; its native recognition service is still finishing.
+    f.session.notifyPlaybackEnd();
+    f.session.configure(options({ lineKey: `actor-${turn + 1}` }));
+    assert.equal(f.handles.length, turn + 1, 'wait for native end before starting another recognition');
+    current.end();
+    t.mock.timers.tick(250);
+    assert.equal(f.cues.length, 0, 'the app voice already prepared recognition; do not add Te escucho');
+    assert.equal(f.handles.length, turn + 2);
+    assert.equal(current.aborted, undefined);
+  }
+  f.handles.at(-1).receive('Sigo ensayando');
+  assert.equal(f.session.getSnapshot().transcript, 'Sigo ensayando');
+  assert.equal(f.poisoned(), false);
+});
+
+test('audioend can release playback while native service shutdown still waits independently', async (t) => {
+  const f = fixture(t);
+  f.session.configure(options()); f.session.stop();
+  let fullEnd = false;
+  const pending = f.session.waitForEnd().then((ended) => { fullEnd = ended; });
+  f.handles[0].audioEnd();
+  assert.equal(await f.session.waitForInputEnd(), true);
+  assert.equal(f.session.getInputEndReason(), 'fin de captura');
+  assert.equal(fullEnd, false);
+  f.handles[0].end(); await pending;
+  assert.equal(fullEnd, true);
+});
+
+test('a continuous recognizer never uses final plus speechend as proof that its input ended', async (t) => {
+  const f = fixture(t, { naturalEnd: false });
+  f.session.configure(options());
+  f.handles[0].receive('Una frase'); f.handles[0].onspeechend();
+  let ready = false;
+  const pending = f.session.waitForInputEnd().then((ended) => { ready = ended; });
+  await Promise.resolve();
+  assert.equal(ready, false);
+  f.handles[0].audioEnd(); await pending;
+  assert.equal(ready, true);
+});
+
+test('missing native input-finished signals keep a deadline and never force an abort', async (t) => {
+  const f = fixture(t);
+  f.session.configure(options()); f.handles[0].receive('Palabras', false); f.session.stop();
+  const input = f.session.waitForInputEnd();
+  t.mock.timers.tick(12000);
+  assert.equal(await input, false);
+  assert.equal(f.handles[0].aborted, undefined);
+  assert.equal(f.poisoned(), false);
+});
+
+test('a browser that omits speechend and audioend still releases playback at ordinary native end', async (t) => {
+  const f = fixture(t);
+  f.session.configure(options()); f.session.stop();
+  const input = f.session.waitForInputEnd();
+  f.handles[0].end();
+  assert.equal(await input, true);
+  assert.equal(f.session.getInputEndReason(), 'fin de servicio');
+  assert.equal(f.handles[0].aborted, undefined);
 });

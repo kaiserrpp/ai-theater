@@ -50,6 +50,8 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey }: UseSpeechRecogn
     restartRecognition: session.restart,
     stopRecognition: session.stop,
     waitForRecognitionEnd: session.waitForEnd,
+    waitForRecognitionInputEnd: session.waitForInputEnd,
+    getRecognitionInputEndReason: session.getInputEndReason,
     notifyRecognitionPlaybackEnd: session.notifyPlaybackEnd,
   };
 };

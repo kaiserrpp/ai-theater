@@ -13,6 +13,7 @@ export type SpeechRecognitionHandle = {
   onstart: (() => void) | null;
   onaudiostart: (() => void) | null;
   onaudioend: (() => void) | null;
+  onspeechend: (() => void) | null;
   onend: (() => void) | null;
   onerror: ((event: { error?: string; message?: string }) => void) | null;
   onresult: ((event: { results: { readonly length: number; [index: number]: RecognitionResult | undefined } }) => void) | null;
@@ -92,10 +93,20 @@ export const createSpeechRecognitionSession = (
   const usage = options.usage || documentRecognitionUsage;
   let needsCue = Boolean(options.naturalEnd && usage.started);
   let closingForChange = false;
+  let audioEnded = false;
+  let finalResultReceived = false;
+  let speechEnded = false;
+  let playbackCompletedAfterInput = false;
+  let inputEndReason: 'frase definitiva' | 'fin de captura' | 'fin de servicio' | null = null;
   let preparing = false;
   let preparationVersion = 0;
   let cancelPreparation: (() => void) | null = null;
   const endWaiters = new Set<(ended: boolean) => void>();
+  const inputEndWaiters = new Set<(ended: boolean) => void>();
+  // In WebKit's one-shot recognizer, final-result + speechend are emitted
+  // when the native request ends its audio and starts finishing. Service end
+  // can arrive later. Never use interim text or silence alone as this proof.
+  const inputHasEnded = () => audioEnded || Boolean(options.naturalEnd && finalResultReceived && speechEnded);
 
   const update = (change: Partial<SpeechRecognitionSnapshot>) => {
     snapshot = { ...snapshot, ...change };
@@ -116,15 +127,20 @@ export const createSpeechRecognitionSession = (
     evidenceTimer = null;
   };
   const finishWaiters = () => { [...endWaiters].forEach((finish) => finish(true)); };
+  const finishInputWaiters = (reason: NonNullable<typeof inputEndReason>) => {
+    inputEndReason ??= reason;
+    [...inputEndWaiters].forEach((finish) => finish(true));
+  };
   const detach = (abort = true) => {
     clearTimers();
     const previous = recognition;
     recognition = null;
     if (!previous) return;
     previous.onstart = previous.onaudiostart = previous.onaudioend = previous.onend = null;
-    previous.onerror = previous.onresult = null;
+    previous.onspeechend = previous.onerror = previous.onresult = null;
     if (abort) { try { previous.abort(); } catch { /* Already stopped. */ } }
     finishWaiters();
+    finishInputWaiters('fin de servicio');
   };
   const fail = (message: string, code: string | null = null, detail: string | null = null) => {
     blocked = true;
@@ -185,6 +201,8 @@ export const createSpeechRecognitionSession = (
       current.lang = language;
       current.maxAlternatives = 1;
       let hadAudioInput = false;
+      audioEnded = finalResultReceived = speechEnded = playbackCompletedAfterInput = false;
+      inputEndReason = null;
       closingForChange = false;
       update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null });
       current.onstart = () => {
@@ -198,7 +216,15 @@ export const createSpeechRecognitionSession = (
         update({ status: 'listening', isAudioActive: true, error: null });
       };
       current.onaudioend = () => {
-        if (recognition === current) update({ isAudioActive: false });
+        if (recognition !== current) return;
+        audioEnded = true;
+        update({ isAudioActive: false });
+        finishInputWaiters('fin de captura');
+      };
+      current.onspeechend = () => {
+        if (recognition !== current) return;
+        speechEnded = true;
+        if (inputHasEnded()) finishInputWaiters('frase definitiva');
       };
       current.onerror = (event) => {
         if (recognition !== current) return;
@@ -214,7 +240,13 @@ export const createSpeechRecognitionSession = (
         fail(recognitionErrorMessage(event.error, event.message), event.error ?? null, event.message?.trim() || null);
       };
       current.onresult = (event) => {
-        if (recognition !== current || !enabled || !pageVisible || blocked || closingForChange) return;
+        if (recognition !== current) return;
+        // Keep the lifecycle proof even after the completed line disabled
+        // transcription. The finishing service must not delay the reply.
+        finalResultReceived ||= Array.from({ length: event.results.length }, (_, index) => event.results[index])
+          .some((result) => result?.isFinal);
+        if (inputHasEnded()) finishInputWaiters('frase definitiva');
+        if (!enabled || !pageVisible || blocked || closingForChange) return;
         hadAudioInput = true;
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
@@ -231,7 +263,7 @@ export const createSpeechRecognitionSession = (
         }
         if (all.length) clearEvidence();
         update({
-          status: 'listening', isAudioActive: true, error: null,
+          status: 'listening', isAudioActive: !audioEnded, error: null,
           transcript: [committedTranscript, ...all].filter(Boolean).join(' '),
           finalTranscript: [committedTranscript, ...finals].filter(Boolean).join(' '),
           interimTranscript: interims.join(' '),
@@ -247,7 +279,7 @@ export const createSpeechRecognitionSession = (
         if (options.naturalEnd) {
           // Calling abort() even after a normal end can poison later iOS runs.
           committedTranscript = snapshot.transcript;
-          detach(false); closingForChange = false; needsCue = true;
+          detach(false); closingForChange = false; needsCue = !playbackCompletedAfterInput;
           if (blocked) return;
           // Safari can end a one-shot session without marking its last result
           // final. Those words can no longer change. Settle them now so the
@@ -376,7 +408,21 @@ export const createSpeechRecognitionSession = (
         endWaiters.add(finish);
       });
     },
-    notifyPlaybackEnd: () => { if (!recognition) needsCue = false; },
+    waitForInputEnd: () => {
+      if (!recognition || inputHasEnded()) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        const finish = (ended: boolean) => { clearTimeout(timeout); inputEndWaiters.delete(finish); resolve(ended); };
+        const timeout = setTimeout(() => finish(false), 12000);
+        inputEndWaiters.add(finish);
+      });
+    },
+    getInputEndReason: () => inputEndReason ?? 'sin captura pendiente',
+    notifyPlaybackEnd: () => {
+      if (!recognition || inputHasEnded()) {
+        needsCue = false;
+        playbackCompletedAfterInput = Boolean(recognition);
+      }
+    },
     dispose: () => { enabled = false; clearEvidence(); cancelCue(); detach(); },
   };
 };
