@@ -33,6 +33,7 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   </View>
   <View style={ui.card}>
     <Text style={ui.subtitle}>Pruebas de audio</Text>
+    <Text style={ui.text}>En iPhone, mantén Silencio desactivado (campana sin tachar en el Centro de control) para oír la voz. La música puede sonar aunque la voz esté silenciada.</Text>
     <Text accessibilityLiveRegion="polite" style={ui.text}>{repeatRequested
       ? 'Volveremos a comprobar el audio al empezar el próximo ensayo.'
       : preparation.speakerConfirmed ? 'El altavoz ya está comprobado. Reutilizaremos las pruebas completadas mientras la app siga abierta.'
