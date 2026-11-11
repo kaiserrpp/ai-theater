@@ -17,7 +17,7 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   {([
     ['intelligent', 'Inteligente', 'Comprueba tus palabras y avanza al completar la réplica.'],
     ['manual', 'Manual', 'Avanza tú con el botón siguiente.'],
-    ['auto', 'Al terminar de hablar', 'Avanza al detectar silencio. Requiere calibrar el micro.'],
+    ['auto', 'Al terminar de hablar', 'Avanza al detectar silencio, sin comparar el texto. Requiere calibrar el micro.'],
   ] as const).map(([value, label, hint]) => <TouchableOpacity key={value} accessibilityRole="radio"
     aria-checked={mode === value}
     accessibilityState={{ checked: mode === value, disabled: value === 'intelligent' && !supported }}

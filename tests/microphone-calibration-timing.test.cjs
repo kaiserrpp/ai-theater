@@ -100,6 +100,30 @@ test('the actor can wait more than 2.2 seconds after the beep before starting a 
   assert.ok(result.voiceLevel < 0.02);
 });
 
+test('silence-mode dialogue cycles release capture before playback and acquire fresh input afterwards', async (t) => {
+  const f = fixture(t);
+  for (let turn = 0; turn < 6; turn += 1) {
+    await f.hook.startListening();
+    const track = f.streams.at(-1).getTracks()[0];
+    await f.hook.releaseListeningInput();
+    assert.equal(track.readyState, 'ended');
+    assert.equal(f.contexts.at(-1).state, 'closed');
+    assert.equal(f.streams.length, turn + 1);
+  }
+});
+
+test('a live track left muted by Safari is never reused for the next actor turn', async (t) => {
+  const f = fixture(t);
+  await f.hook.startListening();
+  const previousTrack = f.streams[0].getTracks()[0];
+  await f.hook.stopListening();
+  previousTrack.muted = true;
+  await f.hook.startListening();
+  assert.equal(f.streams.length, 2);
+  assert.equal(previousTrack.readyState, 'ended');
+  assert.equal(f.streams[1].getTracks()[0].readyState, 'live');
+});
+
 test('background noise alone never completes the voice calibration as a usable phrase', async (t) => {
   const f = fixture(t);
   await f.measureNoise();

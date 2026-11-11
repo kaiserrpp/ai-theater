@@ -35,6 +35,7 @@ const fixture = (t, extra = {}) => {
       if (speechFirst) this.onspeechend?.();
       this.receive(text);
       if (!speechFirst) this.onspeechend?.();
+      this.audioEnd();
     }
     audioEnd() { active = null; this.onaudioend?.(); }
     interrupt(delivery = 'end') {
@@ -377,7 +378,7 @@ test('a real pause before finishing the replica still resumes listening instead 
 });
 
 for (const speechFirst of [false, true]) {
-  test(`one-shot playback readiness requires final result AND speechend (${speechFirst ? 'speech' : 'result'} first)`, async (t) => {
+  test(`final result plus speechend cannot release playback before audioend (${speechFirst ? 'speech' : 'result'} first)`, async (t) => {
     const f = fixture(t);
     f.session.configure(options());
     const current = f.handles[0];
@@ -386,16 +387,19 @@ for (const speechFirst of [false, true]) {
     let inputReady = false, serviceEnded = false;
     const input = f.session.waitForInputEnd().then((ended) => { inputReady = ended; });
     const service = f.session.waitForEnd().then((ended) => { serviceEnded = ended; });
-    if (speechFirst) current.onspeechend();
+    if (speechFirst) current.onspeechend?.();
     else current.receive('Mi frase');
     await Promise.resolve();
     assert.equal(inputReady, false, 'one signal alone must not start playback');
     assert.equal(serviceEnded, false);
     if (speechFirst) current.receive('Mi frase');
-    else current.onspeechend();
+    else current.onspeechend?.();
+    await Promise.resolve();
+    assert.equal(inputReady, false, 'even both speech signals leave the physical capture unconfirmed');
+    current.audioEnd();
     await input;
     assert.equal(inputReady, true);
-    assert.equal(f.session.getInputEndReason(), 'frase definitiva');
+    assert.equal(f.session.getInputEndReason(), 'fin de captura');
     assert.equal(serviceEnded, false, 'input completion must not detach or abort the finishing service');
     assert.equal(current.aborted, undefined);
     current.end(); await service;
@@ -445,7 +449,7 @@ test('audioend can release playback while native service shutdown still waits in
 test('a continuous recognizer never uses final plus speechend as proof that its input ended', async (t) => {
   const f = fixture(t, { naturalEnd: false });
   f.session.configure(options());
-  f.handles[0].receive('Una frase'); f.handles[0].onspeechend();
+  f.handles[0].receive('Una frase'); f.handles[0].onspeechend?.();
   let ready = false;
   const pending = f.session.waitForInputEnd().then((ended) => { ready = ended; });
   await Promise.resolve();

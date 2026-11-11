@@ -94,19 +94,16 @@ export const createSpeechRecognitionSession = (
   let needsCue = Boolean(options.naturalEnd && usage.started);
   let closingForChange = false;
   let audioEnded = false;
-  let finalResultReceived = false;
-  let speechEnded = false;
   let playbackCompletedAfterInput = false;
-  let inputEndReason: 'frase definitiva' | 'fin de captura' | 'fin de servicio' | null = null;
+  let inputEndReason: 'fin de captura' | 'fin de servicio' | null = null;
   let preparing = false;
   let preparationVersion = 0;
   let cancelPreparation: (() => void) | null = null;
   const endWaiters = new Set<(ended: boolean) => void>();
   const inputEndWaiters = new Set<(ended: boolean) => void>();
-  // In WebKit's one-shot recognizer, final-result + speechend are emitted
-  // when the native request ends its audio and starts finishing. Service end
-  // can arrive later. Never use interim text or silence alone as this proof.
-  const inputHasEnded = () => audioEnded || Boolean(options.naturalEnd && finalResultReceived && speechEnded);
+  // A final result/speechend can leave WebKit's capture source alive. Only
+  // audioend proves that capture has stopped. Service end remains a fallback.
+  const inputHasEnded = () => audioEnded;
 
   const update = (change: Partial<SpeechRecognitionSnapshot>) => {
     snapshot = { ...snapshot, ...change };
@@ -201,7 +198,7 @@ export const createSpeechRecognitionSession = (
       current.lang = language;
       current.maxAlternatives = 1;
       let hadAudioInput = false;
-      audioEnded = finalResultReceived = speechEnded = playbackCompletedAfterInput = false;
+      audioEnded = playbackCompletedAfterInput = false;
       inputEndReason = null;
       closingForChange = false;
       update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null });
@@ -221,11 +218,7 @@ export const createSpeechRecognitionSession = (
         update({ isAudioActive: false });
         finishInputWaiters('fin de captura');
       };
-      current.onspeechend = () => {
-        if (recognition !== current) return;
-        speechEnded = true;
-        if (inputHasEnded()) finishInputWaiters('frase definitiva');
-      };
+      current.onspeechend = null;
       current.onerror = (event) => {
         if (recognition !== current) return;
         if (!pageVisible || /page.*(not visible|no longer visible|became invisible)/i.test(event.message ?? '')) {
@@ -241,11 +234,6 @@ export const createSpeechRecognitionSession = (
       };
       current.onresult = (event) => {
         if (recognition !== current) return;
-        // Keep the lifecycle proof even after the completed line disabled
-        // transcription. The finishing service must not delay the reply.
-        finalResultReceived ||= Array.from({ length: event.results.length }, (_, index) => event.results[index])
-          .some((result) => result?.isFinal);
-        if (inputHasEnded()) finishInputWaiters('frase definitiva');
         if (!enabled || !pageVisible || blocked || closingForChange) return;
         hadAudioInput = true;
         if (startTimer !== null) clearTimeout(startTimer);

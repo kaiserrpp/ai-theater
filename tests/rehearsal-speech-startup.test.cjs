@@ -49,6 +49,7 @@ const fixture = (t) => {
       capturing = false;
       this.onresult?.({ results: [{ isFinal: true, 0: { transcript: 'Frase terminada' } }] });
       this.onspeechend?.();
+      this.onaudioend?.();
     }
   }
   global.window = { speechSynthesis: synth, SpeechSynthesisUtterance: Utterance };

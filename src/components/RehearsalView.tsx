@@ -2009,7 +2009,7 @@ export const RehearsalView: React.FC<Props> = ({
       }
       if (isCancelled || !isPageVisible()) return;
       if (temporarilySuspendingAutoListen) {
-        await stopListening();
+        await releaseListeningInput();
         if (isCancelled) {
           return;
         }
@@ -2051,6 +2051,7 @@ export const RehearsalView: React.FC<Props> = ({
     getAdaptiveRehearsalSpeechRate,
     speakableLineText,
     stopListening,
+    releaseListeningInput,
     stopRecognition,
     waitForRecognitionInputEnd,
     waitForRecognitionEnd,

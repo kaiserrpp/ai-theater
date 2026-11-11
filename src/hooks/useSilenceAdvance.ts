@@ -274,7 +274,7 @@ export const useSilenceAdvance = ({
 
     const liveTracks = currentStream
       .getAudioTracks()
-      .filter((track) => track.readyState !== 'ended');
+      .filter((track) => track.readyState !== 'ended' && !track.muted);
 
     if (liveTracks.length === 0) {
       currentStream.getTracks().forEach((track) => track.stop());
