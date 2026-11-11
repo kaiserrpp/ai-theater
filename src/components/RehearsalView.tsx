@@ -2128,28 +2128,34 @@ export const RehearsalView: React.FC<Props> = ({
 
   const prepareRehearsalMedia = useCallback(() => {
     const run = ++preparationRunRef.current;
-    stopRehearsalSpeech(); stopSongAudio();
+    stopSongAudio();
     setIsPreparingRehearsalMedia(true);
     setHasPreparedRehearsalMedia(false);
     setRehearsalMediaStatus('Escucha la frase de prueba.');
     setRehearsalPreflightPhase('audio-check');
     // Synthesis starts in this tap, before any await, to unlock Safari output.
-    let finished = false;
     const finish = (error = false) => {
-      if (finished) return;
-      finished = true; clearTimeout(timeout);
       if (preparationRunRef.current !== run) return;
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(!error);
       setRehearsalMediaStatus(error
-        ? 'No se pudo completar la prueba de voz. Pulsa Probar voz para reintentar.'
+        ? 'No se pudo completar la prueba de voz. Pulsa Probar voz para reiniciarla.'
         : '¿Has oído claramente la frase de la app?');
     };
-    const timeout = setTimeout(() => finish(true), 7000);
-    speakRehearsalSpeech('Hola, hola, dime si me oyes.', {
-      onStart: () => { if (preparationRunRef.current === run) setRehearsalMediaStatus('Sonando: «Hola, hola, dime si me oyes».'); },
-      onDone: () => finish(), onError: () => finish(true),
-    });
+    void playCalibrationVoice('Hola, hola, dime si me oyes.', {
+      speak: (text, callbacks) => speakRehearsalSpeech(text, {
+        ...callbacks,
+        // Restore the cold-start reset used by the working speaker check,
+        // without adding cancellations or delays between rehearsal lines.
+        resetBeforeStart: true,
+        onStart: () => {
+          if (preparationRunRef.current === run) {
+            setRehearsalMediaStatus('Prueba en curso: «Hola, hola, dime si me oyes».');
+          }
+        },
+      }),
+      stop: () => { if (preparationRunRef.current === run) stopRehearsalSpeech(); },
+    }).then(() => finish(), () => finish(true));
   }, [stopSongAudio]);
 
   const calibrateRehearsalMicrophone = useCallback(async () => {

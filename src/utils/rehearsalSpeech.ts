@@ -5,6 +5,9 @@ type SpeechCallbacks = {
   onDone?: () => void;
   onError?: (error: Error) => void;
   rate?: number;
+  // Only the explicit speaker check needs a fresh engine, even when Safari
+  // reports no queued speech. Ordinary rehearsal lines keep the warm engine.
+  resetBeforeStart?: boolean;
 };
 
 type PreparedSpeech = {
@@ -70,7 +73,7 @@ const getPreferredVoice = (synth: SpeechSynthesis) => {
   );
 };
 
-export const stopRehearsalSpeech = () => {
+export const stopRehearsalSpeech = (forceReset = false) => {
   const hadUtterance = activeUtterance !== null;
   speechRun += 1;
   clearSpeechTimers();
@@ -81,7 +84,7 @@ export const stopRehearsalSpeech = () => {
     if (synth) {
       // Completed utterances already released their ownership. Resetting an
       // idle engine in every effect cleanup/start adds work between replicas.
-      if (hadUtterance || synth.pending || synth.speaking) synth.cancel();
+      if (forceReset || hadUtterance || synth.pending || synth.speaking) synth.cancel();
       return;
     }
   }
@@ -149,12 +152,12 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
     }
     return utterance;
   };
-  const preparedUtterance = createUtterance();
+  const preparedUtterance = callbacks.resetBeforeStart ? null : createUtterance();
 
   const attemptSpeak = (attempt: number) => {
     if (!isCurrent()) return;
     let started = false;
-    const utterance = attempt === 0 ? preparedUtterance : createUtterance();
+    const utterance = attempt === 0 && preparedUtterance ? preparedUtterance : createUtterance();
     utterance.rate = speechRate;
     activeUtterance = utterance;
 
@@ -217,7 +220,7 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
     start: (rate = speechRate) => {
       if (launched || cancelled) return;
       speechRate = rate;
-      stopRehearsalSpeech();
+      stopRehearsalSpeech(callbacks.resetBeforeStart);
       run = speechRun;
       launched = true;
       attemptSpeak(0);

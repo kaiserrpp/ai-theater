@@ -20,6 +20,8 @@ Instrucción expresa del usuario, 10 de noviembre de 2026: **publicar la versió
 
 ## Ensayo
 
+- La **2026.11.212** recupera para la prueba inicial de altavoz el reinicio explícito del sintetizador que existía en la 199 y se eliminó al optimizar la 204. Solo esa prueba usa `resetBeforeStart`: reinicia, crea la locución y habla en el mismo toque, sin abrir micro ni activar canciones. Usa también el cierre por error/tiempo límite de `playCalibrationVoice`; un intento fallido no debe seguir hablando ni afectar a otro posterior. Conservar el sintetizador caliente entre réplicas y todas las separaciones de captura/audio. Esta diferencia se verificó en código y pruebas; no está confirmado que explique el silencio reportado en el iPhone ni que el sonido físico se haya recuperado.
+
 - La **2026.11.211** añade `/comparar-transcripcion.html` para comparar Vosk español y Whisper Tiny multilingüe local con una misma muestra, por turnos para reducir memoria. Es un laboratorio separado: el reconocimiento del ensayo y la preferencia de modo permanecen iguales. Mantener las pausas y las reglas de `lineMatching.ts`; `npm run comparison:build` sincroniza su copia ESM y la versión (comprobadas por `npm test`). Los informes `comparacion_local` incluyen motor, identificador de muestra, carga y procesado, sin audio. No tratar el procesado de una grabación como latencia de avance en vivo ni las coincidencias normalizadas como precisión literal del ASR. La prueba en el iPhone físico y la integración de Whisper en el ensayo siguen pendientes.
 
 - Los cambios de escena deben anunciar por voz el título y esperar a «adelante» o al botón «Siguiente escena»; nunca avanzar solo por tiempo, silencio o fin de un audio.

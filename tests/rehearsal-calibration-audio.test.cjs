@@ -153,6 +153,30 @@ const speechBrowser = (t) => {
   return { synth, utterances };
 };
 
+test('a speaker check that starts but never ends is stopped, and its late callbacks cannot finish the next voice', async (t) => {
+  const { synth, utterances } = speechBrowser(t);
+  let stopped = 0;
+  synth.cancel = () => { stopped += 1; };
+  const pending = voice('Hola, hola, dime si me oyes.', {
+    speak: (text, callbacks) => speak(text, { ...callbacks, resetBeforeStart: true }), stop,
+  });
+  utterances[0].onstart();
+  const staleDone = utterances[0].onend;
+  const rejection = assert.rejects(pending, /calibration-voice-unavailable/);
+  t.mock.timers.tick(7000);
+  await rejection;
+  assert.equal(stopped, 2, 'one initial reset and one timeout cleanup');
+  let nextCompleted = 0;
+  speak('Nuevo intento.', { onDone: () => { nextCompleted += 1; } });
+  utterances[1].onstart();
+  staleDone();
+  assert.equal(nextCompleted, 0);
+  utterances[1].onend();
+  assert.equal(nextCompleted, 1);
+  t.mock.timers.tick(10000);
+  assert.equal(stopped, 2);
+});
+
 test('cancelling calibration cannot retry its voice or complete an obsolete announcement', (t) => {
   const { utterances } = speechBrowser(t);
   let completed = 0;

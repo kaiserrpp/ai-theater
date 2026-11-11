@@ -155,6 +155,32 @@ test('a genuinely stuck browser queue is cleared once, while calibration still s
   f.finish();
 });
 
+test('the explicit speaker check resets even an apparently idle engine and speaks within the same tap', (t) => {
+  const f = fixture(t);
+  let inTap = true, startedInTap = false;
+  speak('Hola, hola, dime si me oyes.', {
+    resetBeforeStart: true,
+    onStart: () => { startedInTap = inTap; },
+  });
+  inTap = false;
+  assert.equal(startedInTap, true);
+  assert.deepEqual(f.events.map((event) => event.kind), ['cancel', 'prepared', 'resume', 'speak']);
+  f.finish();
+  speak('La primera réplica.', {});
+  f.finish();
+  assert.equal(f.count('cancel'), 1, 'the initial reset must not return between ordinary lines');
+});
+
+test('a cancelled speaker reset cannot start later or cancel a newer utterance', (t) => {
+  const f = fixture(t);
+  const check = prepare('Prueba cancelada.', { resetBeforeStart: true });
+  check.cancel();
+  speak('La voz actual.', {});
+  check.start();
+  assert.equal(f.count('cancel'), 0);
+  assert.deepEqual(f.utterances.map((utterance) => utterance.text), ['La voz actual.']);
+});
+
 test('the app speaks at natural input completion instead of waiting for delayed native service end', async (t) => {
   const f = fixture(t);
   f.session.configure({ enabled: true, lang: 'es-ES', lineKey: 'actor' });
