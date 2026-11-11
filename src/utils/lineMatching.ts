@@ -190,6 +190,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   delyornar: 'journal',
   entienda: 'sentido',
   entiendo: 'sentido',
+  enlgish: 'english',
   fe: 'fe',
   gratis: 'crutchie',
   haceis: 'hacen',
@@ -231,6 +232,7 @@ const TOKEN_ALIASES: Record<string, string> = {
   quizas: 'quiza',
   lamento: 'triste',
   resears: 'research',
+  riquean: 'rican',
   romeo: 'romeo',
   santafe: 'santafe',
   space: 'specs',
@@ -490,14 +492,64 @@ const getEquivalentLineReferences = (expectedText: string) => {
   );
 };
 
-const tokenize = (value: string) =>
-  normalizeSpeechText(value)
+// The Spanish recognizer writes English sounds as Spanish words. Apply these
+// corrections only while matching the corresponding English in the script;
+// "sur", "Willy" or "Macbeth" keep their meaning in every other line.
+const CONTEXTUAL_RECOGNITION_ALIASES: {
+  referencePattern: RegExp;
+  replacements: [RegExp, string][];
+}[] = [
+  {
+    referencePattern: /^really$/,
+    replacements: [[/\b(?:riley|willy)\b/g, 'really']],
+  },
+  {
+    referencePattern: /^sure$/,
+    replacements: [[/\bsur\b/g, 'sure']],
+  },
+  {
+    referencePattern: /\bmy english is getting much better\b/,
+    replacements: [[
+      /\b(?:my|mae|may|mas|muy) (?:english|ingles) (?:es jardin matt better|(?:(?:es que mas|ketty|isleta) )?macbeth(?: era)?)\b/g,
+      'my english is getting much better',
+    ]],
+  },
+  {
+    referencePattern: /\bpuerto rican english\b/,
+    replacements: [
+      [/\bpuertorriquena(?: en)? (?:ingles|english)\b/g, 'puerto rican english'],
+      [/\bpuerto rico en (?:ingles|english)\b/g, 'puerto rican english'],
+      [/\bingles\b/g, 'english'],
+    ],
+  },
+];
+
+const normalizeHeardText = (value: string, referenceText?: string) => {
+  let normalized = normalizeSpeechText(value);
+  if (!referenceText) return normalized;
+
+  const reference = normalizeSpeechText(referenceText);
+  // An ASR correction must not rescue a phrase that changes a negation.
+  if (getNegationCount(reference.split(' ')) !== getNegationCount(normalized.split(' '))) {
+    return normalized;
+  }
+  CONTEXTUAL_RECOGNITION_ALIASES.forEach(({ referencePattern, replacements }) => {
+    if (!referencePattern.test(reference)) return;
+    replacements.forEach(([pattern, replacement]) => {
+      normalized = normalized.replace(pattern, replacement);
+    });
+  });
+  return normalized;
+};
+
+const tokenize = (value: string, referenceText?: string) =>
+  normalizeHeardText(value, referenceText)
     .split(' ')
     .map((token) => token.trim())
     .filter(Boolean);
 
-const getContentTokens = (value: string) => {
-  const tokens = tokenize(value);
+const getContentTokens = (value: string, referenceText?: string) => {
+  const tokens = tokenize(value, referenceText);
   const contentTokens = tokens.filter(
     (token) =>
       NEGATION_WORDS.has(token) ||
@@ -603,7 +655,7 @@ const getLongestCommonSubsequenceLength = (leftTokens: string[], rightTokens: st
 
 const getFinalPhraseScore = (referenceText: string, heardText: string) => {
   const referenceTokens = tokenize(referenceText);
-  const heardTokens = tokenize(heardText);
+  const heardTokens = tokenize(heardText, referenceText);
   const finalReferenceTokens = getTailTokens(referenceTokens, FLUENT_FINAL_WORD_COUNT);
   const heardTailTokens = getTailTokens(
     heardTokens,
@@ -666,7 +718,7 @@ const scoreAgainstReference = (
   referenceIndex: number
 ): LineMatchResult => {
   const referenceTokens = getContentTokens(referenceText);
-  const heardTokens = getContentTokens(heardText);
+  const heardTokens = getContentTokens(heardText, referenceText);
 
   if (!referenceTokens.length || !heardTokens.length) {
     return getEmptyResult(referenceText, referenceIndex);
@@ -748,7 +800,7 @@ export const getAutomaticLineMatchReason = (
   result: LineMatchResult
 ): AutomaticLineMatchReason | null => {
   const expectedTokens = getContentTokens(result.referenceText || expectedText);
-  const heardTokens = getContentTokens(heardText);
+  const heardTokens = getContentTokens(heardText, result.referenceText || expectedText);
 
   if (!heardTokens.length) {
     return null;
@@ -859,7 +911,7 @@ export const getAutomaticLineAdvanceDelay = (
 
   const reference = result.referenceText || expectedText;
   const ending = getTailTokens(tokenize(reference), FLUENT_FINAL_WORD_COUNT);
-  const heardEnding = getTailTokens(tokenize(heardText), ending.length);
+  const heardEnding = getTailTokens(tokenize(heardText, reference), ending.length);
   const hasCompleteEnding = ending.length >= 4 && heardEnding.length === ending.length &&
     ending.every((token, index) => tokensMatch(token, heardEnding[index]));
   return !result.negationPenaltyApplied && hasCompleteEnding &&

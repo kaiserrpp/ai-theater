@@ -506,3 +506,33 @@ Simulacion con informe 2026-05-19:
 - lineas manuales que ahora avanzarian: 18
 - autoavance proyectado: 83/86, aproximadamente 97%
 - se dejan fuera 3 lineas por ser demasiado parciales o con muy poca cobertura
+
+## Informes del 11 de noviembre de 2026: inglés con reconocimiento español
+
+Revisión para la versión **2026.11.209**:
+
+- Se descargaron los 21 informes disponibles en `production`, con 549 entradas, sin modificar el almacenamiento remoto.
+- Los cinco informes más recientes, enviados con la 208, contienen 30 entradas: 8 autoavances y 22 avances manuales. No contienen incidencias de falso positivo; esto no demuestra que no existan.
+- Las réplicas inglesas aparecen reconocidas en español. Las transcripciones no incluyen grabación, por lo que no permiten comprobar la pronunciación ni asegurar que toda frase saltada se dijera bien.
+
+Equivalencias añadidas a la comparación, limitadas por la referencia del guion:
+
+| Texto esperado | Transcripción observada | Casos manuales recuperados |
+| --- | --- | --- |
+| My English is getting much better | mae english es jardín matt better; may english macbeth; más inglés es que más macbeth; muy english ketty macbeth; más inglés isleta macbeth era | 5 |
+| Really | riley; willy | 3 |
+| Sure | sur; sur hasta | 3 |
+| Dominican English y Puerto Rican English | dominicana inglés y puertorriqueña en inglés | 1 |
+
+Se normalizan también las erratas `Enlgish` y `riquean`. Las correcciones fonéticas se aplican al texto usado por la comparación; el informe conserva las palabras originales del reconocedor y el texto original del guion. No se convierten globalmente `sur`, `Willy`, `Riley` o `Macbeth` en palabras inglesas distintas.
+
+Las reglas de puntuación, umbrales, idiomas y captura se mantienen. Las correcciones nuevas no se aplican si cambia la cantidad de negaciones. Una pausa antes del fragmento inglés conserva lo escuchado y espera una coincidencia suficiente; no se añade ningún final literal obligatorio.
+
+Resultado de la simulación con las mismas transcripciones:
+
+- Se recuperan 12 de los 22 avances manuales: el total aceptable pasa de 8/30 a 20/30, aproximadamente del 27 % al 67 %.
+- En las 549 entradas históricas se pasa de 484 a 496 coincidencias aceptables, sin perder ninguna aceptación anterior.
+- Se mantienen bloqueados los diez casos restantes de la 208: los cinco intentos de «Ey, Sonny», «nureddin», «sobre», «palabras nómadas» y dos transcripciones vacías adicionales. No hay base suficiente para equipararlos con la réplica prevista.
+- Las regresiones incluyen fragmentos ingleses incompletos, pausas de cinco segundos, negaciones y el uso normal de los nombres y palabras fuera de esas réplicas.
+
+Son proyecciones sobre informes guardados. Falta medir los aciertos, los posibles avances incorrectos y la respuesta acústica en el iPhone durante el ensayo.

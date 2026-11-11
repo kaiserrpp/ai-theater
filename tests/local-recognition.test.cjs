@@ -92,6 +92,25 @@ test('local recognition uses the same tolerant threshold when the last word chan
   }
 });
 
+test('a pause before English preserves the Spanish words and accepts the later phonetic result', async (t) => {
+  const f = fixture(t);
+  const expected = 'Tengo noticias. My Enlgish is getting much better.';
+  f.recognition.configure(options()); await settle();
+  f.decoders[0].final('tengo noticias');
+  t.mock.timers.tick(5000);
+  let snapshot = f.recognition.getSnapshot();
+  assert.equal(delay(expected, snapshot.transcript, snapshot.interimTranscript,
+    scoreLineMatch(expected, snapshot.transcript)), null);
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'live');
+  f.decoders[0].partial('may english macbeth');
+  snapshot = f.recognition.getSnapshot();
+  assert.equal(snapshot.transcript, 'tengo noticias may english macbeth');
+  assert.equal(delay(expected, snapshot.transcript, snapshot.interimTranscript,
+    scoreLineMatch(expected, snapshot.transcript)), 60);
+  f.recognition.stop();
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'ended');
+});
+
 test('multi-second pauses keep the words without advancing before a sufficient match', async (t) => {
   const f = fixture(t);
   f.recognition.configure(options()); await settle();
