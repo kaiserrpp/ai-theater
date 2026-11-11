@@ -2,8 +2,9 @@ const { head, list, put } = require('@vercel/blob');
 const { normalizeAuditionScenes } = require('../../shared/auditionScenes');
 const { normalizeMusicalAuditions } = require('../../shared/musicalAuditions');
 const adminSession = require('../../server/admin-session');
+const { normalizeSharedAppearance } = require('../../shared/workAppearance');
 
-const MANIFEST_VERSION = 6;
+const MANIFEST_VERSION = 7;
 const EMPTY_SONGS = [];
 const EMPTY_MUSICAL_NUMBERS = [];
 const SONG_AUDIO_KINDS = new Set(['karaoke', 'vocal_guide']);
@@ -18,13 +19,6 @@ const sanitizeNamespace = (value) =>
 const getStorageNamespace = () => {
   if (typeof process.env.SHARED_STORAGE_NAMESPACE === 'string' && process.env.SHARED_STORAGE_NAMESPACE.trim()) {
     return sanitizeNamespace(process.env.SHARED_STORAGE_NAMESPACE);
-  }
-
-  if (
-    process.env.VERCEL_ENV === 'preview' &&
-    process.env.VERCEL_GIT_COMMIT_REF === 'codex/intelligent-line-advance'
-  ) {
-    return 'production';
   }
 
   if (process.env.VERCEL_ENV === 'production') {
@@ -342,6 +336,7 @@ const normalizeManifest = (value) => {
     }),
     auditionScenes: normalizeAuditionScenes(value?.auditionScenes),
     musicalAuditions: normalizeMusicalAuditions(value?.musicalAuditions),
+    appearance: normalizeSharedAppearance(value?.appearance),
     createdAt:
       typeof value?.createdAt === 'string' && value.createdAt.trim()
         ? value.createdAt

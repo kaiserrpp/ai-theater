@@ -1522,6 +1522,8 @@ export const HomeScreen = () => {
   const workKey = sharedScript?.shareId ? appearanceWorkKey({ kind: 'shared', id: sharedScript.shareId })
     : scriptData ? appearanceWorkKey({ kind: 'local', id: getScriptIdentity(scriptData) }) : null;
   return <AppearanceProvider workKey={workKey} workTitle={scriptData?.obra ?? ''}
+    sharedScript={sharedScript}
+    localWorkKey={scriptData ? appearanceWorkKey({ kind: 'local', id: getScriptIdentity(scriptData) }) : null}
     legacyWorkKey={preferredWork === undefined ? undefined : appearanceWorkKey(preferredWork)}>
     {renderScreen()}
   </AppearanceProvider>;

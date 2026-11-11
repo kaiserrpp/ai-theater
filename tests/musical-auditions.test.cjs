@@ -36,7 +36,7 @@ const audio = (kind, revision = 1) => ({shareId:'music-test',password:'test-key'
   audio:{audioUrl:`https://example.com/${kind}.m4a`,audioFileName:`${kind}.m4a`,contentType:'audio/mp4',size:1000}});
 
 test('old works receive an empty audition music collection and both existing music and scenes survive normalization', () => {
-  const value=base(); assert.equal(value.version,6); assert.deepEqual(value.musicalAuditions,[]);
+  const value=base(); assert.equal(value.version,7); assert.deepEqual(value.musicalAuditions,[]);
   assert.equal(value.musicalNumbers[0].audios[0].audioUrl,'https://example.com/complete.mp3');
   assert.equal(value.auditionScenes.length,1);
 });

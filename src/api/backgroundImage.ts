@@ -23,3 +23,15 @@ export const discardBackgroundImage = async (uri: string) => {
     await FileSystem.deleteAsync(uri, { idempotent: true });
   }
 };
+
+export const backgroundImageDataUrl = async (uri: string): Promise<string> => {
+  if (/^data:image\/(jpeg|png|webp);base64,/i.test(uri)) return uri;
+  const file = await FileSystem.getInfoAsync(uri);
+  if (!file.exists || file.isDirectory || file.size > 3 * 1024 * 1024) {
+    throw new Error('Elige una imagen de menos de 3 MB para compartirla.');
+  }
+  const extension = uri.split('.').pop()?.toLowerCase();
+  const kind = extension === 'jpg' || extension === 'jpeg' ? 'jpeg' : extension;
+  if (kind !== 'jpeg' && kind !== 'png' && kind !== 'webp') throw new Error('Elige una imagen JPG, PNG o WebP.');
+  return `data:image/${kind};base64,${await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 })}`;
+};

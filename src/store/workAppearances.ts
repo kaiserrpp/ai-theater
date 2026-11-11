@@ -6,6 +6,13 @@ export type WorkAppearances = Record<string, BackgroundPreference | null>;
 type Storage = { getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<unknown>; removeItem: (key: string) => Promise<unknown> };
 export const appearanceWorkKey = (work: PreferredWork | null) => work ? `${work.kind}:${work.id}` : null;
 
+export const resolveWorkBackground = (works: WorkAppearances, workKey: string | null, localWorkKey: string | null = null) => {
+  if (!workKey) return null;
+  if (Object.prototype.hasOwnProperty.call(works, workKey)) return works[workKey];
+  // Publishing a local work keeps the poster selected before it had a share ID.
+  return workKey.startsWith('shared:') && localWorkKey?.startsWith('local:') ? works[localWorkKey] ?? null : null;
+};
+
 const parseAppearances = (stored: string | null): WorkAppearances => {
   if (!stored) return {};
   const parsed = JSON.parse(stored);

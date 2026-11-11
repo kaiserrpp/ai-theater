@@ -119,6 +119,7 @@ test('all protected material endpoints accept a valid session without a password
     ['publish', ['POST']], ['song-audio', ['POST', 'PATCH', 'DELETE']], ['musical-number', ['POST', 'PATCH', 'DELETE']],
     ['musical-number-audio', ['POST', 'PATCH', 'DELETE']], ['video-audio-extract', ['POST']],
     ['audition-scene', ['POST', 'PATCH', 'DELETE']], ['audition-scene', ['POST', 'PATCH', 'DELETE'], { auditionType: 'music' }],
+    ['index', ['POST', 'DELETE'], { resource: 'appearance' }],
   ];
   for (const [name, methods, query = {}] of cases) {
     const handler = require(`../api/shared-script/${name}`);

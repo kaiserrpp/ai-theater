@@ -1,5 +1,6 @@
 import { ScriptData } from './script';
 import type { CharacterMergeMap } from '../utils/scriptRoleMerges';
+import type { SharedWorkAppearance } from '../../shared/workAppearance';
 
 export type SharedSongAudioKind = 'karaoke' | 'vocal_guide';
 export type MusicalTimelineCueTargetKind = 'dialogue' | 'song';
@@ -55,6 +56,7 @@ export interface SharedScriptManifest {
   musicalNumbers: SharedMusicalNumberAsset[];
   auditionScenes: SharedAuditionScene[];
   musicalAuditions: SharedMusicalAudition[];
+  appearance?: SharedWorkAppearance;
   createdAt: string;
   updatedAt: string;
 }

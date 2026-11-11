@@ -77,6 +77,7 @@ module.exports = async (request, response) => {
       // publishing from an older client must not erase existing audition scenes.
       auditionScenes: previousManifest?.auditionScenes || [],
       musicalAuditions: previousManifest?.musicalAuditions || [],
+      appearance: previousManifest?.appearance,
       createdAt,
       updatedAt: now,
     };

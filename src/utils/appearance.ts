@@ -1,3 +1,5 @@
+import { isSharedBackgroundUri } from '../../shared/workAppearance';
+
 export type RGB = [number, number, number];
 export type BackgroundPreference = { uri: string; name: string; average: RGB; accent?: RGB };
 
@@ -86,7 +88,7 @@ export const parseBackgroundPreference = (stored: string | null): BackgroundPref
   if (!stored) return null;
   try {
     const value = JSON.parse(stored);
-    if (typeof value?.uri !== 'string' || !/^(data:image\/(jpeg|png|webp);base64,|file:\/\/)/i.test(value.uri)
+    if (typeof value?.uri !== 'string' || (!/^(data:image\/(jpeg|png|webp);base64,|file:\/\/)/i.test(value.uri) && !isSharedBackgroundUri(value.uri))
       || typeof value.name !== 'string' || !Array.isArray(value.average) || value.average.length !== 3
       || !value.average.every((channel: unknown) => typeof channel === 'number' && Number.isFinite(channel) && channel >= 0 && channel <= 255)) return null;
     const accent = Array.isArray(value.accent) && value.accent.length === 3

@@ -1,6 +1,8 @@
 const { readManifest } = require('./_shared');
+const appearance = require('../../server/work-appearance');
 
 module.exports = async (request, response) => {
+  if (request.query?.resource === 'appearance') return appearance(request, response);
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
     response.status(405).json({ error: 'Metodo no permitido.' });

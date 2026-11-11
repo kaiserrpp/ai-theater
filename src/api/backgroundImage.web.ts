@@ -40,3 +40,10 @@ export const prepareBackgroundImage = async (asset: DocumentPickerAsset): Promis
 };
 
 export const discardBackgroundImage = async (_uri: string) => {};
+
+export const backgroundImageDataUrl = async (uri: string): Promise<string> => {
+  if (!/^data:image\/(jpeg|png|webp);base64,/i.test(uri) || uri.length > 4 * 1024 * 1024 + 100) {
+    throw new Error('Elige otra imagen. La imagen preparada debe ocupar menos de 3 MB.');
+  }
+  return uri;
+};
