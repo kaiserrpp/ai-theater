@@ -36,6 +36,7 @@ export type SpeechRecognitionSnapshot = {
 
 type RecognitionOptions = {
   naturalEnd?: boolean;
+  startTimeoutMs?: number;
   pageVisible?: boolean;
   prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
   usage?: { started: boolean };
@@ -62,6 +63,8 @@ const recognitionErrorMessage = (code?: string, detail = '') => {
       return 'El servicio de reconocimiento no responde. Comprueba la conexión y pulsa Activar micrófono.';
     case 'language-not-supported':
       return 'El navegador no puede reconocer el idioma de esta réplica.';
+    case 'local-recognition-failed':
+      return 'No se ha podido preparar la escucha en este dispositivo. Comprueba la conexión y reintenta; la primera descarga ocupa unos 40 MB.';
     default:
       return 'No se pudo iniciar la escucha. Pulsa Activar micrófono para intentarlo de nuevo.';
   }
@@ -164,6 +167,7 @@ export const createSpeechRecognitionSession = (
     clearTimers(); clearEvidence(); cancelCue();
     committedTranscript = snapshot.transcript;
     closingForChange = true;
+    if (!options.naturalEnd) detach();
     update({ status: blocked ? 'error' : 'suspended', isAudioActive: false });
   };
   const start = () => {
@@ -291,7 +295,7 @@ export const createSpeechRecognitionSession = (
       // Some devices expose the service but never open the audio input.
       startTimer = setTimeout(() => {
         if (recognition === current) fail('El reconocimiento no ha abierto el micrófono. Pulsa Activar micrófono para iniciar la escucha.');
-      }, 15000);
+      }, options.startTimeoutMs ?? 15000);
       usage.started = true;
       current.start();
     } catch (error) {

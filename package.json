@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.11.205",
+  "version": "2026.11.206",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
     "version:bump": "node increment-version.js",
@@ -45,7 +45,8 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-web": "~0.21.0",
-    "react-native-worklets": "0.5.1"
+    "react-native-worklets": "0.5.1",
+    "vosk-browser": "0.0.8"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

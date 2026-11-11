@@ -15,7 +15,7 @@ import { resolveListenPreference, resolveTranscriptPreference, supportsRecogniti
 import { canBeginPreparedRehearsal, runRehearsalMicrophoneCalibration } from '../utils/rehearsalPreparation';
 import { playCalibrationBeep, playCalibrationVoice, primeRehearsalAudioPlayer } from '../utils/rehearsalCalibrationAudio';
 import { getRehearsalPreparationStep, rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
-import { hasRecognizedMicrophoneCheck } from '../utils/speechRecognitionCompatibility';
+import { hasRecognizedMicrophoneCheck, needsNaturalRecognitionEnd } from '../utils/speechRecognitionCompatibility';
 import {
   INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX,
   LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
@@ -778,6 +778,10 @@ export const RehearsalView: React.FC<Props> = ({
     return inferSpeechRecognitionLanguage(isMyTurn ? speakableLineText : nextActorLine?.t ?? speakableLineText);
   }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText]);
   const isIntelligentListenMode = listenModeSelection === 'intelligent';
+  const preferLocalRecognition = useMemo(() => needsNaturalRecognitionEnd(
+    typeof navigator === 'undefined' ? null : navigator
+  ) && inferSpeechRecognitionLanguage(filteredGuion.filter((line) => lineMatchesRoles(line, myRoles))
+    .map((line) => line.t).join(' ')) === 'es-ES', [filteredGuion, myRoles]);
   const isCheckingIntelligentRecognition = isIntelligentListenMode && rehearsalPreflightPhase === 'intelligent-check';
   const recognitionPreparationKey = `prepare:${resolvedScriptId}`;
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
@@ -875,6 +879,7 @@ export const RehearsalView: React.FC<Props> = ({
 
   const {
     isSupported: isSpeechRecognitionSupported,
+    isLocal: isLocalSpeechRecognition,
     status: speechRecognitionStatus,
     transcript: speechRecognitionTranscript,
     finalTranscript: speechRecognitionFinalTranscript,
@@ -894,8 +899,10 @@ export const RehearsalView: React.FC<Props> = ({
     notifyRecognitionPlaybackEnd,
   } = useSpeechRecognition({
     enabled: shouldKeepIntelligentRecognitionWarm,
-    lang: isCheckingIntelligentRecognition ? 'es-ES' : intelligentRecognitionLanguage,
+    lang: preferLocalRecognition || isCheckingIntelligentRecognition ? 'es-ES' : intelligentRecognitionLanguage,
     lineKey: recognitionLineKey,
+    preferLocal: preferLocalRecognition,
+    prepareLocal: hasConfirmedRehearsalSetup && isIntelligentListenMode,
   });
 
   const startCurrentScene = useCallback(() => {
@@ -1218,7 +1225,8 @@ export const RehearsalView: React.FC<Props> = ({
     );
     const advanceDelay = getAutomaticLineAdvanceDelay(
       speakableLineText, speechRecognitionTranscript,
-      speechRecognitionInterimTranscript, intelligentLineMatch
+      speechRecognitionInterimTranscript, intelligentLineMatch,
+      { requireCompleteEnding: isLocalSpeechRecognition }
     );
 
     if (
@@ -1268,6 +1276,7 @@ export const RehearsalView: React.FC<Props> = ({
     currentLineVariantKey,
     filteredGuion.length,
     intelligentLineMatch,
+    isLocalSpeechRecognition,
     recordIntelligentFeedback,
     resetSpeechRecognitionTranscript,
     shouldUseIntelligentRecognition,
@@ -2650,6 +2659,7 @@ export const RehearsalView: React.FC<Props> = ({
         <Text style={ui.text}>{myRoles.join(', ')} · {filterScenes.length} {filterScenes.length === 1 ? 'escena' : 'escenas'}</Text>
         <View style={ui.card}><Icon name={listenModeSelection === 'manual' ? 'gesture-tap' : 'microphone-outline'} size={32} /><Text style={ui.subtitle}>{listenModeSelection === 'intelligent' ? 'Modo inteligente' : listenModeSelection === 'auto' ? 'Avance al terminar de hablar' : 'Modo manual'}</Text><Text style={ui.text}>{listenModeSelection === 'intelligent' ? 'La app interpreta los demás personajes y comprueba tus palabras cuando llega tu turno.' : listenModeSelection === 'auto' ? 'Prepararemos el micro para avanzar cuando termines tu réplica y guardes silencio.' : 'La app interpreta los demás personajes. Pulsa siguiente al terminar tu réplica.'}</Text></View>
         <Text style={ui.text}>Las pruebas de audio se hacen una sola vez mientras la app siga abierta. Puedes repetirlas desde «Micrófono y voz».</Text>
+        {isLocalSpeechRecognition && isIntelligentListenMode ? <Text style={ui.text}>La escucha inteligente se prepara en este dispositivo. La primera vez descarga unos 40 MB; después reutiliza el modelo. Tus pausas no hacen avanzar la réplica.</Text> : null}
         <Button label={preferencesLoaded ? (initialIndex > 0 ? 'Continuar ensayo' : 'Empezar ensayo') : 'Recuperando preferencias…'} disabled={!preferencesLoaded} onPress={() => { setIsPaused(false); handleStartConfiguredRehearsal(); }} />
         <Button label="Micrófono y voz" secondary onPress={() => setShowMicrophoneMenu(true)} />
       </ScrollView>
@@ -2668,11 +2678,13 @@ export const RehearsalView: React.FC<Props> = ({
       <ScrollView contentContainerStyle={styles.preflightScrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.preflightCard}>
           {speechRecognitionStatus !== 'error' ? <>
-            <Text style={styles.preflightTitle}>{isRecognitionAudioActive ? 'Di «prueba de micro»' : 'Abriendo la escucha…'}</Text>
+            <Text style={styles.preflightTitle}>{isRecognitionAudioActive ? 'Di «prueba de micro»' : isLocalSpeechRecognition ? 'Preparando la escucha en este dispositivo…' : 'Abriendo la escucha…'}</Text>
             <Text style={styles.preflightText}>
               {rehearsalPreparationSession.getSnapshot().recognitionOutputConfirmed
                 ? 'Estamos activando el micrófono para este ensayo. Las pruebas de audio ya están hechas.'
-                : 'Si Safari solicita reconocer tu voz, pulsa Permitir. Di «prueba de micro»: comprobaremos que aparecen tus palabras antes de entrar al ensayo.'}
+                : isLocalSpeechRecognition
+                  ? 'Permite el micrófono. La primera preparación descarga unos 40 MB. Después di «prueba de micro»: comprobaremos tus palabras antes de empezar.'
+                  : 'Si Safari solicita reconocer tu voz, pulsa Permitir. Di «prueba de micro»: comprobaremos que aparecen tus palabras antes de entrar al ensayo.'}
             </Text>
             <Text style={styles.preflightText}>He oído: {speechRecognitionTranscript || 'Esperando tus palabras…'}</Text>
           </> : null}
