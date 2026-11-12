@@ -254,6 +254,18 @@ export interface RecognitionProcessingTiming {
   processingMs: number;
   queueMs: number;
   audioDurationMs: number;
+  encoderDevice?: 'webgpu' | 'wasm';
+  decoderDevice?: 'wasm';
+  encoderDtype?: 'fp32' | 'q8';
+  fallbackReason?: string | null;
+}
+
+export interface RehearsalResponseTiming {
+  kind: 'browser_events';
+  matchToVoiceRequestMs: number;
+  matchToVoiceStartEventMs: number;
+  inputCloseMs: number;
+  voiceRequestToStartEventMs: number;
 }
 
 export interface IntelligentLineFeedbackEntry {
@@ -261,6 +273,7 @@ export interface IntelligentLineFeedbackEntry {
   scriptContextEnabled?: boolean;
   scriptContextTermCount?: number;
   recognitionTiming?: RecognitionProcessingTiming | null;
+  responseTiming?: RehearsalResponseTiming | null;
   recognitionComparison?: {
     sampleId: string | null; engine: 'vosk' | 'whisper'; status: 'done' | 'error';
     model: string | null; modelRevision: string | null; backend: 'wasm';

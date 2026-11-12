@@ -41,22 +41,31 @@ test('streamed words and live timings arrive before completion, and cancelling r
  t.mock.timers.tick(350);await settle();
  const request=workers[0].messages.find(m=>m.type==='transcribe');
  assert.equal(request.language,'spanish');assert.equal(request.context,undefined);
- const reply=(type,text)=>workers[0].onmessage({data:{type,id:request.id,text,processingMs:250,queueMs:12,audioDurationMs:1000}});
+ const reply=(type,text)=>workers[0].onmessage({data:{type,id:request.id,text,processingMs:250,queueMs:12,audioDurationMs:1000,
+  encoderDevice:'webgpu',decoderDevice:'wasm',encoderDtype:'fp32',fallbackReason:null}});
  reply('partial','prueba de');reply('partial','prueba de micro');
  assert.equal(events.length,2);assert.equal(events[1].results[0].isFinal,false);assert.equal(events[1].results[0][0].transcript,'prueba de micro');
  assert.equal(timings.at(-1).kind,'live_processing');assert.equal(timings.at(-1).processingMs,250);assert.equal(timings.at(-1).queueMs,12);
+ assert.equal(timings.at(-1).encoderDevice,'webgpu');
+ reply('result','prueba de micro');await settle();
+ const timingOfDisplayedWords=timings.at(-1),eventCount=events.length;
+ processors[0].onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(16000).fill(0.2)}});
+ t.mock.timers.tick(350);await settle();
+ assert.equal(timings.at(-1),timingOfDisplayedWords,'a new pending inference must not erase timing of the text still displayed');
+ const nextRequest=workers[0].messages.filter(m=>m.type==='transcribe').at(-1);
  recognition.abort();await settle();
  const count=timings.length;
  reply('partial','adelante');reply('result','obsolete result');await settle();
- assert.equal(events.length,2);assert.equal(timings.length,count);
+ workers[0].onmessage({data:{type:'partial',id:nextRequest.id,text:'stale words'}});
+ assert.equal(events.length,eventCount);assert.equal(timings.length,count);
  assert(workers[0].messages.some(m=>m.type==='cancel'&&m.session===request.session));
 
- const checkEvents=[];
+ const checkEvents=[],rehearsalRequests=workers[0].messages.filter(m=>m.type==='transcribe').length;
  const CheckConstructor=getConstructor(()=>({prompt:'Sonny, English'}),()=> 'auto',undefined,()=>true);
  const check=new CheckConstructor();check.onresult=event=>checkEvents.push(event);check.start();await settle();
  processors.at(-1).onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(64000).fill(0.2)}});
  t.mock.timers.tick(10000);await settle();
- assert.equal(workers[0].messages.filter(m=>m.type==='transcribe').length,1,'setup never transcribes a growing fragment');
+ assert.equal(workers[0].messages.filter(m=>m.type==='transcribe').length,rehearsalRequests,'setup never transcribes a growing fragment');
  assert.equal(check.finishInput(),true);
  const checkRequest=workers[0].messages.filter(m=>m.type==='transcribe').at(-1);
  assert.equal(checkRequest.language,'spanish');assert.equal(checkRequest.context,undefined);

@@ -1,16 +1,19 @@
 import { WHISPER_MODEL, WHISPER_REVISION, TRANSFORMERS_URL, SAMPLE_RATE } from './comparison-core.mjs';
 
-let runtime;
-export const loadWhisper = (onProgress = () => {}) => runtime ??= (async () => {
+export const createWhisperRuntime = async ({ device = 'wasm', dtype = 'q8', onProgress = () => {} } = {}) => {
   const { pipeline, env, Tensor, TextStreamer, StoppingCriteria } = await import(TRANSFORMERS_URL);
   env.allowLocalModels = false;
   env.backends.onnx.wasm.numThreads = 1;
   env.backends.onnx.wasm.proxy = false;
   const transcribe = await pipeline('automatic-speech-recognition', WHISPER_MODEL, {
-    revision: WHISPER_REVISION, dtype: 'q8', device: 'wasm', progress_callback: onProgress,
+    revision: WHISPER_REVISION, dtype, device, progress_callback: onProgress,
   });
   return { transcribe, Tensor, TextStreamer, StoppingCriteria };
-})().catch((error) => { runtime = null; throw error; });
+};
+
+let runtime;
+export const loadWhisper = (onProgress = () => {}) => runtime ??= createWhisperRuntime({ onProgress })
+  .catch((error) => { runtime = null; throw error; });
 
 export const whisperPrefix = (tokenizer, config, language, prompt, timestamps = false) => {
   const prefix = [config.decoder_start_token_id, config.lang_to_id[language === 'spanish' ? '<|es|>' : '<|en|>'], config.task_to_id.transcribe];

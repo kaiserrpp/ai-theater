@@ -1,13 +1,16 @@
-import { loadWhisper, whisperPrefix, generatedAudioTokens } from './whisper-runtime.mjs';
+import { whisperPrefix, generatedAudioTokens } from './whisper-runtime.mjs';
+import { liveWhisperBackend } from './whisper-live-backend.mjs';
 
 const cancelledError = () => Object.assign(new Error('Escucha cancelada.'), { name: 'AbortError' });
 
 // The comparison keeps its original offline path. Live recognition encodes each
 // growing audio window once, sharing that tensor with detection and generation.
-export const runWhisperLiveTranscription = async ({ transcribe, Tensor, TextStreamer, StoppingCriteria }, audio, {
+export const runWhisperLiveTranscription = async ({ transcribe, Tensor, TextStreamer, StoppingCriteria,
+  encoderDevice = 'wasm', decoderDevice = 'wasm', encoderDtype = 'q8', fallbackReason = null }, audio, {
   context, language = 'auto', onText = () => {}, isCancelled = () => false,
 } = {}) => {
   const started = performance.now();
+  const backend = { encoderDevice, decoderDevice, encoderDtype, fallbackReason };
   const check = () => { if (isCancelled()) throw cancelledError(); };
   check();
   if (!audio.some(value => Math.abs(value) > 0.00001)) return { text: '', processingMs: 0, languageUsed: null };
@@ -50,7 +53,7 @@ export const runWhisperLiveTranscription = async ({ transcribe, Tensor, TextStre
         emitted = text;
         // TextStreamer emits completed words, so a partial BPE token cannot
         // masquerade as a completed word/negation in the Intelligent matcher.
-        onText(text, { processingMs: performance.now() - started });
+        onText(text, { processingMs: performance.now() - started, ...backend });
       }
     },
   });
@@ -80,7 +83,7 @@ export const runWhisperLiveTranscription = async ({ transcribe, Tensor, TextStre
       max_new_tokens: 224, do_sample: false, streamer });
     check();
     const text = transcribe.tokenizer.decode(generatedAudioTokens(output, prefix), { skip_special_tokens: true }).trim();
-    return { text, languageUsed, contextUsed: Boolean(contextPrompt), contextPrompt,
+    return { text, languageUsed, ...backend, contextUsed: Boolean(contextPrompt), contextPrompt,
       contextTermCount: contextPrompt ? contextPrompt.split(/[,\.]/).filter(term => term.trim()).length : 0,
       processingMs: performance.now() - started, featureMs: featuresAt - started,
       encoderMs: encodedAt - featuresAt, languageMs: languageAt - encodedAt,
@@ -91,5 +94,13 @@ export const runWhisperLiveTranscription = async ({ transcribe, Tensor, TextStre
   }
 };
 
-export const transcribeWhisperLiveAudio = async (audio, options) =>
-  runWhisperLiveTranscription(await loadWhisper(), audio, options);
+export const loadLiveWhisper = () => liveWhisperBackend.load();
+export const transcribeWhisperLiveAudio = async (audio, options) => {
+  const runtime = await loadLiveWhisper();
+  try { return await runWhisperLiveTranscription(runtime, audio, options); }
+  catch (error) {
+    if (runtime.encoderDevice !== 'webgpu' || error?.name === 'AbortError' || options?.isCancelled?.()) throw error;
+    const fallback = await liveWhisperBackend.useCPU(runtime, error);
+    return runWhisperLiveTranscription(fallback, audio, options);
+  }
+};

@@ -5,24 +5,30 @@ import type { RecognitionProcessingTiming } from '../types/sharedScript';
 import { createWhisperStreamDecoder } from './whisperStreamDecoder';
 import { createWhisperMicrophoneCheck } from './whisperMicrophoneCheck';
 
-type Reply = { type: string; id: number; text: string; error?: string; processingMs?: number; queueMs?: number; audioDurationMs?: number };
+type Reply = { type: string; id: number; text: string; error?: string; processingMs?: number; queueMs?: number; audioDurationMs?: number;
+  encoderDevice?: 'webgpu' | 'wasm'; decoderDevice?: 'wasm'; encoderDtype?: 'fp32' | 'q8'; fallbackReason?: string | null };
 type OnTiming = (timing: RecognitionProcessingTiming | null) => void;
 let worker: Worker | null = null, loaded: Promise<void> | null = null, nextId = 0;
+let activeEncoderDevice: 'webgpu' | 'wasm' = 'wasm';
 const pending = new Map<number, { session?: number; startedAt: number; onTiming?: OnTiming; onText?: (text: string) => void; timer: ReturnType<typeof setTimeout>; resolve: (reply: Reply) => void; reject: (error: Error) => void }>();
 const rejectPending = (error: Error) => {
   pending.forEach((entry) => { clearTimeout(entry.timer); entry.reject(error); }); pending.clear();
 };
 const getWorker = () => {
   if (worker) return worker;
-  const version = Constants.expoConfig?.version || '217';
+  activeEncoderDevice = 'wasm';
+  const version = Constants.expoConfig?.version || '218';
   worker = new Worker(new URL(`/asr/whisper-live-worker.mjs?v=${version}`, window.location.href), { type: 'module' });
   const createdWorker = worker;
   worker.onmessage = ({ data }: MessageEvent<Reply>) => {
     if (worker !== createdWorker) return;
     const entry = pending.get(data.id); if (!entry) return;
+    if (data.encoderDevice) activeEncoderDevice = data.encoderDevice;
     if (typeof data.processingMs === 'number') entry.onTiming?.({ kind: 'live_processing',
       requestToTextMs: Math.round(performance.now() - entry.startedAt), processingMs: Math.round(data.processingMs),
-      queueMs: Math.round(data.queueMs || 0), audioDurationMs: Math.round(data.audioDurationMs || 0) });
+      queueMs: Math.round(data.queueMs || 0), audioDurationMs: Math.round(data.audioDurationMs || 0),
+      ...(data.encoderDevice ? { encoderDevice: data.encoderDevice, decoderDevice: data.decoderDevice,
+        encoderDtype: data.encoderDtype, fallbackReason: data.fallbackReason } : {}) });
     if (data.type === 'partial') { entry.onText?.(data.text); return; }
     pending.delete(data.id); clearTimeout(entry.timer);
     if (data.type === 'error') entry.reject(new Error(data.error || 'Whisper no ha podido transcribir.'));
@@ -69,10 +75,11 @@ const loadModel = async (getLanguage: () => string, onTiming: OnTiming | undefin
             return request({ type: 'transcribe', session, audio, language: 'spanish' }, undefined, onTiming);
           }, () => cancelSession(session)) : createWhisperStreamDecoder(sampleRate, context,
           async (audio, vocabulary, onText) => {
-            onTiming?.(null);
+            // The displayed words still belong to the previous inference until
+            // this one returns words. Keep their timing available for a skip.
             return request({ type: 'transcribe', session, audio, context: vocabulary, language: getLanguage() }, onText, onTiming);
           },
-          () => cancelSession(session));
+          () => cancelSession(session), () => activeEncoderDevice === 'webgpu' ? 120 : 350);
         this.on = decoder.on; this.acceptWaveform = decoder.acceptWaveform; this.remove = decoder.remove;
         this.finishInput = decoder.finishInput;
       }

@@ -51,6 +51,7 @@ const normalizeEntry = (entry) => {
   const timing = entry.recognitionEngine === 'whisper' && entry.recognitionTiming?.kind === 'live_processing'
     ? entry.recognitionTiming : null;
   const timingMs = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(180000, Math.round(value))) : null;
+  const responseTiming = entry.responseTiming?.kind === 'browser_events' ? entry.responseTiming : null;
 
   if (!expectedText && !heardText) {
     return null;
@@ -62,7 +63,13 @@ const normalizeEntry = (entry) => {
     scriptContextTermCount: typeof entry.scriptContextTermCount === 'number' && Number.isFinite(entry.scriptContextTermCount)
       ? Math.max(0, Math.min(100, Math.round(entry.scriptContextTermCount))) : null,
     recognitionTiming: timing ? { kind: 'live_processing', requestToTextMs: timingMs(timing.requestToTextMs),
-      processingMs: timingMs(timing.processingMs), queueMs: timingMs(timing.queueMs), audioDurationMs: timingMs(timing.audioDurationMs) } : null,
+      processingMs: timingMs(timing.processingMs), queueMs: timingMs(timing.queueMs), audioDurationMs: timingMs(timing.audioDurationMs),
+      ...(['webgpu', 'wasm'].includes(timing.encoderDevice) ? { encoderDevice: timing.encoderDevice, decoderDevice: 'wasm',
+        encoderDtype: ['fp32', 'q8'].includes(timing.encoderDtype) ? timing.encoderDtype : null,
+        fallbackReason: typeof timing.fallbackReason === 'string' ? timing.fallbackReason.slice(0, 180) : null } : {}) } : null,
+    responseTiming: responseTiming ? { kind: 'browser_events', matchToVoiceRequestMs: timingMs(responseTiming.matchToVoiceRequestMs),
+      matchToVoiceStartEventMs: timingMs(responseTiming.matchToVoiceStartEventMs), inputCloseMs: timingMs(responseTiming.inputCloseMs),
+      voiceRequestToStartEventMs: timingMs(responseTiming.voiceRequestToStartEventMs) } : null,
     lineIndex: typeof entry.lineIndex === 'number' ? entry.lineIndex : -1,
     character: clampText(entry.character).slice(0, 120),
     sceneTitle: typeof entry.sceneTitle === 'string' ? clampText(entry.sceneTitle).slice(0, 180) : null,

@@ -50,6 +50,7 @@ import {
   scoreLineMatch,
 } from '../utils/lineMatching';
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
+import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
 import { getAutomaticRehearsalTargetIndex, getSceneAdvanceRecognitionAction, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
@@ -2018,9 +2019,20 @@ export const RehearsalView: React.FC<Props> = ({
     let inputReadyAt = requestedAt;
     let speechRequestedAt = requestedAt;
     let inputEndReason = '';
+    const responseEntry = lastIntelligentAutoAdvanceRef.current?.toIndex === currentIndex && !lastIntelligentAutoAdvanceRef.current.entry.responseTiming
+      ? lastIntelligentAutoAdvanceRef.current.entry : null;
     const preparedSpeech = prepareRehearsalSpeech(speakableLineText, {
       onStart: () => {
         if (isCancelled) return;
+        if (responseEntry) {
+          const responseTiming = getRehearsalResponseTiming(responseEntry.createdAt, requestedAt,
+            inputReadyAt, speechRequestedAt, Date.now());
+          if (responseTiming) {
+            const updated = { ...responseEntry, responseTiming };
+            setIntelligentFeedbackEntries(entries => entries.map(entry => entry === responseEntry ? updated : entry));
+            if (lastIntelligentAutoAdvanceRef.current?.entry === responseEntry) lastIntelligentAutoAdvanceRef.current.entry = updated;
+          }
+        }
         setSpeechStatusMessage(
           `Reproduciendo la linea. Fin de entrada: ${inputReadyAt - requestedAt} ms (${inputEndReason}). Inicio de voz: ${Date.now() - speechRequestedAt} ms.`
         );
@@ -2720,7 +2732,7 @@ export const RehearsalView: React.FC<Props> = ({
         <Text style={ui.text}>Las pruebas de audio se hacen una sola vez mientras la app siga abierta. Puedes repetirlas desde «Micrófono y voz».</Text>
         <Text style={ui.text}>En iPhone, desactiva Silencio (campana tachada) en el Centro de control. La música puede sonar aunque la voz esté silenciada.</Text>
         {isLocalSpeechRecognition && isIntelligentListenMode ? <Text style={ui.text}>{recognitionEngine === 'whisper'
-          ? `Whisper usará el contexto del guion (${recognitionContext.names.length} nombres y ${recognitionContext.vocabulary.length} palabras). La primera preparación descarga el modelo y sus bibliotecas, unos 70 MB. Tus pausas no hacen avanzar la réplica.`
+          ? `Whisper usará el contexto del guion (${recognitionContext.names.length} nombres y ${recognitionContext.vocabulary.length} palabras). La primera preparación descarga el modelo y sus bibliotecas, hasta unos 100 MB con aceleración gráfica. Tus pausas no hacen avanzar la réplica.`
           : 'La escucha inteligente se prepara en este dispositivo. La primera vez descarga unos 40 MB; después reutiliza el modelo. Tus pausas no hacen avanzar la réplica.'}</Text> : null}
         <Button label={preferencesLoaded ? (initialIndex > 0 ? 'Continuar ensayo' : 'Empezar ensayo') : 'Recuperando preferencias…'} disabled={!preferencesLoaded} onPress={() => { setIsPaused(false); handleStartConfiguredRehearsal(); }} />
         <Button label="Micrófono y voz" secondary onPress={() => setShowMicrophoneMenu(true)} />

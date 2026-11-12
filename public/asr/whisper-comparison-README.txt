@@ -34,5 +34,11 @@ between language detection and generation, enables that supported input in
 Whisper's 3.8.1 forward-parameter allow-list, streams complete audio words with
 TextStreamer (skip_prompt), and checks cancellation between decoder steps.
 The separate offline comparison retains the original transcription path.
+
+Since 2026.11.218 the live path can run the original fp32 encoder on WebGPU,
+keeping the q8 decoder on WASM. Both variants use the same pinned model
+revision. The encoder is warmed before opening capture; unsupported/lost GPU
+resources are disposed and live Whisper continues on WASM q8. Backend and
+browser response-event timings are included in text-only rehearsal reports.
 https://github.com/huggingface/transformers.js/blob/3.8.1/src/generation/streamers.js
 https://github.com/huggingface/transformers.js/blob/3.8.1/src/generation/stopping_criteria.js

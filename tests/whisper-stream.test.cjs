@@ -94,3 +94,15 @@ test('a reused capture reads the current context when transcribing, including re
   assert.deepEqual(received, [undefined, { names: ['Sonny'], vocabulary: ['English'], prompt: 'Sonny. English' }, undefined]);
   decoder.remove();
 });
+
+test('GPU scheduling reduces the next poll without changing the minimum audio window, and CPU fallback restores its cadence', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let delay = 120, calls = 0;
+  const decoder = createWhisperStreamDecoder(16000, undefined, async () => { calls++; return { text: 'Hey' }; }, () => {}, () => delay);
+  t.after(decoder.remove);
+  const feed = seconds => decoder.acceptWaveform({ getChannelData: () => new Float32Array(seconds * 16000).fill(0.2) });
+  feed(0.4); t.mock.timers.tick(120); await settle(); assert.equal(calls, 0);
+  feed(0.6); t.mock.timers.tick(120); await settle(); assert.equal(calls, 1);
+  delay = 350; feed(1); t.mock.timers.tick(120); await settle(); assert.equal(calls, 1);
+  t.mock.timers.tick(230); await settle(); assert.equal(calls, 2);
+});

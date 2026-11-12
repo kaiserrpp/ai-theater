@@ -5,7 +5,7 @@ export type WhisperAudioResult = { text: string };
 type Transcribe = (audio: Float32Array, context: ScriptRecognitionContext | undefined, onText: (text: string) => void) => Promise<WhisperAudioResult>;
 type Message = { result?: { text?: string; partial?: string }; error?: string };
 
-export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRecognitionContext | (() => ScriptRecognitionContext | undefined) | undefined, transcribe: Transcribe, cancel: () => void): LocalRecognizer => {
+export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRecognitionContext | (() => ScriptRecognitionContext | undefined) | undefined, transcribe: Transcribe, cancel: () => void, getSchedulingDelay: () => number = () => 350): LocalRecognizer => {
   const listeners: Partial<Record<'result' | 'partialresult' | 'error', (message: Message) => void>> = {};
   let frames: Float32Array[] = [], samples = 0, processed = 0, lastVoiced = 0;
   let lastText = '';
@@ -62,7 +62,7 @@ export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRe
     }
   };
   const schedule = () => {
-    if (!disposed && !busy && timer === null) timer = setTimeout(() => { void pump(); }, 350);
+    if (!disposed && !busy && timer === null) timer = setTimeout(() => { void pump(); }, getSchedulingDelay());
   };
   return {
     on: (event, listener) => { listeners[event] = listener; },

@@ -1,5 +1,4 @@
-import { loadWhisper } from './whisper-runtime.mjs';
-import { transcribeWhisperLiveAudio } from './whisper-live-runtime.mjs';
+import { loadLiveWhisper, transcribeWhisperLiveAudio } from './whisper-live-runtime.mjs';
 
 let chain = Promise.resolve();
 const cancelled = new Set();
@@ -9,7 +8,10 @@ self.onmessage = ({ data }) => {
   chain = chain.catch(() => {}).then(async () => {
     if (cancelled.has(data.session)) return;
     try {
-      if (data.type === 'load') { await loadWhisper(); self.postMessage({ type: 'ready', id: data.id }); return; }
+      if (data.type === 'load') {
+        const runtime = await loadLiveWhisper();
+        self.postMessage({ type: 'ready', id: data.id, encoderDevice: runtime.encoderDevice }); return;
+      }
       const timing = { queueMs: performance.now() - queuedAt, audioDurationMs: data.audio.length / 16 };
       const result = await transcribeWhisperLiveAudio(data.audio, {
         context: data.context, language: data.language || 'auto', isCancelled: () => cancelled.has(data.session),
