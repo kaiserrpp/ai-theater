@@ -152,6 +152,7 @@ const NUMBER_TOKEN_ALIASES = {
     '1000': 'mil',
 };
 const TOKEN_ALIASES = {
+    hey: 'ey',
     apuraos: 'apurense',
     artista: 'estrella',
     atraparme: 'atrapar',

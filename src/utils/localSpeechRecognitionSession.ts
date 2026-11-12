@@ -1,4 +1,5 @@
 import type { SpeechRecognitionConstructor, SpeechRecognitionHandle } from './speechRecognitionSession';
+import type { ScriptRecognitionContext } from './scriptRecognitionContext';
 
 export type LocalRecognizer = {
   on: (event: 'result' | 'partialresult' | 'error', callback: (message: {
@@ -7,11 +8,12 @@ export type LocalRecognizer = {
   acceptWaveform: (buffer: AudioBuffer) => void;
   remove: () => void;
 };
-export type LocalSpeechModel = { KaldiRecognizer: new (sampleRate: number) => LocalRecognizer };
+export type LocalSpeechModel = { KaldiRecognizer: new (sampleRate: number, getContext?: () => ScriptRecognitionContext | undefined) => LocalRecognizer };
 type Dependencies = {
   loadModel: () => Promise<LocalSpeechModel>;
   getUserMedia: () => Promise<MediaStream>;
   createAudioContext: () => AudioContext;
+  getContext?: () => ScriptRecognitionContext | undefined;
 };
 
 // The language model stays loaded across turns. Only our own capture graph and
@@ -83,7 +85,7 @@ export const createLocalSpeechRecognitionConstructor = (dependencies: Dependenci
         this.context = context;
         if (context.state === 'suspended') await context.resume();
         if (!isCurrent()) return;
-        const recognizer = new model.KaldiRecognizer(context.sampleRate);
+        const recognizer = new model.KaldiRecognizer(context.sampleRate, dependencies.getContext);
         this.recognizer = recognizer;
         recognizer.on('partialresult', (message) => emit(message.result?.partial?.trim() || ''));
         recognizer.on('result', (message) => {

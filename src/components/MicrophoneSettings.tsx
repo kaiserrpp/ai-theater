@@ -3,11 +3,13 @@ import { Platform, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { ListenPreference } from '../utils/rehearsalPreferences';
 import { rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
 import { Button, Icon, usePracticeTheme } from './PracticeUI';
+import type { RecognitionEngine } from '../utils/scriptRecognitionContext';
 
-export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, onRepeatPreparation }: {
+export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, onRepeatPreparation, engine = 'vosk', onEngineChange }: {
   mode: ListenPreference; onModeChange: (mode: ListenPreference) => void;
   showTranscript: boolean; onTranscriptChange: (visible: boolean) => void; supported: boolean;
   onRepeatPreparation?: () => void;
+  engine?: RecognitionEngine; onEngineChange?: (engine: RecognitionEngine) => void;
 }) => {
   const { palette, ui } = usePracticeTheme();
   const preparation = useSyncExternalStore(rehearsalPreparationSession.subscribe, rehearsalPreparationSession.getSnapshot, rehearsalPreparationSession.getSnapshot);
@@ -27,6 +29,15 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
     <View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 16 }]}>{label}</Text><Text style={ui.text}>{hint}</Text></View>
   </TouchableOpacity>)}
   {!supported ? <Text style={ui.text}>Este navegador no ofrece reconocimiento de voz. Puedes ensayar en modo manual.</Text> : null}
+  {onEngineChange ? <View style={ui.card}>
+    <Text style={ui.subtitle}>Reconocimiento de Inteligente</Text>
+    <Text style={ui.text}>Whisper puede usar los nombres y el vocabulario del guion. Es una prueba local y puede tardar más en transcribir. Las pausas se conservan.</Text>
+    {([['vosk', 'Reconocimiento actual'], ['whisper', 'Whisper con contexto del guion']] as const).map(([value, label]) =>
+      <TouchableOpacity key={value} accessibilityRole="radio" accessibilityState={{ checked: engine === value }}
+        onPress={() => onEngineChange(value)} style={[ui.row, { paddingVertical: 12 }]}>
+        <Icon name={engine === value ? 'radiobox-marked' : 'radiobox-blank'} /><Text style={ui.text}>{label}</Text>
+      </TouchableOpacity>)}
+  </View> : null}
   <View style={[ui.card, ui.row]}><View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 16 }]}>Mostrar transcripción</Text>
     <Text style={ui.text}>Muestra lo que la app oye en modo inteligente.</Text></View>
     <Switch accessibilityLabel="Mostrar transcripción" value={showTranscript} onValueChange={onTranscriptChange} trackColor={{ true: palette.plum }} />

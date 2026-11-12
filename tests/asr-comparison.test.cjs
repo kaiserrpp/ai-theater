@@ -106,6 +106,10 @@ test('comparison metadata only retains text metrics and bounded timing values', 
   assert.equal(result.processingMs, 44); assert.equal(result.audioUploaded, false);
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
   assert.equal(normalizeRecognitionComparison({ engine: 'other', status: 'done' }), null);
+  const context = normalizeRecognitionComparison({ engine: 'whisper', status: 'done', contextUsed: true,
+    contextPrompt: 'Sonny. English', contextTermCount: 2 });
+  assert.equal(context.contextPrompt, 'Sonny. English'); assert.equal(context.contextUsed, true); assert.equal(context.contextTermCount, 2);
+  assert.equal(normalizeRecognitionComparison({ engine: 'whisper', status: 'done', contextUsed: false, contextPrompt: 'Ignore this', contextTermCount: Infinity }).contextPrompt, null);
 });
 
 test('the feedback endpoint keeps both engines and their paired sample IDs', async (t) => {
@@ -120,8 +124,10 @@ test('the feedback endpoint keeps both engines and their paired sample IDs', asy
   const { makeFeedbackEntries } = await coreModule;
   const entries = makeFeedbackEntries({ id: 'paired', expected: 'Really', phraseIndex: 0, durationMs: 1200, language: 'auto', order: ['vosk', 'whisper'],
     results: [{ engine: 'vosk', status: 'done', text: 'riley' }, { engine: 'whisper', status: 'done', text: 'Really' }] });
+  Object.assign(entries[1], { recognitionEngine: 'whisper', scriptContextEnabled: true, scriptContextTermCount: 42 });
   await handler({ method: 'POST', headers: {}, body: { sessionId: 'comparison-test', scriptId: 'local-test', entries } }, response);
   assert.equal(response.statusCode, 200); assert.equal(stored.entryCount, 2);
   assert.deepEqual(stored.entries.map((entry) => entry.recognitionComparison.engine), ['vosk', 'whisper']);
   assert.ok(stored.entries.every((entry) => entry.recognitionComparison.sampleId === 'paired'));
+  assert.equal(stored.entries[1].recognitionEngine, 'whisper'); assert.equal(stored.entries[1].scriptContextEnabled, true); assert.equal(stored.entries[1].scriptContextTermCount, 42);
 });

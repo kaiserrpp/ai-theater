@@ -2,23 +2,30 @@ import { createLocalSpeechRecognitionConstructor, type LocalSpeechModel } from '
 import type { SpeechRecognitionConstructor } from './speechRecognitionSession';
 
 let loadedModel: Promise<LocalSpeechModel> | null = null;
+let modelEpoch = 0;
+let activeModel: { terminate: () => void } | null = null;
 const loadModel = () => {
   if (!loadedModel) {
-    loadedModel = import('vosk-browser').then(({ Model }) => new Promise<LocalSpeechModel>((resolve, reject) => {
-      const model = new Model(new URL('/asr/vosk-model-small-es-0.42.tar.gz', window.location.href).href, -2);
-      const timeout = setTimeout(() => {
-        model.terminate(); reject(new Error('La descarga del reconocimiento local ha tardado demasiado. Comprueba la conexión y reintenta.'));
-      }, 120000);
-      model.on('load', (message) => {
-        clearTimeout(timeout);
-        if (message.event === 'load' && message.result) resolve(model as unknown as LocalSpeechModel);
-        else { model.terminate(); reject(new Error('No se ha podido cargar el reconocimiento local.')); }
+    const epoch = ++modelEpoch;
+    loadedModel = import('vosk-browser').then(({ Model }) => {
+      if (epoch !== modelEpoch) throw new Error('Carga local cancelada.');
+      return new Promise<LocalSpeechModel>((resolve, reject) => {
+        const model = new Model(new URL('/asr/vosk-model-small-es-0.42.tar.gz', window.location.href).href, -2);
+        activeModel = model;
+        const timeout = setTimeout(() => {
+          model.terminate(); reject(new Error('La descarga del reconocimiento local ha tardado demasiado. Comprueba la conexión y reintenta.'));
+        }, 120000);
+        model.on('load', (message) => {
+          clearTimeout(timeout);
+          if (message.event === 'load' && message.result) resolve(model as unknown as LocalSpeechModel);
+          else { model.terminate(); reject(new Error('No se ha podido cargar el reconocimiento local.')); }
+        });
+        model.on('error', (message) => {
+          clearTimeout(timeout); if (epoch === modelEpoch) loadedModel = null; model.terminate();
+          reject(new Error(message.event === 'error' ? message.error : 'local-model-error'));
+        });
       });
-      model.on('error', (message) => {
-        clearTimeout(timeout); loadedModel = null; model.terminate();
-        reject(new Error(message.event === 'error' ? message.error : 'local-model-error'));
-      });
-    })).catch((error: unknown) => { loadedModel = null; throw error; });
+    }).catch((error: unknown) => { if (epoch === modelEpoch) { loadedModel = null; activeModel = null; } throw error; });
   }
   return loadedModel;
 };
@@ -41,3 +48,8 @@ export const getLocalSpeechRecognitionConstructor = (): SpeechRecognitionConstru
 };
 
 export const preloadLocalSpeechRecognition = async (): Promise<void> => { await loadModel(); };
+export const disposeLocalSpeechRecognition = () => {
+  const previous = loadedModel; loadedModel = null; modelEpoch++;
+  activeModel?.terminate(); activeModel = null;
+  void previous?.then((model) => (model as LocalSpeechModel & { terminate: () => void }).terminate()).catch(() => {});
+};

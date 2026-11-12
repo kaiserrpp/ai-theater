@@ -64,7 +64,7 @@ const recognitionErrorMessage = (code?: string, detail = '') => {
     case 'language-not-supported':
       return 'El navegador no puede reconocer el idioma de esta réplica.';
     case 'local-recognition-failed':
-      return 'No se ha podido preparar la escucha en este dispositivo. Comprueba la conexión y reintenta; la primera descarga ocupa unos 40 MB.';
+      return 'No se ha podido preparar la escucha local. Comprueba la conexión y reintenta; la primera preparación descarga el modelo.';
     default:
       return 'No se pudo iniciar la escucha. Pulsa Activar micrófono para intentarlo de nuevo.';
   }

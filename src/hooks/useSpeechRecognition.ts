@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSpeechRecognitionSession,
   type SpeechRecognitionConstructor,
@@ -7,7 +7,9 @@ import {
 import { needsNaturalRecognitionEnd } from '../utils/speechRecognitionCompatibility';
 import { prepareRecognitionRestart } from '../utils/rehearsalSpeech';
 import { isPageVisible, observePageVisibility } from '../utils/pageVisibility';
-import { getLocalSpeechRecognitionConstructor, preloadLocalSpeechRecognition } from '../utils/localSpeechRecognition';
+import { getLocalSpeechRecognitionConstructor, preloadLocalSpeechRecognition, disposeLocalSpeechRecognition } from '../utils/localSpeechRecognition';
+import { getWhisperSpeechRecognitionConstructor, preloadWhisperSpeechRecognition, disposeWhisperSpeechRecognition } from '../utils/whisperSpeechRecognition';
+import type { RecognitionEngine, ScriptRecognitionContext } from '../utils/scriptRecognitionContext';
 
 type UseSpeechRecognitionOptions = {
   enabled: boolean;
@@ -15,6 +17,8 @@ type UseSpeechRecognitionOptions = {
   lineKey: string | null;
   preferLocal?: boolean;
   prepareLocal?: boolean;
+  engine?: RecognitionEngine;
+  context?: ScriptRecognitionContext;
 };
 
 const getSpeechRecognitionConstructor = () => {
@@ -26,10 +30,12 @@ const getSpeechRecognitionConstructor = () => {
   return scopedWindow.SpeechRecognition ?? scopedWindow.webkitSpeechRecognition ?? null;
 };
 
-export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = false, prepareLocal = false }: UseSpeechRecognitionOptions) => {
+export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = false, prepareLocal = false, engine = 'vosk', context }: UseSpeechRecognitionOptions) => {
+  const contextRef = useRef(context); contextRef.current = context;
   const NativeConstructor = useMemo(getSpeechRecognitionConstructor, []);
-  const LocalConstructor = useMemo(() => preferLocal ? getLocalSpeechRecognitionConstructor() : null, [preferLocal]);
-  const Constructor = LocalConstructor ?? NativeConstructor;
+  const LocalConstructor = useMemo(() => engine === 'whisper' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current) :
+    preferLocal ? getLocalSpeechRecognitionConstructor() : null, [engine, preferLocal]);
+  const Constructor = engine === 'whisper' ? LocalConstructor : LocalConstructor ?? NativeConstructor;
   const isLocal = Boolean(LocalConstructor);
   const naturalEnd = useMemo(() => !isLocal && needsNaturalRecognitionEnd(typeof navigator === 'undefined' ? null : navigator), [isLocal]);
   const [snapshot, setSnapshot] = useState<SpeechRecognitionSnapshot>({
@@ -42,8 +48,9 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
   }), [Constructor, naturalEnd, isLocal]);
 
   useEffect(() => {
-    if (isLocal && prepareLocal) void preloadLocalSpeechRecognition().catch(() => undefined);
-  }, [isLocal, prepareLocal]);
+    if (engine === 'whisper') disposeLocalSpeechRecognition();
+    if (isLocal && prepareLocal) void (engine === 'whisper' ? preloadWhisperSpeechRecognition() : preloadLocalSpeechRecognition()).catch(() => undefined);
+  }, [isLocal, prepareLocal, engine]);
 
   useEffect(() => observePageVisibility(session.setPageVisible), [session]);
 
@@ -51,7 +58,10 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
     session.configure({ enabled, lang, lineKey });
   }, [enabled, lang, lineKey, session]);
 
-  useEffect(() => () => session.dispose(), [session]);
+  useEffect(() => () => {
+    session.dispose();
+    if (engine === 'whisper') disposeWhisperSpeechRecognition();
+  }, [session, engine]);
 
   return {
     ...snapshot,

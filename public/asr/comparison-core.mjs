@@ -59,7 +59,7 @@ export const evaluateTranscript = (expected, heard) => {
 
 // Both engines receive independent copies of the same full sample. A pause is
 // audio within the sample, never a signal to change the expected line.
-export const compareSample = async ({ audio, expected, language = 'auto', order = ['vosk', 'whisper'], engines, signal, onResult = () => {}, onProgress = () => {} }) => {
+export const compareSample = async ({ audio, expected, context = null, language = 'auto', order = ['vosk', 'whisper'], engines, signal, onResult = () => {}, onProgress = () => {} }) => {
   if (!audio.length || audio.length > SAMPLE_RATE * MAX_SAMPLE_SECONDS) throw new Error('La muestra debe durar entre un instante y 45 segundos.');
   const results = [];
   for (const engine of order) {
@@ -67,7 +67,7 @@ export const compareSample = async ({ audio, expected, language = 'auto', order 
     onProgress(engine, 'Preparando modelo…');
     let result;
     try {
-      const output = await engines[engine](audio.slice(), { signal, language, onProgress: (message) => { if (!signal?.aborted) onProgress(engine, message); } });
+      const output = await engines[engine](audio.slice(), { signal, language, context: engine === 'whisper' ? context : null, onProgress: (message) => { if (!signal?.aborted) onProgress(engine, message); } });
       checkAbort(signal);
       result = { engine, status: 'done', ...output, ...evaluateTranscript(expected, output.text), verdict: null };
     } catch (error) {
@@ -89,11 +89,13 @@ export const makeFeedbackEntries = (trial) => trial.results.map((result) => ({
   autoAdvanceReason: result.reason, result: 'comparacion_local',
   matchedReferenceText: result.referenceText || trial.expected, matchedReferenceIndex: result.referenceIndex || 0,
   language: result.engine === 'vosk' ? 'es-ES' : trial.language, createdAt: trial.createdAt,
-  recognitionComparison: { sampleId: trial.id, engine: result.engine, status: result.status,
+  recognitionComparison: { sampleId: trial.sampleId || trial.id, engine: result.engine, status: result.status,
     model: result.engine === 'vosk' ? 'vosk-model-small-es-0.42' : WHISPER_MODEL,
     backend: 'wasm', modelRevision: result.engine === 'whisper' ? WHISPER_REVISION : '0.42',
     sampleDurationMs: trial.durationMs, processingMs: result.processingMs, loadMs: result.loadMs,
     languageUsed: result.engine === 'vosk' ? 'spanish' : result.languageUsed,
+    contextUsed: result.contextUsed === true, contextTermCount: result.contextTermCount || 0,
+    contextPrompt: result.contextUsed ? result.contextPrompt ?? trial.context?.prompt : null,
     accepted: result.accepted ?? false, literalDifference: result.literalDifference,
     verdict: result.verdict, error: result.error || null, order: trial.order.join(','),
     timingKind: 'offline_processing', audioUploaded: false },

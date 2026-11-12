@@ -67,7 +67,7 @@ export const transcribeVosk = async (audio, { signal, onProgress }) => {
   }
 };
 
-export const transcribeWhisper = (audio, { signal, language, onProgress }) => new Promise((resolve, reject) => {
+export const transcribeWhisper = (audio, { signal, language, context, onProgress }) => new Promise((resolve, reject) => {
   checkAbort(signal);
   const worker = new Worker(new URL(`/asr/whisper-comparison-worker.mjs?v=${APP_VERSION}`, location.href), { type: 'module' });
   let timeout;
@@ -82,7 +82,8 @@ export const transcribeWhisper = (audio, { signal, language, onProgress }) => ne
     if (data.type === 'progress') onProgress(data.progress == null ? 'Preparando Whisper…' : `Descargando modelo: ${Math.round(data.progress)} %`);
     if (data.type === 'processing') onProgress('Procesando la muestra…');
     if (data.type === 'error') finish(new Error(data.error));
-    if (data.type === 'result') finish(null, { text: data.text, loadMs: data.loadMs, languageUsed: data.languageUsed, processingMs: data.processingMs });
+    if (data.type === 'result') finish(null, { text: data.text, loadMs: data.loadMs, languageUsed: data.languageUsed, processingMs: data.processingMs,
+      contextUsed: data.contextUsed, contextTermCount: data.contextTermCount, contextPrompt: data.contextPrompt });
   };
-  worker.postMessage({ audio, language }, [audio.buffer]);
+  worker.postMessage({ audio, language, context }, [audio.buffer]);
 });

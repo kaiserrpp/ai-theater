@@ -10,6 +10,7 @@ export const LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY =
 export const REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY = '@teatro_ia_rehearsal_audio_compatibility_v2';
 export const INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX = '@teatro_ia_line_variants:';
 export const REHEARSAL_LISTEN_MODE_STORAGE_KEY = '@teatro_ia_rehearsal_listen_mode';
+export const REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY = '@teatro_ia_rehearsal_recognition_engine';
 export const REHEARSAL_TRANSCRIPT_STORAGE_KEY = '@teatro_ia_rehearsal_transcript_visible';
 export const REHEARSAL_AUDIO_MODE_STORAGE_KEY = '@teatro_ia_rehearsal_audio_mode';
 export const REHEARSAL_AUDIO_SELECTION_STORAGE_PREFIX = '@teatro_ia_rehearsal_audio_selection:';

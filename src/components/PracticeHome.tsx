@@ -4,7 +4,8 @@ import { Linking, ScrollView, Text, TouchableOpacity, View } from 'react-native'
 import { SavedScript } from '../hooks/useLibrary';
 import { resolveAuditionPreferences } from '../../shared/auditionScenes';
 import { getAuditionRehearsalPlan, type AuditionRehearsalMode } from '../utils/auditionRehearsal';
-import { AUDITION_PREFERENCES_STORAGE_PREFIX, REHEARSAL_LISTEN_MODE_STORAGE_KEY, REHEARSAL_TRANSCRIPT_STORAGE_KEY } from '../store/storageKeys';
+import { AUDITION_PREFERENCES_STORAGE_PREFIX, REHEARSAL_LISTEN_MODE_STORAGE_KEY, REHEARSAL_TRANSCRIPT_STORAGE_KEY, REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY } from '../store/storageKeys';
+import { resolveRecognitionEngine, type RecognitionEngine } from '../utils/scriptRecognitionContext';
 import { RehearsalMode, ScriptData } from '../types/script';
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
 import { resolveListenPreference, resolveTranscriptPreference, supportsRecognition, type ListenPreference } from '../utils/rehearsalPreferences';
@@ -43,6 +44,7 @@ export const PracticeHome = (props: Props) => {
   const [initialAudition, setInitialAudition] = useState<string | null>(null);
   const [mode, setMode] = useState<ListenPreference>(() => resolveListenPreference(null, supportsRecognition()));
   const [showTranscript, setShowTranscript] = useState(true);
+  const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('vosk');
   const [storageNotice, setStorageNotice] = useState('');
   const [auditionUploadRequest, setAuditionUploadRequest] = useState(0);
   const shareId = props.manifest?.shareId;
@@ -56,8 +58,8 @@ export const PracticeHome = (props: Props) => {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([AsyncStorage.getItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY), AsyncStorage.getItem(REHEARSAL_TRANSCRIPT_STORAGE_KEY)])
-      .then(([storedMode, storedTranscript]) => { if (!cancelled) { setMode(resolveListenPreference(storedMode, supportsRecognition())); setShowTranscript(resolveTranscriptPreference(storedTranscript)); } }).catch(() => {});
+    void Promise.all([AsyncStorage.getItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY), AsyncStorage.getItem(REHEARSAL_TRANSCRIPT_STORAGE_KEY), AsyncStorage.getItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY)])
+      .then(([storedMode, storedTranscript, storedEngine]) => { if (!cancelled) { setMode(resolveListenPreference(storedMode, supportsRecognition())); setShowTranscript(resolveTranscriptPreference(storedTranscript)); setRecognitionEngine(resolveRecognitionEngine(storedEngine)); } }).catch(() => {});
     return () => { cancelled = true; };
   }, [sheet]);
   useEffect(() => {
@@ -143,7 +145,9 @@ export const PracticeHome = (props: Props) => {
       <AppearanceSettings onBusyChange={setAppearanceBusy} />
     </Sheet>
     <Sheet title="Micrófono y voz" visible={sheet === 'mic'} onClose={() => setSheet(null)}>
-      <MicrophoneSettings mode={mode} supported={supportsRecognition()} onModeChange={(next) => { setMode(next); savePreference(REHEARSAL_LISTEN_MODE_STORAGE_KEY, next); }} showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
+      <MicrophoneSettings mode={mode} supported={supportsRecognition()} onModeChange={(next) => { setMode(next); savePreference(REHEARSAL_LISTEN_MODE_STORAGE_KEY, next); }}
+        engine={recognitionEngine} onEngineChange={(next) => { setRecognitionEngine(next); savePreference(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, next); }}
+        showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
       <Button label="Comparar Whisper y Vosk" secondary onPress={openRecognitionComparison} />
       {storageNotice ? <Text style={ui.error}>{storageNotice}</Text> : null}
     </Sheet>

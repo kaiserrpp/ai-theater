@@ -15,6 +15,7 @@ export const createRehearsalPreparationSession = () => {
     speakerConfirmed: false, calibration: null, recognitionOutputConfirmed: false,
   });
   let snapshot = empty();
+  const confirmedRecognitionEngines = new Set<string>();
   const listeners = new Set<() => void>();
   const update = (next: RehearsalPreparationSnapshot) => {
     snapshot = Object.freeze(next);
@@ -34,12 +35,14 @@ export const createRehearsalPreparationSession = () => {
         !Number.isFinite(calibration.voiceThreshold) || calibration.voiceThreshold <= 0) return;
       update({ ...snapshot, calibration: Object.freeze({ ...calibration }) });
     },
-    confirmRecognitionOutput: (heardText = '') => {
+    confirmRecognitionOutput: (heardText = '', engine = 'default') => {
       if (snapshot.speakerConfirmed && snapshot.calibration && hasRecognizedMicrophoneCheck(heardText)) {
+        confirmedRecognitionEngines.add(engine);
         update({ ...snapshot, recognitionOutputConfirmed: true });
       }
     },
-    reset: () => update(empty()),
+    hasConfirmedRecognitionEngine: (engine: string) => confirmedRecognitionEngines.has(engine),
+    reset: () => { confirmedRecognitionEngines.clear(); update(empty()); },
   };
 };
 

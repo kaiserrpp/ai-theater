@@ -54,6 +54,10 @@ const normalizeEntry = (entry) => {
   }
 
   return {
+    recognitionEngine: ['native', 'vosk', 'whisper'].includes(entry.recognitionEngine) ? entry.recognitionEngine : null,
+    scriptContextEnabled: entry.scriptContextEnabled === true,
+    scriptContextTermCount: typeof entry.scriptContextTermCount === 'number' && Number.isFinite(entry.scriptContextTermCount)
+      ? Math.max(0, Math.min(100, Math.round(entry.scriptContextTermCount))) : null,
     lineIndex: typeof entry.lineIndex === 'number' ? entry.lineIndex : -1,
     character: clampText(entry.character).slice(0, 120),
     sceneTitle: typeof entry.sceneTitle === 'string' ? clampText(entry.sceneTitle).slice(0, 180) : null,

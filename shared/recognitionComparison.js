@@ -5,6 +5,8 @@ const normalizeRecognitionComparison = (value) => {
   return { sampleId: text(value.sampleId, 100), engine: value.engine, status: value.status,
     model: text(value.model, 100), modelRevision: text(value.modelRevision, 80), backend: 'wasm',
     languageUsed: ['english', 'spanish'].includes(value.languageUsed) ? value.languageUsed : null,
+    contextUsed: value.contextUsed === true, contextTermCount: finite(value.contextTermCount, 100),
+    contextPrompt: value.contextUsed === true ? text(value.contextPrompt, 600) : null,
     sampleDurationMs: finite(value.sampleDurationMs, 45000), loadMs: finite(value.loadMs, 600000), processingMs: finite(value.processingMs, 600000),
     accepted: value.accepted === true, literalDifference: finite(value.literalDifference, 100),
     verdict: ['correct', 'incorrect'].includes(value.verdict) ? value.verdict : null,

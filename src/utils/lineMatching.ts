@@ -157,6 +157,7 @@ const NUMBER_TOKEN_ALIASES: Record<string, string> = {
 };
 
 const TOKEN_ALIASES: Record<string, string> = {
+  hey: 'ey',
   apuraos: 'apurense',
   artista: 'estrella',
   atraparme: 'atrapar',

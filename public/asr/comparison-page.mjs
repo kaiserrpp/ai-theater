@@ -2,6 +2,7 @@ import { APP_VERSION } from './comparison-version.mjs';
 import { PHRASES, SAMPLE_RATE, MAX_SAMPLE_SECONDS, resampleAudio, compareSample, makeFeedbackEntries } from './comparison-core.mjs';
 import { createSampleCapture, wavBlob } from './comparison-capture.mjs';
 import { transcribeVosk, transcribeWhisper } from './comparison-engines.mjs';
+import { buildScriptRecognitionContext } from './script-recognition-context.mjs';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search), shareId = params.get('share');
@@ -13,6 +14,7 @@ const custom = document.createElement('option'); custom.value = '-1'; custom.tex
 $('expected').value = PHRASES[0];
 let audio = null, sampleUrl = null, recording = false, opening = false, comparing = false, sending = false;
 let controller = null, results = [], currentTrial = null, history = [], sampleEpoch = 0;
+let scriptContext = null, contextLoading = true, currentSampleId = null;
 try { const stored = JSON.parse(localStorage.getItem(storageKey) || '[]'); if (Array.isArray(stored)) history = stored.filter((trial) => trial && typeof trial.expected === 'string' && Array.isArray(trial.results)).slice(-12); } catch {}
 const newId = () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const contextClass = () => window.AudioContext || window.webkitAudioContext;
@@ -27,8 +29,8 @@ const capture = createSampleCapture({
 const updateButtons = () => {
   const busy = recording || opening || comparing;
   $('record').disabled = busy || !canCapture; $('stop').disabled = !recording && !opening;
-  $('compare').disabled = busy || !audio || !$('expected').value.trim(); $('cancel').disabled = !comparing;
-  for (const id of ['phrase', 'expected', 'language', 'order', 'audio-file']) $(id).disabled = busy;
+  $('compare').disabled = busy || !audio || !$('expected').value.trim() || ($('use-context').checked && (contextLoading || !scriptContext?.prompt)); $('cancel').disabled = !comparing;
+  for (const id of ['phrase', 'expected', 'language', 'order', 'audio-file', 'use-context']) $(id).disabled = busy;
   if (!contextClass()) $('audio-file').disabled = true;
   $('send').disabled = !history.length || sending || busy; $('copy').disabled = !history.length || busy;
 };
@@ -49,7 +51,7 @@ const clearSample = () => {
   $('duration').textContent = 'Sin muestra. Máximo 45 segundos.'; $('results').replaceChildren(); updateButtons();
 };
 const setSample = (next) => {
-  audio = next;
+  audio = next; currentSampleId = newId();
   if (sampleUrl) URL.revokeObjectURL(sampleUrl);
   sampleUrl = URL.createObjectURL(wavBlob(audio)); $('playback').src = sampleUrl; $('playback').hidden = false;
   $('duration').textContent = `Muestra guardada: ${(audio.length / SAMPLE_RATE).toFixed(2)} segundos. Los dos motores recibirán este mismo audio.`;
@@ -74,6 +76,7 @@ $('record').onclick = async () => {
 $('stop').onclick = () => finishRecording();
 $('phrase').onchange = () => { clearSample(); const index = Number($('phrase').value); $('expected').value = index < 0 ? '' : PHRASES[index]; updateButtons(); };
 $('expected').oninput = updateButtons;
+$('use-context').onchange = updateButtons;
 $('ios').oninput = updateReport;
 $('audio-file').onchange = async () => {
   const file = $('audio-file').files[0]; if (!file) return;
@@ -110,6 +113,7 @@ const renderResults = () => {
       }
       section.appendChild(metrics);
       if (result.languageUsed) { const language = document.createElement('p'); language.className = 'muted'; language.textContent = `Idioma usado: ${result.languageUsed === 'spanish' ? 'español' : 'inglés'}.`; section.appendChild(language); }
+      if (result.engine === 'whisper') { const note = document.createElement('p'); note.className = 'muted'; note.textContent = result.contextUsed ? `Contexto del guion aplicado (${result.contextTermCount} términos).` : 'Sin contexto del guion.'; section.appendChild(note); }
       const note = document.createElement('p'); note.className = 'muted'; note.textContent = 'La diferencia literal compara con el guion sin las equivalencias. Si cambiaste palabras al interpretar, esa diferencia no demuestra un error del motor.'; section.appendChild(note);
       const row = document.createElement('div'); row.className = 'row verdict';
       for (const [value, label] of [['correct', 'Me ha entendido'], ['incorrect', 'No me ha entendido']]) {
@@ -129,10 +133,11 @@ $('compare').onclick = async () => {
   $('playback').pause();
   const active = new AbortController(); controller = active;
   const trial = { id: newId(), createdAt: new Date().toISOString(), expected: $('expected').value.trim(),
+    sampleId: currentSampleId, context: $('use-context').checked ? scriptContext : null,
     phraseIndex: Number($('phrase').value), language: $('language').value, order: $('order').value.split(','),
     durationMs: Math.round(audio.length / SAMPLE_RATE * 1000), results: [] };
   try {
-    trial.results = await compareSample({ audio, expected: trial.expected, language: trial.language, order: trial.order,
+    trial.results = await compareSample({ audio, expected: trial.expected, context: trial.context, language: trial.language, order: trial.order,
       engines: { vosk: transcribeVosk, whisper: transcribeWhisper }, signal: active.signal,
       onProgress: (engine, message) => { $('status').textContent = `${engine === 'vosk' ? 'Vosk' : 'Whisper'} · ${message}`; },
       onResult: (result) => { results.push(result); renderResults(); },
@@ -174,4 +179,25 @@ $('send').onclick = async () => {
   finally { clearTimeout(sendingTimeout); sending = false; updateButtons(); }
 };
 updateReport();
+const loadContext = async () => {
+  try {
+    let lines = PHRASES.map((t) => ({ t })), characters = [];
+    if (shareId) {
+      const response = await fetch(`/api/shared-script?shareId=${encodeURIComponent(shareId)}`, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error('No se pudo leer el guion compartido.');
+      const manifest = await response.json();
+      const scripts = [manifest.scriptData, ...(manifest.auditionScenes || []).map((scene) => scene.scriptData)].filter(Boolean);
+      lines = scripts.flatMap((script) => script.guion || []);
+      characters = scripts.flatMap((script) => script.personajes || []);
+    }
+    scriptContext = buildScriptRecognitionContext(lines, characters);
+    $('context-status').textContent = scriptContext.prompt
+      ? `${scriptContext.names.length} nombres y ${scriptContext.vocabulary.length} palabras del ${shareId ? 'guion compartido' : 'vocabulario de ejemplo'}. La réplica que escribas arriba se usa solo para evaluar el resultado.`
+      : 'El guion no contiene vocabulario. Puedes comparar sin contexto.';
+    $('context-words').textContent = scriptContext.prompt || 'Sin vocabulario.';
+  } catch {
+    $('context-status').textContent = 'No se pudo preparar el contexto. Recarga para reintentarlo o desmarca la opción para comparar sin contexto.';
+  } finally { contextLoading = false; updateButtons(); }
+};
+void loadContext();
 if (!canCapture) $('microphone-status').textContent = 'Este navegador no ofrece la captura de audio necesaria. Abre esta prueba en Safari del iPhone.';

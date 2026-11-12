@@ -249,10 +249,14 @@ export type IntelligentLineFeedbackIssueType =
   | 'otro';
 
 export interface IntelligentLineFeedbackEntry {
+  recognitionEngine?: 'native' | 'vosk' | 'whisper';
+  scriptContextEnabled?: boolean;
+  scriptContextTermCount?: number;
   recognitionComparison?: {
     sampleId: string | null; engine: 'vosk' | 'whisper'; status: 'done' | 'error';
     model: string | null; modelRevision: string | null; backend: 'wasm';
     languageUsed: 'english' | 'spanish' | null;
+    contextUsed?: boolean; contextTermCount?: number; contextPrompt?: string | null;
     sampleDurationMs: number | null; loadMs: number | null; processingMs: number | null;
     accepted: boolean; literalDifference: number | null; verdict: 'correct' | 'incorrect' | null;
     error: string | null; order: string | null; timingKind: 'offline_processing'; audioUploaded: false;

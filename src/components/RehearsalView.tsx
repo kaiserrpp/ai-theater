@@ -16,6 +16,7 @@ import { canBeginPreparedRehearsal, runRehearsalMicrophoneCalibration } from '..
 import { playCalibrationBeep, playCalibrationVoice, primeRehearsalAudioPlayer } from '../utils/rehearsalCalibrationAudio';
 import { getRehearsalPreparationStep, rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
 import { hasRecognizedMicrophoneCheck, needsNaturalRecognitionEnd } from '../utils/speechRecognitionCompatibility';
+import { buildScriptRecognitionContext, resolveRecognitionEngine, type RecognitionEngine } from '../utils/scriptRecognitionContext';
 import {
   INTELLIGENT_LINE_VARIANTS_STORAGE_PREFIX,
   LEGACY_REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
@@ -23,6 +24,7 @@ import {
   REHEARSAL_AUDIO_COMPATIBILITY_STORAGE_KEY,
   REHEARSAL_AUDIO_MODE_STORAGE_KEY,
   REHEARSAL_LISTEN_MODE_STORAGE_KEY,
+  REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY,
   REHEARSAL_TRANSCRIPT_STORAGE_KEY,
 } from '../store/storageKeys';
 import { Dialogue } from '../types/script';
@@ -478,6 +480,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [rehearsalAudioModeSelection, setRehearsalAudioModeSelection] =
     useState<RehearsalAudioModeSelection>('karaoke');
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('vosk');
   const [showTranscript, setShowTranscript] = useState(true);
   const [showMicrophoneMenu, setShowMicrophoneMenu] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -778,6 +781,7 @@ export const RehearsalView: React.FC<Props> = ({
     return inferSpeechRecognitionLanguage(isMyTurn ? speakableLineText : nextActorLine?.t ?? speakableLineText);
   }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText]);
   const isIntelligentListenMode = listenModeSelection === 'intelligent';
+  const recognitionContext = useMemo(() => buildScriptRecognitionContext(filteredGuion), [filteredGuion]);
   const preferLocalRecognition = useMemo(() => needsNaturalRecognitionEnd(
     typeof navigator === 'undefined' ? null : navigator
   ) && inferSpeechRecognitionLanguage(filteredGuion.filter((line) => lineMatchesRoles(line, myRoles))
@@ -903,6 +907,8 @@ export const RehearsalView: React.FC<Props> = ({
     lineKey: recognitionLineKey,
     preferLocal: preferLocalRecognition,
     prepareLocal: hasConfirmedRehearsalSetup && isIntelligentListenMode,
+    engine: recognitionEngine,
+    context: shouldUseIntelligentRecognition ? recognitionContext : undefined,
   });
 
   const startCurrentScene = useCallback(() => {
@@ -1011,6 +1017,9 @@ export const RehearsalView: React.FC<Props> = ({
         feedbackLineMatch
       );
       const entry: IntelligentLineFeedbackEntry = {
+        recognitionEngine: recognitionEngine === 'whisper' ? 'whisper' : isLocalSpeechRecognition ? 'vosk' : 'native',
+        scriptContextEnabled: recognitionEngine === 'whisper' && Boolean(recognitionContext.prompt),
+        scriptContextTermCount: recognitionEngine === 'whisper' ? recognitionContext.names.length + recognitionContext.vocabulary.length : 0,
         lineIndex: currentLineIndexInScript,
         character: currentLine.p,
         sceneTitle: currentSceneTitle,
@@ -1045,6 +1054,9 @@ export const RehearsalView: React.FC<Props> = ({
       intelligentRecognitionLanguage,
       speakableLineText,
       speechRecognitionTranscript,
+      recognitionEngine,
+      recognitionContext,
+      isLocalSpeechRecognition,
     ]
   );
 
@@ -1328,23 +1340,24 @@ export const RehearsalView: React.FC<Props> = ({
 
   const finishRehearsalPreparation = useCallback((recognizedText?: string) => {
     const preparation = rehearsalPreparationSession.getSnapshot();
+    const engineKey = recognitionEngine === 'whisper' ? 'whisper' : isLocalSpeechRecognition ? 'vosk' : 'native';
     const inputConfirmedNow = hasRecognizedMicrophoneCheck(recognizedText || '');
     if (listenModeSelection === 'pending' || !canBeginPreparedRehearsal(listenModeSelection, {
       speakerConfirmed: preparation.speakerConfirmed,
       microphoneCalibrated: Boolean(preparation.calibration),
       recognitionAudioActive: isRecognitionAudioActive || inputConfirmedNow,
-      speakerWithRecognitionConfirmed: inputConfirmedNow || preparation.recognitionOutputConfirmed,
+      speakerWithRecognitionConfirmed: inputConfirmedNow || rehearsalPreparationSession.hasConfirmedRecognitionEngine(engineKey),
     })) {
       setRehearsalMediaStatus('Falta activar la escucha o completar las pruebas de audio.');
       return;
     }
-    if (inputConfirmedNow) rehearsalPreparationSession.confirmRecognitionOutput(recognizedText!);
+    if (inputConfirmedNow) rehearsalPreparationSession.confirmRecognitionOutput(recognizedText!, engineKey);
     resetSpeechRecognitionTranscript();
     setAutoListenEnabled(listenModeSelection === 'auto'); setTemporarilySuspendingAutoListen(false);
     setHasCompletedRehearsalPreflight(true); setIsRehearsalMediaReady(true);
     setIsPreparingRehearsalMedia(false);
     setRehearsalPreflightPhase(null); setRehearsalMediaStatus(null);
-  }, [isRecognitionAudioActive, listenModeSelection, resetSpeechRecognitionTranscript]);
+  }, [isRecognitionAudioActive, listenModeSelection, resetSpeechRecognitionTranscript, recognitionEngine, isLocalSpeechRecognition]);
 
   const enableIntelligentListenForDevice = useCallback(() => {
     const preparation = rehearsalPreparationSession.getSnapshot();
@@ -1366,14 +1379,17 @@ export const RehearsalView: React.FC<Props> = ({
 
   useEffect(() => {
     if (!isCheckingIntelligentRecognition) return;
-    if (hasRecognizedMicrophoneCheck(speechRecognitionFinalTranscript)) {
-      finishRehearsalPreparation(speechRecognitionFinalTranscript);
+    const checkedText = recognitionEngine === 'whisper' ? speechRecognitionTranscript : speechRecognitionFinalTranscript;
+    if (hasRecognizedMicrophoneCheck(checkedText)) {
+      finishRehearsalPreparation(checkedText);
       return;
     }
-    if (isRecognitionAudioActive && rehearsalPreparationSession.getSnapshot().recognitionOutputConfirmed) {
+    const engineKey = recognitionEngine === 'whisper' ? 'whisper' : isLocalSpeechRecognition ? 'vosk' : 'native';
+    if (isRecognitionAudioActive && rehearsalPreparationSession.hasConfirmedRecognitionEngine(engineKey)) {
       finishRehearsalPreparation();
     }
-  }, [finishRehearsalPreparation, isCheckingIntelligentRecognition, isRecognitionAudioActive, speechRecognitionFinalTranscript]);
+  }, [finishRehearsalPreparation, isCheckingIntelligentRecognition, isRecognitionAudioActive, speechRecognitionFinalTranscript,
+    recognitionEngine, speechRecognitionTranscript, isLocalSpeechRecognition]);
 
   const stopSongAudio = useCallback(() => {
     const player = audioRef.current;
@@ -1619,10 +1635,11 @@ export const RehearsalView: React.FC<Props> = ({
 
     const loadRehearsalPreferences = async () => {
       try {
-        const [storedListenMode, storedAudioMode, storedTranscript] = await Promise.all([
+        const [storedListenMode, storedAudioMode, storedTranscript, storedEngine] = await Promise.all([
           AsyncStorage.getItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY),
           AsyncStorage.getItem(REHEARSAL_AUDIO_MODE_STORAGE_KEY),
           AsyncStorage.getItem(REHEARSAL_TRANSCRIPT_STORAGE_KEY),
+          AsyncStorage.getItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY),
         ]);
 
         if (!isMounted) {
@@ -1631,6 +1648,7 @@ export const RehearsalView: React.FC<Props> = ({
 
         setListenModeSelection(resolveListenPreference(storedListenMode, isSpeechRecognitionSupported));
         setShowTranscript(resolveTranscriptPreference(storedTranscript));
+        setRecognitionEngine(resolveRecognitionEngine(storedEngine));
 
         if (isSharedSongAudioKind(storedAudioMode)) {
           setRehearsalAudioModeSelection(storedAudioMode);
@@ -2549,6 +2567,25 @@ export const RehearsalView: React.FC<Props> = ({
     shouldAskForRehearsalAudioChoice,
   ]);
 
+  const handleSelectRecognitionEngine = useCallback(async (next: RecognitionEngine) => {
+    if (next === recognitionEngine) return;
+    const run = ++preparationRunRef.current;
+    stopRehearsalSpeech(); stopSongAudio(); disposeCalibrationAudio(); stopRecognition();
+    setHasConfirmedRehearsalSetup(false); setHasCompletedRehearsalPreflight(false);
+    setIsRehearsalMediaReady(false); setRehearsalPreflightPhase(null);
+    setIsPreparingRehearsalMedia(false); setHasPreparedRehearsalMedia(false); setAutoListenEnabled(false);
+    void releaseListeningInput();
+    // Changing adapters must not abort a native iOS request that is still
+    // closing. A fresh tap will activate the chosen engine after it ends.
+    if (!await waitForRecognitionEnd()) {
+      if (preparationRunRef.current === run) setCompatibilityMessage('Safari aún está cerrando la escucha anterior. Reintenta el cambio de reconocimiento.');
+      return;
+    }
+    if (preparationRunRef.current !== run || exitRequestedRef.current) return;
+    setRecognitionEngine(next); setIsPaused(false); setCompatibilityMessage(null); setShowMicrophoneMenu(false);
+    void AsyncStorage.setItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, next).catch(() => setPreferenceNotice('El reconocimiento elegido sigue activo, pero no se pudo recordar.'));
+  }, [recognitionEngine, disposeCalibrationAudio, releaseListeningInput, stopRecognition, stopSongAudio, waitForRecognitionEnd]);
+
   const renderHeader = (title: string) => <>
     <View style={[ui.header, { paddingVertical: 10 }]}>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar ensayo" onPress={handleExit} style={ui.icon}><Icon name="arrow-left" /></TouchableOpacity>
@@ -2560,6 +2597,7 @@ export const RehearsalView: React.FC<Props> = ({
     </View>
     <Sheet title="Micrófono y voz" visible={showMicrophoneMenu} onClose={() => setShowMicrophoneMenu(false)}>
       <MicrophoneSettings mode={listenModeSelection === 'pending' ? 'intelligent' : listenModeSelection} supported={isSpeechRecognitionSupported}
+        engine={recognitionEngine} onEngineChange={(next) => { void handleSelectRecognitionEngine(next); }}
         onModeChange={(mode) => {
           if (mode === listenModeSelection) return;
           preparationRunRef.current += 1; setSpeakerConfirmed(false); setMicrophoneCalibrated(false);
@@ -2664,7 +2702,9 @@ export const RehearsalView: React.FC<Props> = ({
         <View style={ui.card}><Icon name={listenModeSelection === 'manual' ? 'gesture-tap' : 'microphone-outline'} size={32} /><Text style={ui.subtitle}>{listenModeSelection === 'intelligent' ? 'Modo inteligente' : listenModeSelection === 'auto' ? 'Avance al terminar de hablar' : 'Modo manual'}</Text><Text style={ui.text}>{listenModeSelection === 'intelligent' ? 'La app interpreta los demás personajes y comprueba tus palabras cuando llega tu turno.' : listenModeSelection === 'auto' ? 'Prepararemos el micro para avanzar cuando termines tu réplica y guardes silencio.' : 'La app interpreta los demás personajes. Pulsa siguiente al terminar tu réplica.'}</Text></View>
         <Text style={ui.text}>Las pruebas de audio se hacen una sola vez mientras la app siga abierta. Puedes repetirlas desde «Micrófono y voz».</Text>
         <Text style={ui.text}>En iPhone, desactiva Silencio (campana tachada) en el Centro de control. La música puede sonar aunque la voz esté silenciada.</Text>
-        {isLocalSpeechRecognition && isIntelligentListenMode ? <Text style={ui.text}>La escucha inteligente se prepara en este dispositivo. La primera vez descarga unos 40 MB; después reutiliza el modelo. Tus pausas no hacen avanzar la réplica.</Text> : null}
+        {isLocalSpeechRecognition && isIntelligentListenMode ? <Text style={ui.text}>{recognitionEngine === 'whisper'
+          ? `Whisper usará el contexto del guion (${recognitionContext.names.length} nombres y ${recognitionContext.vocabulary.length} palabras). La primera preparación descarga el modelo y sus bibliotecas, unos 70 MB. Tus pausas no hacen avanzar la réplica.`
+          : 'La escucha inteligente se prepara en este dispositivo. La primera vez descarga unos 40 MB; después reutiliza el modelo. Tus pausas no hacen avanzar la réplica.'}</Text> : null}
         <Button label={preferencesLoaded ? (initialIndex > 0 ? 'Continuar ensayo' : 'Empezar ensayo') : 'Recuperando preferencias…'} disabled={!preferencesLoaded} onPress={() => { setIsPaused(false); handleStartConfiguredRehearsal(); }} />
         <Button label="Micrófono y voz" secondary onPress={() => setShowMicrophoneMenu(true)} />
       </ScrollView>
@@ -2685,10 +2725,10 @@ export const RehearsalView: React.FC<Props> = ({
           {speechRecognitionStatus !== 'error' ? <>
             <Text style={styles.preflightTitle}>{isRecognitionAudioActive ? 'Di «prueba de micro»' : isLocalSpeechRecognition ? 'Preparando la escucha en este dispositivo…' : 'Abriendo la escucha…'}</Text>
             <Text style={styles.preflightText}>
-              {rehearsalPreparationSession.getSnapshot().recognitionOutputConfirmed
+              {rehearsalPreparationSession.hasConfirmedRecognitionEngine(recognitionEngine === 'whisper' ? 'whisper' : isLocalSpeechRecognition ? 'vosk' : 'native')
                 ? 'Estamos activando el micrófono para este ensayo. Las pruebas de audio ya están hechas.'
                 : isLocalSpeechRecognition
-                  ? 'Permite el micrófono. La primera preparación descarga unos 40 MB. Después di «prueba de micro»: comprobaremos tus palabras antes de empezar.'
+                  ? `Permite el micrófono. ${recognitionEngine === 'whisper' ? 'Whisper prepara el modelo y el vocabulario del guion.' : 'La primera preparación descarga unos 40 MB.'} Después di «prueba de micro»: comprobaremos tus palabras antes de empezar.`
                   : 'Si Safari solicita reconocer tu voz, pulsa Permitir. Di «prueba de micro»: comprobaremos que aparecen tus palabras antes de entrar al ensayo.'}
             </Text>
             <Text style={styles.preflightText}>He oído: {speechRecognitionTranscript || 'Esperando tus palabras…'}</Text>

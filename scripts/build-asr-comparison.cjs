@@ -5,6 +5,9 @@ const root = path.join(__dirname, '..');
 const version = require('../package.json').version;
 const source = fs.readFileSync(path.join(root, 'src/utils/lineMatching.ts'), 'utf8');
 const outputs = {
+  'public/asr/script-recognition-context.mjs': '// Generated from src/utils/scriptRecognitionContext.ts.\n' + ts.transpileModule(fs.readFileSync(path.join(root, 'src/utils/scriptRecognitionContext.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
+  }).outputText,
   'public/asr/line-matching.mjs': '// Generated from src/utils/lineMatching.ts; run npm run comparison:build.\n' + ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022, removeComments: false },
   }).outputText,

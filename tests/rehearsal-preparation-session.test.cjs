@@ -13,6 +13,21 @@ if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
 
 const calibration = { status: 'ready', noiseFloor: 0.01, voiceLevel: 0.2, voiceThreshold: 0.04, voiceToNoiseRatio: 20 };
+test('switching recognition engines preserves speaker and calibration but requires words from the new engine', () => {
+  const session = createSession(); session.confirmSpeaker(); session.rememberCalibration(calibration);
+  session.confirmRecognitionOutput('prueba de micro', 'vosk');
+  assert.equal(session.hasConfirmedRecognitionEngine('vosk'), true);
+  assert.equal(session.hasConfirmedRecognitionEngine('whisper'), false);
+  session.confirmRecognitionOutput('', 'whisper');
+  assert.equal(session.hasConfirmedRecognitionEngine('whisper'), false);
+  session.confirmRecognitionOutput('Prueba de micro.', 'whisper');
+  assert.equal(session.hasConfirmedRecognitionEngine('whisper'), true);
+  assert.equal(session.getSnapshot().speakerConfirmed, true);
+  assert.ok(session.getSnapshot().calibration);
+  session.reset();
+  assert.equal(session.hasConfirmedRecognitionEngine('vosk'), false);
+  assert.equal(session.hasConfirmedRecognitionEngine('whisper'), false);
+});
 const evidence = (session, recognition) => ({
   speakerConfirmed: session.getSnapshot().speakerConfirmed,
   microphoneCalibrated: Boolean(session.getSnapshot().calibration),
