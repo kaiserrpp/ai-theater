@@ -5,6 +5,7 @@ const { setImmediate: settle } = require('node:timers/promises');
 const previousLoader = require.extensions['.ts'];
 require.extensions['.ts'] = (m, filename) => m._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 const { createWhisperStreamDecoder } = require('../src/utils/whisperStreamDecoder.ts');
+const { getWhisperSegmentationThreshold } = require('../src/utils/whisperSpeechActivity.ts');
 const { scoreLineMatch, getAutomaticLineAdvanceDelay } = require('../src/utils/lineMatching.ts');
 if (previousLoader) require.extensions['.ts'] = previousLoader; else delete require.extensions['.ts'];
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -28,7 +29,9 @@ test('multi-second pauses preserve words and never cause advancement or repeated
   assert.equal(accepted(f.events[0].message.result.partial), false);
   f.feed(6, 0); await f.run();
   assert.equal(calls.length, 1);
-  assert.equal(f.events.length, 1);
+  assert.equal(f.events.length, 2);
+  assert.equal(f.events[1].event, 'result');
+  assert.equal(accepted(f.events[1].message.result.text), false, 'finalized partial words still cannot complete an insufficient replica');
   f.feed(2); await f.run();
   assert.equal(calls[1].audio.length, 2 * 16000);
   assert.equal(f.events[1].event, 'result');
@@ -98,11 +101,65 @@ test('a reused capture reads the current context when transcribing, including re
 test('GPU scheduling reduces the next poll without changing the minimum audio window, and CPU fallback restores its cadence', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let delay = 120, calls = 0;
-  const decoder = createWhisperStreamDecoder(16000, undefined, async () => { calls++; return { text: 'Hey' }; }, () => {}, () => delay);
+  const decoder = createWhisperStreamDecoder(16000, undefined, async () => { calls++; return { text: 'Hey' }; }, () => {}, { getSchedulingDelay: () => delay });
   t.after(decoder.remove);
   const feed = seconds => decoder.acceptWaveform({ getChannelData: () => new Float32Array(seconds * 16000).fill(0.2) });
   feed(0.4); t.mock.timers.tick(120); await settle(); assert.equal(calls, 0);
   feed(0.6); t.mock.timers.tick(120); await settle(); assert.equal(calls, 1);
   delay = 350; feed(1); t.mock.timers.tick(120); await settle(); assert.equal(calls, 1);
   t.mock.timers.tick(230); await settle(); assert.equal(calls, 2);
+});
+
+test('the exact iPhone fluent ending no longer waits for the 20-second window after decoded speech settles', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const expected = 'Tengo noticias. My Enlgish is getting much better.';
+  const heard = 'I think, no, defias, my English is getting much better.';
+  const score = scoreLineMatch(expected, heard), events = [], finalizations = [];
+  assert.equal(getAutomaticLineAdvanceDelay(expected, heard, heard, score), null, 'reproduces 218 provisional stall');
+  const decoder = createWhisperStreamDecoder(16000, undefined, async () => ({ text: heard }), () => {}, {
+    getSpeechThreshold: () => 0.006, onFinalized: info => finalizations.push(info),
+  });
+  t.after(decoder.remove);
+  decoder.on('partialresult', message => events.push({ kind: 'partial', text: message.result.partial }));
+  decoder.on('result', message => events.push({ kind: 'final', text: message.result.text }));
+  const feed = (seconds, value) => decoder.acceptWaveform({ getChannelData: () => new Float32Array(Math.round(seconds * 16000)).fill(value) });
+  feed(3, 0.1); t.mock.timers.tick(350); await settle();
+  assert.equal(events.length, 1);
+  feed(0.7, 0.0003); await settle();
+  assert.deepEqual(events[1], { kind: 'final', text: heard });
+  assert.equal(getAutomaticLineAdvanceDelay(expected, events[1].text, '', scoreLineMatch(expected, events[1].text)), 0);
+  assert.equal(finalizations[0].segmentFinalization, 'speech_gap');
+  assert(finalizations[0].trailingQuietMs >= 600);
+});
+
+test('an old inference cannot finalize while later speech has not been decoded', async t => {
+  const first = deferred();
+  const f = fixture(t, async () => f.events.length ? { text: reference } : first.promise);
+  f.feed(1); await f.run(); f.feed(1); f.feed(1, 0);
+  first.resolve({ text: 'Abuela qué pasó' }); await settle();
+  assert.equal(f.events.length, 1); assert.equal(f.events[0].event, 'partialresult');
+  await f.run();
+  assert.equal(f.events.at(-1).event, 'result'); assert.equal(f.events.at(-1).message.result.text, reference);
+});
+
+test('quiet words arriving during inference are preserved across a segment boundary', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const first = deferred(), audios = [];
+  const decoder = createWhisperStreamDecoder(16000, undefined, async audio => {
+    audios.push(audio); return audios.length === 1 ? first.promise : { text: 'por qué gritas' };
+  }, () => {}, { getSpeechThreshold: () => 0.006 });
+  t.after(decoder.remove);
+  const feed = (seconds, value) => decoder.acceptWaveform({ getChannelData: () => new Float32Array(Math.round(seconds * 16000)).fill(value) });
+  feed(1, 0.1); t.mock.timers.tick(350); await settle();
+  feed(0.8, 0.0002); feed(0.7, 0);
+  first.resolve({ text: 'Abuela qué pasó' }); await settle();
+  t.mock.timers.tick(350); await settle();
+  assert.equal(audios.length, 2); assert.equal(audios[1].length, 1.5 * 16000);
+  assert.equal(audios[1][0], Math.fround(0.0002));
+});
+
+test('segmentation uses measured voice/noise levels without imposing the silence detector minimum on quiet voices', () => {
+  assert(Math.abs(getWhisperSegmentationThreshold(0.0002, 0.002) - 0.0003) < 1e-9);
+  assert(getWhisperSegmentationThreshold(0.001, 0.03) < 0.006);
+  assert.equal(getWhisperSegmentationThreshold(NaN, 0), 0.0001);
 });

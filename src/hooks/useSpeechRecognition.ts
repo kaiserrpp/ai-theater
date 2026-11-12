@@ -22,6 +22,7 @@ type UseSpeechRecognitionOptions = {
   context?: ScriptRecognitionContext;
   whisperLanguage?: 'auto' | 'spanish' | 'english';
   whisperMicrophoneCheck?: boolean;
+  whisperSpeechThreshold?: number;
 };
 
 const getSpeechRecognitionConstructor = () => {
@@ -33,14 +34,15 @@ const getSpeechRecognitionConstructor = () => {
   return scopedWindow.SpeechRecognition ?? scopedWindow.webkitSpeechRecognition ?? null;
 };
 
-export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = false, prepareLocal = false, engine = 'vosk', context, whisperLanguage = 'auto', whisperMicrophoneCheck = false }: UseSpeechRecognitionOptions) => {
+export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = false, prepareLocal = false, engine = 'vosk', context, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
   const contextRef = useRef(context); contextRef.current = context;
   const whisperLanguageRef = useRef(whisperLanguage); whisperLanguageRef.current = whisperLanguage;
   const microphoneCheckRef = useRef(whisperMicrophoneCheck); microphoneCheckRef.current = whisperMicrophoneCheck;
+  const speechThresholdRef = useRef(whisperSpeechThreshold); speechThresholdRef.current = whisperSpeechThreshold;
   const processingTimingRef = useRef<RecognitionProcessingTiming | null>(null);
   const getRecognitionProcessingTiming = useCallback(() => processingTimingRef.current, []);
   const NativeConstructor = useMemo(getSpeechRecognitionConstructor, []);
-  const LocalConstructor = useMemo(() => engine === 'whisper' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }, () => microphoneCheckRef.current) :
+  const LocalConstructor = useMemo(() => engine === 'whisper' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }, () => microphoneCheckRef.current, () => speechThresholdRef.current) :
     preferLocal ? getLocalSpeechRecognitionConstructor() : null, [engine, preferLocal]);
   const Constructor = engine === 'whisper' ? LocalConstructor : LocalConstructor ?? NativeConstructor;
   const isLocal = Boolean(LocalConstructor);

@@ -17,14 +17,14 @@ const rejectPending = (error: Error) => {
 const getWorker = () => {
   if (worker) return worker;
   activeEncoderDevice = 'wasm';
-  const version = Constants.expoConfig?.version || '218';
+  const version = Constants.expoConfig?.version || '219';
   worker = new Worker(new URL(`/asr/whisper-live-worker.mjs?v=${version}`, window.location.href), { type: 'module' });
   const createdWorker = worker;
   worker.onmessage = ({ data }: MessageEvent<Reply>) => {
     if (worker !== createdWorker) return;
     const entry = pending.get(data.id); if (!entry) return;
     if (data.encoderDevice) activeEncoderDevice = data.encoderDevice;
-    if (typeof data.processingMs === 'number') entry.onTiming?.({ kind: 'live_processing',
+    if (typeof data.processingMs === 'number' && data.text?.trim()) entry.onTiming?.({ kind: 'live_processing',
       requestToTextMs: Math.round(performance.now() - entry.startedAt), processingMs: Math.round(data.processingMs),
       queueMs: Math.round(data.queueMs || 0), audioDurationMs: Math.round(data.audioDurationMs || 0),
       ...(data.encoderDevice ? { encoderDevice: data.encoderDevice, decoderDevice: data.decoderDevice,
@@ -61,7 +61,7 @@ const cancelSession = (session: number) => {
 const prepareModel = (): Promise<void> => loaded ??= request({ type: 'load' }).then(() => undefined)
   .catch((error) => { loaded = null; throw error; });
 
-const loadModel = async (getLanguage: () => string, onTiming: OnTiming | undefined, isMicrophoneCheck: () => boolean): Promise<LocalSpeechModel> => {
+const loadModel = async (getLanguage: () => string, onTiming: OnTiming | undefined, isMicrophoneCheck: () => boolean, getSpeechThreshold: () => number): Promise<LocalSpeechModel> => {
   await prepareModel();
   return {
     KaldiRecognizer: class implements LocalRecognizer {
@@ -69,17 +69,20 @@ const loadModel = async (getLanguage: () => string, onTiming: OnTiming | undefin
       finishInput: LocalRecognizer['finishInput'];
       constructor(sampleRate: number, context?: () => ScriptRecognitionContext | undefined) {
         const session = ++nextId;
+        let lastTiming: RecognitionProcessingTiming | null = null;
+        const reportTiming: OnTiming = timing => { lastTiming = timing; onTiming?.(timing); };
         const decoder = isMicrophoneCheck() ? createWhisperMicrophoneCheck(sampleRate,
           async audio => {
-            onTiming?.(null);
-            return request({ type: 'transcribe', session, audio, language: 'spanish' }, undefined, onTiming);
+            reportTiming(null);
+            return request({ type: 'transcribe', session, audio, language: 'spanish' }, undefined, reportTiming);
           }, () => cancelSession(session)) : createWhisperStreamDecoder(sampleRate, context,
           async (audio, vocabulary, onText) => {
             // The displayed words still belong to the previous inference until
             // this one returns words. Keep their timing available for a skip.
-            return request({ type: 'transcribe', session, audio, context: vocabulary, language: getLanguage() }, onText, onTiming);
+            return request({ type: 'transcribe', session, audio, context: vocabulary, language: getLanguage() }, onText, reportTiming);
           },
-          () => cancelSession(session), () => activeEncoderDevice === 'webgpu' ? 120 : 350);
+          () => cancelSession(session), { getSchedulingDelay: () => activeEncoderDevice === 'webgpu' ? 120 : 350,
+            getSpeechThreshold, onFinalized: info => { if (lastTiming) reportTiming({ ...lastTiming, ...info }); } });
         this.on = decoder.on; this.acceptWaveform = decoder.acceptWaveform; this.remove = decoder.remove;
         this.finishInput = decoder.finishInput;
       }
@@ -87,10 +90,10 @@ const loadModel = async (getLanguage: () => string, onTiming: OnTiming | undefin
   };
 };
 
-export const getWhisperSpeechRecognitionConstructor = (getContext: () => ScriptRecognitionContext | undefined, getLanguage: () => string = () => 'auto', onTiming?: OnTiming, isMicrophoneCheck: () => boolean = () => false) => {
+export const getWhisperSpeechRecognitionConstructor = (getContext: () => ScriptRecognitionContext | undefined, getLanguage: () => string = () => 'auto', onTiming?: OnTiming, isMicrophoneCheck: () => boolean = () => false, getSpeechThreshold: () => number = () => 0.0001) => {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof Worker === 'undefined' ||
     typeof WebAssembly === 'undefined' || typeof window.AudioContext === 'undefined') return null;
-  return createLocalSpeechRecognitionConstructor({ loadModel: () => loadModel(getLanguage, onTiming, isMicrophoneCheck), getContext,
+  return createLocalSpeechRecognitionConstructor({ loadModel: () => loadModel(getLanguage, onTiming, isMicrophoneCheck, getSpeechThreshold), getContext,
     getUserMedia: () => navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
     createAudioContext: () => new AudioContext(),
   });

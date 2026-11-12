@@ -258,6 +258,9 @@ export interface RecognitionProcessingTiming {
   decoderDevice?: 'wasm';
   encoderDtype?: 'fp32' | 'q8';
   fallbackReason?: string | null;
+  segmentFinalization?: 'speech_gap' | 'window_limit' | 'speech_resume';
+  trailingQuietMs?: number;
+  segmentationThreshold?: number;
 }
 
 export interface RehearsalResponseTiming {

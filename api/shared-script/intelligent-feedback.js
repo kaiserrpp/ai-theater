@@ -66,7 +66,10 @@ const normalizeEntry = (entry) => {
       processingMs: timingMs(timing.processingMs), queueMs: timingMs(timing.queueMs), audioDurationMs: timingMs(timing.audioDurationMs),
       ...(['webgpu', 'wasm'].includes(timing.encoderDevice) ? { encoderDevice: timing.encoderDevice, decoderDevice: 'wasm',
         encoderDtype: ['fp32', 'q8'].includes(timing.encoderDtype) ? timing.encoderDtype : null,
-        fallbackReason: typeof timing.fallbackReason === 'string' ? timing.fallbackReason.slice(0, 180) : null } : {}) } : null,
+        fallbackReason: typeof timing.fallbackReason === 'string' ? timing.fallbackReason.slice(0, 180) : null } : {}),
+      ...(['speech_gap', 'window_limit', 'speech_resume'].includes(timing.segmentFinalization) ? {
+        segmentFinalization: timing.segmentFinalization, trailingQuietMs: timingMs(timing.trailingQuietMs),
+        segmentationThreshold: clampScore(timing.segmentationThreshold) } : {}) } : null,
     responseTiming: responseTiming ? { kind: 'browser_events', matchToVoiceRequestMs: timingMs(responseTiming.matchToVoiceRequestMs),
       matchToVoiceStartEventMs: timingMs(responseTiming.matchToVoiceStartEventMs), inputCloseMs: timingMs(responseTiming.inputCloseMs),
       voiceRequestToStartEventMs: timingMs(responseTiming.voiceRequestToStartEventMs) } : null,

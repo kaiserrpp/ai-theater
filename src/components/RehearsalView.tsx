@@ -51,6 +51,7 @@ import {
 } from '../utils/lineMatching';
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
+import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
 import { getAutomaticRehearsalTargetIndex, getSceneAdvanceRecognitionAction, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
@@ -867,6 +868,8 @@ export const RehearsalView: React.FC<Props> = ({
     isSignalAboveThreshold,
     silenceElapsedMs,
     voiceThreshold,
+    microphoneNoiseFloor,
+    microphoneVoiceLevel,
     microphoneCalibrationProgress,
     lineStateLabel,
     calibrateAmbientNoise,
@@ -915,6 +918,7 @@ export const RehearsalView: React.FC<Props> = ({
     context: shouldUseIntelligentRecognition ? recognitionContext : undefined,
     whisperLanguage: shouldListenForSceneCommand ? 'spanish' : 'auto',
     whisperMicrophoneCheck: isCheckingIntelligentRecognition,
+    whisperSpeechThreshold: getWhisperSegmentationThreshold(microphoneNoiseFloor, microphoneVoiceLevel),
   });
 
   const startCurrentScene = useCallback(() => {
@@ -2907,6 +2911,9 @@ export const RehearsalView: React.FC<Props> = ({
       speechRecognitionTranscript,
       intelligentLineMatch
     );
+    const canRepeatWhisperLine = recognitionEngine === 'whisper' && hasTranscript &&
+      getAutomaticLineAdvanceDelay(speakableLineText, speechRecognitionTranscript,
+        speechRecognitionInterimTranscript, intelligentLineMatch) === null;
     const scoreToneStyle =
       automaticReason || intelligentLineMatch.score >= 0.88
         ? styles.intelligentScoreGood
@@ -2934,6 +2941,8 @@ export const RehearsalView: React.FC<Props> = ({
           <Text style={ui.label}>HE OÍDO</Text>
           <Text style={[ui.text, { color: palette.ink }]}>{speechRecognitionTranscript || 'Tu transcripción aparecerá aquí…'}</Text>
         </View> : null}
+        {canRepeatWhisperLine ? <Button label="Repetir réplica" secondary disabled={isPaused || !pageVisible}
+          onPress={handleRetryIntelligentLine} /> : null}
         {showDiagnostics ? <>
         <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>
         <Text style={styles.intelligentHint}>

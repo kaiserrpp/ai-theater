@@ -16,7 +16,8 @@ test('feedback preserves bounded live processing timings separately from offline
   let handler;
   try { handler = require('../api/shared-script/intelligent-feedback.js'); }
   finally { Module._load = previousLoad; }
-  const timing = { kind: 'live_processing', processingMs: 2200.4, requestToTextMs: 2310.6, queueMs: 100, audioDurationMs: 1800, audio: [0.7], encoderDevice: 'webgpu', decoderDevice: 'wasm', encoderDtype: 'fp32' };
+  const timing = { kind: 'live_processing', processingMs: 2200.4, requestToTextMs: 2310.6, queueMs: 100, audioDurationMs: 1800, audio: [0.7], encoderDevice: 'webgpu', decoderDevice: 'wasm', encoderDtype: 'fp32',
+    segmentFinalization: 'speech_gap', trailingQuietMs: 640, segmentationThreshold: 0.003 };
   const responseTiming = { kind: 'browser_events', matchToVoiceRequestMs: 23, matchToVoiceStartEventMs: 47, inputCloseMs: 1, voiceRequestToStartEventMs: 24 };
   const entry = { expectedText: 'Ey, Sonny.', heardText: 'Hey, Sonny.', recognitionEngine: 'whisper', recognitionTiming: timing, responseTiming };
   const response = { status(code) { this.code = code; return this; }, json(body) { this.body = body; } };
@@ -27,7 +28,8 @@ test('feedback preserves bounded live processing timings separately from offline
   assert.equal(response.code, 200);
   assert.equal(saved.environment, 'development');
   assert.deepEqual(saved.entries[0].recognitionTiming, { kind: 'live_processing', requestToTextMs: 2311, processingMs: 2200, queueMs: 100, audioDurationMs: 1800,
-    encoderDevice: 'webgpu', decoderDevice: 'wasm', encoderDtype: 'fp32', fallbackReason: null });
+    encoderDevice: 'webgpu', decoderDevice: 'wasm', encoderDtype: 'fp32', fallbackReason: null,
+    segmentFinalization: 'speech_gap', trailingQuietMs: 640, segmentationThreshold: 0.003 });
   assert.deepEqual(saved.entries[0].responseTiming, responseTiming);
   assert.equal(saved.entries[1].recognitionTiming, null);
   assert.equal(saved.entries[2].recognitionTiming.processingMs, null);
