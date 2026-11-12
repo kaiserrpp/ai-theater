@@ -1,4 +1,4 @@
-export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'suspended' | 'preparing' | 'finishing' | 'starting' | 'listening' | 'error';
+export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'suspended' | 'preparing' | 'processing' | 'finishing' | 'starting' | 'listening' | 'error';
 
 type RecognitionResult = {
   readonly isFinal: boolean;
@@ -19,6 +19,7 @@ export type SpeechRecognitionHandle = {
   onresult: ((event: { results: { readonly length: number; [index: number]: RecognitionResult | undefined } }) => void) | null;
   start: () => void;
   abort: () => void;
+  finishInput?: () => boolean;
 };
 
 export type SpeechRecognitionConstructor = new () => SpeechRecognitionHandle;
@@ -97,6 +98,7 @@ export const createSpeechRecognitionSession = (
   let needsCue = Boolean(options.naturalEnd && usage.started);
   let closingForChange = false;
   let audioEnded = false;
+  let inputIsFinishing = false;
   let playbackCompletedAfterInput = false;
   let inputEndReason: 'fin de captura' | 'fin de servicio' | null = null;
   let preparing = false;
@@ -203,6 +205,7 @@ export const createSpeechRecognitionSession = (
       current.maxAlternatives = 1;
       let hadAudioInput = false;
       audioEnded = playbackCompletedAfterInput = false;
+      inputIsFinishing = false;
       inputEndReason = null;
       closingForChange = false;
       update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null });
@@ -287,6 +290,7 @@ export const createSpeechRecognitionSession = (
         }
         committedTranscript = snapshot.transcript;
         detach(false);
+        if (inputIsFinishing) { enabled = false; inputIsFinishing = false; }
         update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false });
         if (enabled && !blocked) {
           restartTimer = setTimeout(() => { restartTimer = null; start(); }, 250);
@@ -391,6 +395,14 @@ export const createSpeechRecognitionSession = (
       start();
     },
     resetTranscript,
+    finishInput: () => {
+      if (!enabled || !pageVisible || blocked || inputIsFinishing || !recognition?.finishInput) return false;
+      inputIsFinishing = true;
+      const accepted = recognition.finishInput();
+      if (accepted) update({ status: 'processing', isAudioActive: false });
+      else inputIsFinishing = false;
+      return accepted;
+    },
     stop,
     waitForEnd: () => {
       if (!recognition) return Promise.resolve(true);

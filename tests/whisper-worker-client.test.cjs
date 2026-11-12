@@ -50,4 +50,19 @@ test('streamed words and live timings arrive before completion, and cancelling r
  reply('partial','adelante');reply('result','obsolete result');await settle();
  assert.equal(events.length,2);assert.equal(timings.length,count);
  assert(workers[0].messages.some(m=>m.type==='cancel'&&m.session===request.session));
+
+ const checkEvents=[];
+ const CheckConstructor=getConstructor(()=>({prompt:'Sonny, English'}),()=> 'auto',undefined,()=>true);
+ const check=new CheckConstructor();check.onresult=event=>checkEvents.push(event);check.start();await settle();
+ processors.at(-1).onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(64000).fill(0.2)}});
+ t.mock.timers.tick(10000);await settle();
+ assert.equal(workers[0].messages.filter(m=>m.type==='transcribe').length,1,'setup never transcribes a growing fragment');
+ assert.equal(check.finishInput(),true);
+ const checkRequest=workers[0].messages.filter(m=>m.type==='transcribe').at(-1);
+ assert.equal(checkRequest.language,'spanish');assert.equal(checkRequest.context,undefined);
+ workers[0].onmessage({data:{type:'partial',id:checkRequest.id,text:'prueba de micro'}});
+ assert.equal(checkEvents.length,0,'provisional guesses cannot validate setup');
+ workers[0].onmessage({data:{type:'result',id:checkRequest.id,text:'Hola, esta es una prueba de micro.'}});await settle();
+ assert.equal(checkEvents.length,1);assert.equal(checkEvents[0].results[0].isFinal,true);
+ assert.equal(workers.length,1,'retry/setup and rehearsal share the loaded worker');
 });

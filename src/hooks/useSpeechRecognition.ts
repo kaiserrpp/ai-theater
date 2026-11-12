@@ -21,6 +21,7 @@ type UseSpeechRecognitionOptions = {
   engine?: RecognitionEngine;
   context?: ScriptRecognitionContext;
   whisperLanguage?: 'auto' | 'spanish' | 'english';
+  whisperMicrophoneCheck?: boolean;
 };
 
 const getSpeechRecognitionConstructor = () => {
@@ -32,13 +33,14 @@ const getSpeechRecognitionConstructor = () => {
   return scopedWindow.SpeechRecognition ?? scopedWindow.webkitSpeechRecognition ?? null;
 };
 
-export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = false, prepareLocal = false, engine = 'vosk', context, whisperLanguage = 'auto' }: UseSpeechRecognitionOptions) => {
+export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = false, prepareLocal = false, engine = 'vosk', context, whisperLanguage = 'auto', whisperMicrophoneCheck = false }: UseSpeechRecognitionOptions) => {
   const contextRef = useRef(context); contextRef.current = context;
   const whisperLanguageRef = useRef(whisperLanguage); whisperLanguageRef.current = whisperLanguage;
+  const microphoneCheckRef = useRef(whisperMicrophoneCheck); microphoneCheckRef.current = whisperMicrophoneCheck;
   const processingTimingRef = useRef<RecognitionProcessingTiming | null>(null);
   const getRecognitionProcessingTiming = useCallback(() => processingTimingRef.current, []);
   const NativeConstructor = useMemo(getSpeechRecognitionConstructor, []);
-  const LocalConstructor = useMemo(() => engine === 'whisper' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }) :
+  const LocalConstructor = useMemo(() => engine === 'whisper' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }, () => microphoneCheckRef.current) :
     preferLocal ? getLocalSpeechRecognitionConstructor() : null, [engine, preferLocal]);
   const Constructor = engine === 'whisper' ? LocalConstructor : LocalConstructor ?? NativeConstructor;
   const isLocal = Boolean(LocalConstructor);
@@ -75,6 +77,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
     isLocal,
     getRecognitionProcessingTiming,
     resetTranscript: session.resetTranscript,
+    finishRecognitionInput: session.finishInput,
     activateRecognition: session.activate,
     restartRecognition: session.restart,
     stopRecognition: session.stop,

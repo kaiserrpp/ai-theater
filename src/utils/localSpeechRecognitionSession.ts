@@ -6,6 +6,7 @@ export type LocalRecognizer = {
     result?: { text?: string; partial?: string }; error?: string;
   }) => void) => void;
   acceptWaveform: (buffer: AudioBuffer) => void;
+  finishInput?: () => boolean;
   remove: () => void;
 };
 export type LocalSpeechModel = { KaldiRecognizer: new (sampleRate: number, getContext?: () => ScriptRecognitionContext | undefined) => LocalRecognizer };
@@ -41,17 +42,28 @@ export const createLocalSpeechRecognitionConstructor = (dependencies: Dependenci
     private recognizer: LocalRecognizer | null = null;
     private finals: string[] = [];
 
-    private release() {
-      this.generation += 1;
-      this.active = false;
+    private releaseCapture() {
       if (this.processor) this.processor.onaudioprocess = null;
       this.source?.disconnect(); this.processor?.disconnect(); this.output?.disconnect();
       this.source = null; this.processor = null; this.output = null;
       this.stream?.getTracks().forEach((track) => track.stop());
       this.stream = null;
-      this.recognizer?.remove(); this.recognizer = null;
       const context = this.context; this.context = null;
       if (context) void context.close().catch(() => undefined);
+    }
+
+    private release() {
+      this.generation += 1;
+      this.active = false;
+      this.releaseCapture();
+      this.recognizer?.remove(); this.recognizer = null;
+    }
+
+    finishInput() {
+      if (!this.active || !this.recognizer?.finishInput) return false;
+      this.releaseCapture();
+      this.onaudioend?.();
+      return this.recognizer.finishInput();
     }
 
     abort() {
@@ -93,6 +105,10 @@ export const createLocalSpeechRecognitionConstructor = (dependencies: Dependenci
           const text = message.result?.text?.trim();
           if (text) this.finals.push(text);
           emit();
+          if (recognizer.finishInput) {
+            this.release();
+            this.onend?.();
+          }
         });
         recognizer.on('error', (message) => {
           if (!isCurrent()) return;

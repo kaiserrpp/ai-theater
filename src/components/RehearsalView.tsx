@@ -503,6 +503,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [hasConfirmedRehearsalSetup, setHasConfirmedRehearsalSetup] = useState(false);
   const [speakerConfirmed, setSpeakerConfirmed] = useState(false);
   const [microphoneCalibrated, setMicrophoneCalibrated] = useState(false);
+  const [hasSubmittedWhisperCheck, setHasSubmittedWhisperCheck] = useState(false);
   const preparationRunRef = useRef(0);
   useEffect(() => () => { preparationRunRef.current += 1; }, []);
   const [isSongPlaybackUnlocked, setIsSongPlaybackUnlocked] = useState(false);
@@ -895,6 +896,7 @@ export const RehearsalView: React.FC<Props> = ({
     errorCode: speechRecognitionErrorCode,
     errorDetail: speechRecognitionErrorDetail,
     resetTranscript: resetSpeechRecognitionTranscript,
+    finishRecognitionInput,
     activateRecognition,
     restartRecognition,
     stopRecognition,
@@ -911,6 +913,7 @@ export const RehearsalView: React.FC<Props> = ({
     engine: recognitionEngine,
     context: shouldUseIntelligentRecognition ? recognitionContext : undefined,
     whisperLanguage: shouldListenForSceneCommand ? 'spanish' : 'auto',
+    whisperMicrophoneCheck: isCheckingIntelligentRecognition,
   });
 
   const startCurrentScene = useCallback(() => {
@@ -1372,6 +1375,7 @@ export const RehearsalView: React.FC<Props> = ({
     const preparation = rehearsalPreparationSession.getSnapshot();
     if (!preparation.speakerConfirmed || !preparation.calibration) return;
     stopRehearsalSpeech();
+    setHasSubmittedWhisperCheck(false);
     setListenModeSelection('intelligent');
     setHasConfirmedRehearsalSetup(true);
     setAutoListenEnabled(false);
@@ -1385,6 +1389,10 @@ export const RehearsalView: React.FC<Props> = ({
     setCompatibilityMessage(null);
     activateRecognition({ lang: 'es-ES', lineKey: recognitionPreparationKey });
   }, [activateRecognition, recognitionPreparationKey]);
+
+  useEffect(() => {
+    if (!isCheckingIntelligentRecognition || isRecognitionAudioActive) setHasSubmittedWhisperCheck(false);
+  }, [isCheckingIntelligentRecognition, isRecognitionAudioActive]);
 
   useEffect(() => {
     if (!isCheckingIntelligentRecognition) return;
@@ -2732,17 +2740,29 @@ export const RehearsalView: React.FC<Props> = ({
       <ScrollView contentContainerStyle={styles.preflightScrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.preflightCard}>
           {speechRecognitionStatus !== 'error' ? <>
-            <Text style={styles.preflightTitle}>{isRecognitionAudioActive ? 'Di «prueba de micro»' : isLocalSpeechRecognition ? 'Preparando la escucha en este dispositivo…' : 'Abriendo la escucha…'}</Text>
+            <Text style={styles.preflightTitle}>{recognitionEngine === 'whisper'
+              ? speechRecognitionStatus === 'processing' ? 'Comprobando la frase…' : isRecognitionAudioActive ? 'Micrófono listo' : hasSubmittedWhisperCheck ? 'Repite solo esta prueba' : 'Preparando Whisper…'
+              : isRecognitionAudioActive ? 'Di «prueba de micro»' : isLocalSpeechRecognition ? 'Preparando la escucha en este dispositivo…' : 'Abriendo la escucha…'}</Text>
             <Text style={styles.preflightText}>
               {rehearsalPreparationSession.hasConfirmedRecognitionEngine(recognitionEngine === 'whisper' ? 'whisper' : isLocalSpeechRecognition ? 'vosk' : 'native')
                 ? 'Estamos activando el micrófono para este ensayo. Las pruebas de audio ya están hechas.'
+                : recognitionEngine === 'whisper'
+                  ? speechRecognitionStatus === 'processing' ? 'La grabación ha terminado. Espera mientras Whisper comprueba la frase.'
+                    : hasSubmittedWhisperCheck ? 'Whisper no ha reconocido la frase de prueba. Puedes repetirla conservando el altavoz y la calibración.'
+                      : 'Espera a «Micrófono listo». Di una vez: «Hola, esta es una prueba de micro para empezar el ensayo». Después pulsa «Terminar y comprobar».'
                 : isLocalSpeechRecognition
-                  ? `Permite el micrófono. ${recognitionEngine === 'whisper' ? 'Whisper prepara el modelo y el vocabulario del guion.' : 'La primera preparación descarga unos 40 MB.'} Después di «prueba de micro»: comprobaremos tus palabras antes de empezar.`
+                  ? 'Permite el micrófono. La primera preparación descarga unos 40 MB. Después di «prueba de micro»: comprobaremos tus palabras antes de empezar.'
                   : 'Si Safari solicita reconocer tu voz, pulsa Permitir. Di «prueba de micro»: comprobaremos que aparecen tus palabras antes de entrar al ensayo.'}
             </Text>
-            <Text style={styles.preflightText}>He oído: {speechRecognitionTranscript || 'Esperando tus palabras…'}</Text>
+            {recognitionEngine !== 'whisper' || hasSubmittedWhisperCheck && speechRecognitionStatus !== 'processing'
+              ? <Text style={styles.preflightText}>He oído: {speechRecognitionTranscript || (recognitionEngine === 'whisper' ? 'No hemos recibido palabras.' : 'Esperando tus palabras…')}</Text> : null}
+            {recognitionEngine === 'whisper' && !hasSubmittedWhisperCheck ? <Button
+              label="Terminar y comprobar" disabled={!isRecognitionAudioActive}
+              onPress={() => { if (finishRecognitionInput()) setHasSubmittedWhisperCheck(true); }} /> : null}
+            {recognitionEngine === 'whisper' && hasSubmittedWhisperCheck && speechRecognitionStatus !== 'processing' ? <Button
+              label="Reintentar prueba" onPress={enableIntelligentListenForDevice} /> : null}
           </> : null}
-          {renderRecognitionError(enableIntelligentListenForDevice, 'Reintentar inicio')}
+          {renderRecognitionError(enableIntelligentListenForDevice, recognitionEngine === 'whisper' ? 'Reintentar prueba' : 'Reintentar inicio')}
           <TouchableOpacity accessibilityRole="button"
             style={[styles.preflightActionButton, styles.preflightFallbackButton]}
             onPress={() => {

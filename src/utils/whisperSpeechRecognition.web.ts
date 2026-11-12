@@ -3,6 +3,7 @@ import { createLocalSpeechRecognitionConstructor, type LocalRecognizer, type Loc
 import type { ScriptRecognitionContext } from './scriptRecognitionContext';
 import type { RecognitionProcessingTiming } from '../types/sharedScript';
 import { createWhisperStreamDecoder } from './whisperStreamDecoder';
+import { createWhisperMicrophoneCheck } from './whisperMicrophoneCheck';
 
 type Reply = { type: string; id: number; text: string; error?: string; processingMs?: number; queueMs?: number; audioDurationMs?: number };
 type OnTiming = (timing: RecognitionProcessingTiming | null) => void;
@@ -13,7 +14,7 @@ const rejectPending = (error: Error) => {
 };
 const getWorker = () => {
   if (worker) return worker;
-  const version = Constants.expoConfig?.version || '216';
+  const version = Constants.expoConfig?.version || '217';
   worker = new Worker(new URL(`/asr/whisper-live-worker.mjs?v=${version}`, window.location.href), { type: 'module' });
   const createdWorker = worker;
   worker.onmessage = ({ data }: MessageEvent<Reply>) => {
@@ -54,29 +55,35 @@ const cancelSession = (session: number) => {
 const prepareModel = (): Promise<void> => loaded ??= request({ type: 'load' }).then(() => undefined)
   .catch((error) => { loaded = null; throw error; });
 
-const loadModel = async (getLanguage: () => string, onTiming?: OnTiming): Promise<LocalSpeechModel> => {
+const loadModel = async (getLanguage: () => string, onTiming: OnTiming | undefined, isMicrophoneCheck: () => boolean): Promise<LocalSpeechModel> => {
   await prepareModel();
   return {
     KaldiRecognizer: class implements LocalRecognizer {
       on: LocalRecognizer['on']; acceptWaveform: LocalRecognizer['acceptWaveform']; remove: LocalRecognizer['remove'];
+      finishInput: LocalRecognizer['finishInput'];
       constructor(sampleRate: number, context?: () => ScriptRecognitionContext | undefined) {
         const session = ++nextId;
-        const decoder = createWhisperStreamDecoder(sampleRate, context,
+        const decoder = isMicrophoneCheck() ? createWhisperMicrophoneCheck(sampleRate,
+          async audio => {
+            onTiming?.(null);
+            return request({ type: 'transcribe', session, audio, language: 'spanish' }, undefined, onTiming);
+          }, () => cancelSession(session)) : createWhisperStreamDecoder(sampleRate, context,
           async (audio, vocabulary, onText) => {
             onTiming?.(null);
             return request({ type: 'transcribe', session, audio, context: vocabulary, language: getLanguage() }, onText, onTiming);
           },
           () => cancelSession(session));
         this.on = decoder.on; this.acceptWaveform = decoder.acceptWaveform; this.remove = decoder.remove;
+        this.finishInput = decoder.finishInput;
       }
     },
   };
 };
 
-export const getWhisperSpeechRecognitionConstructor = (getContext: () => ScriptRecognitionContext | undefined, getLanguage: () => string = () => 'auto', onTiming?: OnTiming) => {
+export const getWhisperSpeechRecognitionConstructor = (getContext: () => ScriptRecognitionContext | undefined, getLanguage: () => string = () => 'auto', onTiming?: OnTiming, isMicrophoneCheck: () => boolean = () => false) => {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof Worker === 'undefined' ||
     typeof WebAssembly === 'undefined' || typeof window.AudioContext === 'undefined') return null;
-  return createLocalSpeechRecognitionConstructor({ loadModel: () => loadModel(getLanguage, onTiming), getContext,
+  return createLocalSpeechRecognitionConstructor({ loadModel: () => loadModel(getLanguage, onTiming, isMicrophoneCheck), getContext,
     getUserMedia: () => navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
     createAudioContext: () => new AudioContext(),
   });
