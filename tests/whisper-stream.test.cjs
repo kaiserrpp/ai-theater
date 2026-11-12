@@ -46,6 +46,22 @@ test('leaving a turn discards late neural results and cancels queued recognition
   assert.equal(f.events.length, 0); assert.equal(calls, 1); assert.equal(f.cancelled(), 1);
 });
 
+test('completed streamed words are evaluated before neural decoding finishes, and late chunks cannot advance another turn', async (t) => {
+  const pending = deferred(); let words;
+  const f = fixture(t, (_audio, _context, onText) => { words = onText; return pending.promise; });
+  f.feed(2); await f.run();
+  words('Abuela qué pasó');
+  assert.equal(accepted(f.events.at(-1).message.result.partial), false);
+  f.feed(5, 0); await f.run();
+  assert.equal(f.events.length, 1, 'a pause cannot complete the turn');
+  words(reference);
+  assert.equal(accepted(f.events.at(-1).message.result.partial), true);
+  f.decoder.remove();
+  words('late words from the previous actor');
+  pending.resolve({ text: 'late result' }); await settle();
+  assert.equal(f.events.length, 2); assert.equal(f.cancelled(), 1);
+});
+
 test('silence cannot produce prompted names, and neural failures remain errors rather than accepted replies', async (t) => {
   let calls = 0;
   const f = fixture(t, async () => { calls++; throw new Error('model failed'); });

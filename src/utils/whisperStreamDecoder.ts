@@ -2,7 +2,7 @@ import type { LocalRecognizer } from './localSpeechRecognitionSession';
 import type { ScriptRecognitionContext } from './scriptRecognitionContext';
 
 export type WhisperAudioResult = { text: string };
-type Transcribe = (audio: Float32Array, context: ScriptRecognitionContext | undefined) => Promise<WhisperAudioResult>;
+type Transcribe = (audio: Float32Array, context: ScriptRecognitionContext | undefined, onText: (text: string) => void) => Promise<WhisperAudioResult>;
 type Message = { result?: { text?: string; partial?: string }; error?: string };
 
 export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRecognitionContext | (() => ScriptRecognitionContext | undefined) | undefined, transcribe: Transcribe, cancel: () => void): LocalRecognizer => {
@@ -31,7 +31,13 @@ export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRe
       audio[i] = pcm[start] + (pcm[end] - pcm[start]) * (at - start);
     }
     try {
-      const result = await transcribe(audio, typeof context === 'function' ? context() : context);
+      const result = await transcribe(audio, typeof context === 'function' ? context() : context, (text) => {
+        if (disposed) return;
+        // Words from this inference replace its previous partial; they never
+        // commit an actor turn. The shared Intelligent matcher evaluates them.
+        lastText = text;
+        listeners.partialresult?.({ result: { partial: text } });
+      });
       if (disposed) return;
       processed = length;
       if (length >= sampleRate * 20) {

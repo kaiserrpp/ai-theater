@@ -248,10 +248,19 @@ export type IntelligentLineFeedbackIssueType =
   | 'dije_mal_mi_frase'
   | 'otro';
 
+export interface RecognitionProcessingTiming {
+  kind: 'live_processing';
+  requestToTextMs: number;
+  processingMs: number;
+  queueMs: number;
+  audioDurationMs: number;
+}
+
 export interface IntelligentLineFeedbackEntry {
   recognitionEngine?: 'native' | 'vosk' | 'whisper';
   scriptContextEnabled?: boolean;
   scriptContextTermCount?: number;
+  recognitionTiming?: RecognitionProcessingTiming | null;
   recognitionComparison?: {
     sampleId: string | null; engine: 'vosk' | 'whisper'; status: 'done' | 'error';
     model: string | null; modelRevision: string | null; backend: 'wasm';

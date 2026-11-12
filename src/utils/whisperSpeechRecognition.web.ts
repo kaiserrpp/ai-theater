@@ -1,22 +1,28 @@
 import Constants from 'expo-constants';
 import { createLocalSpeechRecognitionConstructor, type LocalRecognizer, type LocalSpeechModel } from './localSpeechRecognitionSession';
 import type { ScriptRecognitionContext } from './scriptRecognitionContext';
+import type { RecognitionProcessingTiming } from '../types/sharedScript';
 import { createWhisperStreamDecoder } from './whisperStreamDecoder';
 
-type Reply = { type: string; id: number; text: string; error?: string };
-let worker: Worker | null = null, loaded: Promise<LocalSpeechModel> | null = null, nextId = 0;
-const pending = new Map<number, { session?: number; timer: ReturnType<typeof setTimeout>; resolve: (reply: Reply) => void; reject: (error: Error) => void }>();
+type Reply = { type: string; id: number; text: string; error?: string; processingMs?: number; queueMs?: number; audioDurationMs?: number };
+type OnTiming = (timing: RecognitionProcessingTiming | null) => void;
+let worker: Worker | null = null, loaded: Promise<void> | null = null, nextId = 0;
+const pending = new Map<number, { session?: number; startedAt: number; onTiming?: OnTiming; onText?: (text: string) => void; timer: ReturnType<typeof setTimeout>; resolve: (reply: Reply) => void; reject: (error: Error) => void }>();
 const rejectPending = (error: Error) => {
   pending.forEach((entry) => { clearTimeout(entry.timer); entry.reject(error); }); pending.clear();
 };
 const getWorker = () => {
   if (worker) return worker;
-  const version = Constants.expoConfig?.version || '214';
+  const version = Constants.expoConfig?.version || '216';
   worker = new Worker(new URL(`/asr/whisper-live-worker.mjs?v=${version}`, window.location.href), { type: 'module' });
   const createdWorker = worker;
   worker.onmessage = ({ data }: MessageEvent<Reply>) => {
     if (worker !== createdWorker) return;
     const entry = pending.get(data.id); if (!entry) return;
+    if (typeof data.processingMs === 'number') entry.onTiming?.({ kind: 'live_processing',
+      requestToTextMs: Math.round(performance.now() - entry.startedAt), processingMs: Math.round(data.processingMs),
+      queueMs: Math.round(data.queueMs || 0), audioDurationMs: Math.round(data.audioDurationMs || 0) });
+    if (data.type === 'partial') { entry.onText?.(data.text); return; }
     pending.delete(data.id); clearTimeout(entry.timer);
     if (data.type === 'error') entry.reject(new Error(data.error || 'Whisper no ha podido transcribir.'));
     else entry.resolve(data);
@@ -28,14 +34,14 @@ const getWorker = () => {
   };
   return worker;
 };
-const request = (message: { type: string; session?: number; audio?: Float32Array; context?: ScriptRecognitionContext }) => new Promise<Reply>((resolve, reject) => {
+const request = (message: { type: string; session?: number; audio?: Float32Array; context?: ScriptRecognitionContext; language?: string }, onText?: (text: string) => void, onTiming?: OnTiming) => new Promise<Reply>((resolve, reject) => {
   const id = ++nextId;
   const timer = setTimeout(() => {
     pending.delete(id); reject(new Error('Whisper ha tardado demasiado. Comprueba la conexión y reintenta.'));
     worker?.terminate(); worker = null; loaded = null;
     rejectPending(new Error('Whisper ha terminado sin respuesta. Puedes reintentar.'));
   }, message.type === 'load' ? 120000 : 90000);
-  pending.set(id, { session: message.session, timer, resolve, reject });
+  pending.set(id, { session: message.session, startedAt: performance.now(), onTiming, onText, timer, resolve, reject });
   try { getWorker().postMessage({ ...message, id }, message.audio ? [message.audio.buffer as ArrayBuffer] : []); }
   catch (error) { clearTimeout(timer); pending.delete(id); reject(error instanceof Error ? error : new Error('Whisper no está disponible.')); }
 });
@@ -45,28 +51,37 @@ const cancelSession = (session: number) => {
     pending.delete(id); clearTimeout(entry.timer); entry.reject(new Error('Escucha cancelada.'));
   }
 };
-const loadModel = (): Promise<LocalSpeechModel> => loaded ??= request({ type: 'load' }).then(() => ({
-  KaldiRecognizer: class implements LocalRecognizer {
-    on: LocalRecognizer['on']; acceptWaveform: LocalRecognizer['acceptWaveform']; remove: LocalRecognizer['remove'];
-    constructor(sampleRate: number, context?: () => ScriptRecognitionContext | undefined) {
-      const session = ++nextId;
-      const decoder = createWhisperStreamDecoder(sampleRate, context,
-        async (audio, vocabulary) => request({ type: 'transcribe', session, audio, context: vocabulary }),
-        () => cancelSession(session));
-      this.on = decoder.on; this.acceptWaveform = decoder.acceptWaveform; this.remove = decoder.remove;
-    }
-  },
-})).catch((error) => { loaded = null; throw error; });
+const prepareModel = (): Promise<void> => loaded ??= request({ type: 'load' }).then(() => undefined)
+  .catch((error) => { loaded = null; throw error; });
 
-export const getWhisperSpeechRecognitionConstructor = (getContext: () => ScriptRecognitionContext | undefined) => {
+const loadModel = async (getLanguage: () => string, onTiming?: OnTiming): Promise<LocalSpeechModel> => {
+  await prepareModel();
+  return {
+    KaldiRecognizer: class implements LocalRecognizer {
+      on: LocalRecognizer['on']; acceptWaveform: LocalRecognizer['acceptWaveform']; remove: LocalRecognizer['remove'];
+      constructor(sampleRate: number, context?: () => ScriptRecognitionContext | undefined) {
+        const session = ++nextId;
+        const decoder = createWhisperStreamDecoder(sampleRate, context,
+          async (audio, vocabulary, onText) => {
+            onTiming?.(null);
+            return request({ type: 'transcribe', session, audio, context: vocabulary, language: getLanguage() }, onText, onTiming);
+          },
+          () => cancelSession(session));
+        this.on = decoder.on; this.acceptWaveform = decoder.acceptWaveform; this.remove = decoder.remove;
+      }
+    },
+  };
+};
+
+export const getWhisperSpeechRecognitionConstructor = (getContext: () => ScriptRecognitionContext | undefined, getLanguage: () => string = () => 'auto', onTiming?: OnTiming) => {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof Worker === 'undefined' ||
     typeof WebAssembly === 'undefined' || typeof window.AudioContext === 'undefined') return null;
-  return createLocalSpeechRecognitionConstructor({ loadModel, getContext,
+  return createLocalSpeechRecognitionConstructor({ loadModel: () => loadModel(getLanguage, onTiming), getContext,
     getUserMedia: () => navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
     createAudioContext: () => new AudioContext(),
   });
 };
-export const preloadWhisperSpeechRecognition = async () => { await loadModel(); };
+export const preloadWhisperSpeechRecognition = async () => { await prepareModel(); };
 export const disposeWhisperSpeechRecognition = () => {
   worker?.terminate(); worker = null; loaded = null;
   rejectPending(new Error('Whisper se ha cerrado.'));

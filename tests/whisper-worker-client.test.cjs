@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const previousLoader=require.extensions['.ts'],previousLoad=Module._load;
 require.extensions['.ts']=(m,file)=>m._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,file);
 Module._load=function(name,...args){return name==='expo-constants'?{default:{expoConfig:{version:'test'}}}:previousLoad.call(this,name,...args)};
-const {preloadWhisperSpeechRecognition:preload,disposeWhisperSpeechRecognition:dispose}=require('../src/utils/whisperSpeechRecognition.web.ts');
+const {preloadWhisperSpeechRecognition:preload,disposeWhisperSpeechRecognition:dispose,getWhisperSpeechRecognitionConstructor:getConstructor}=require('../src/utils/whisperSpeechRecognition.web.ts');
 Module._load=previousLoad;if(previousLoader)require.extensions['.ts']=previousLoader;else delete require.extensions['.ts'];
 
 test('a hung model is released and a fresh retry ignores errors from the terminated worker',async t=>{
@@ -14,4 +14,40 @@ test('a hung model is released and a fresh retry ignores errors from the termina
  const second=preload();assert.equal(workers.length,2);lateError({message:'old failure'});assert.equal(workers[1].terminated,undefined);
  workers[1].onmessage({data:{type:'ready',id:workers[1].messages[0].id}});await second;
  await preload();assert.equal(workers.length,2,'a loaded model stays warm');
+});
+
+test('streamed words and live timings arrive before completion, and cancelling rejects all later chunks',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ const {setImmediate:settle}=require('node:timers/promises');
+ const previousWindow=global.window,previousWorker=global.Worker,previousAudioContext=global.AudioContext;
+ const previousNavigator=Object.getOwnPropertyDescriptor(global,'navigator');
+ const workers=[],processors=[],timings=[],events=[];
+ const node=()=>({connect(){},disconnect(){}});
+ class AudioContext{
+  constructor(){this.sampleRate=16000;this.state='running';this.destination={}}
+  createMediaStreamSource(){return node()}
+  createScriptProcessor(){const p=node();processors.push(p);return p}
+  createGain(){return {...node(),gain:{value:0}}}
+  async close(){}
+ }
+ global.AudioContext=AudioContext;global.window={location:{href:'http://localhost/'},AudioContext};
+ Object.defineProperty(global,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:async()=>({getTracks:()=>[{stop(){}}]})}}});
+ global.Worker=class{constructor(){this.messages=[];workers.push(this)}postMessage(m){this.messages.push(m)}terminate(){}};
+ t.after(()=>{dispose();global.window=previousWindow;global.Worker=previousWorker;global.AudioContext=previousAudioContext;if(previousNavigator)Object.defineProperty(global,'navigator',previousNavigator);else delete global.navigator});
+ const ready=preload();workers[0].onmessage({data:{type:'ready',id:workers[0].messages[0].id}});await ready;
+ const Constructor=getConstructor(()=>undefined,()=> 'spanish',timing=>timings.push(timing));
+ const recognition=new Constructor();recognition.onresult=event=>events.push(event);recognition.start();await settle();
+ processors[0].onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(16000).fill(0.2)}});
+ t.mock.timers.tick(350);await settle();
+ const request=workers[0].messages.find(m=>m.type==='transcribe');
+ assert.equal(request.language,'spanish');assert.equal(request.context,undefined);
+ const reply=(type,text)=>workers[0].onmessage({data:{type,id:request.id,text,processingMs:250,queueMs:12,audioDurationMs:1000}});
+ reply('partial','prueba de');reply('partial','prueba de micro');
+ assert.equal(events.length,2);assert.equal(events[1].results[0].isFinal,false);assert.equal(events[1].results[0][0].transcript,'prueba de micro');
+ assert.equal(timings.at(-1).kind,'live_processing');assert.equal(timings.at(-1).processingMs,250);assert.equal(timings.at(-1).queueMs,12);
+ recognition.abort();await settle();
+ const count=timings.length;
+ reply('partial','adelante');reply('result','obsolete result');await settle();
+ assert.equal(events.length,2);assert.equal(timings.length,count);
+ assert(workers[0].messages.some(m=>m.type==='cancel'&&m.session===request.session));
 });

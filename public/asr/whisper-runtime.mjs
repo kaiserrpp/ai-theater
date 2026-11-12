@@ -2,14 +2,14 @@ import { WHISPER_MODEL, WHISPER_REVISION, TRANSFORMERS_URL, SAMPLE_RATE } from '
 
 let runtime;
 export const loadWhisper = (onProgress = () => {}) => runtime ??= (async () => {
-  const { pipeline, env, Tensor } = await import(TRANSFORMERS_URL);
+  const { pipeline, env, Tensor, TextStreamer, StoppingCriteria } = await import(TRANSFORMERS_URL);
   env.allowLocalModels = false;
   env.backends.onnx.wasm.numThreads = 1;
   env.backends.onnx.wasm.proxy = false;
   const transcribe = await pipeline('automatic-speech-recognition', WHISPER_MODEL, {
     revision: WHISPER_REVISION, dtype: 'q8', device: 'wasm', progress_callback: onProgress,
   });
-  return { transcribe, Tensor };
+  return { transcribe, Tensor, TextStreamer, StoppingCriteria };
 })().catch((error) => { runtime = null; throw error; });
 
 export const whisperPrefix = (tokenizer, config, language, prompt, timestamps = false) => {

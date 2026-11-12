@@ -48,6 +48,9 @@ const normalizeEntry = (entry) => {
   const expectedText = clampText(entry.expectedText);
   const heardText = clampText(entry.heardText);
   const recognitionComparison = normalizeRecognitionComparison(entry.recognitionComparison);
+  const timing = entry.recognitionEngine === 'whisper' && entry.recognitionTiming?.kind === 'live_processing'
+    ? entry.recognitionTiming : null;
+  const timingMs = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(180000, Math.round(value))) : null;
 
   if (!expectedText && !heardText) {
     return null;
@@ -58,6 +61,8 @@ const normalizeEntry = (entry) => {
     scriptContextEnabled: entry.scriptContextEnabled === true,
     scriptContextTermCount: typeof entry.scriptContextTermCount === 'number' && Number.isFinite(entry.scriptContextTermCount)
       ? Math.max(0, Math.min(100, Math.round(entry.scriptContextTermCount))) : null,
+    recognitionTiming: timing ? { kind: 'live_processing', requestToTextMs: timingMs(timing.requestToTextMs),
+      processingMs: timingMs(timing.processingMs), queueMs: timingMs(timing.queueMs), audioDurationMs: timingMs(timing.audioDurationMs) } : null,
     lineIndex: typeof entry.lineIndex === 'number' ? entry.lineIndex : -1,
     character: clampText(entry.character).slice(0, 120),
     sceneTitle: typeof entry.sceneTitle === 'string' ? clampText(entry.sceneTitle).slice(0, 180) : null,

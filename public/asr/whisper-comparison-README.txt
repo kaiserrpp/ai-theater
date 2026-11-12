@@ -28,3 +28,11 @@ prompt_ids itself; see its Whisper generation source. Chunk merging uses that
 runtime's tokenizer._decode_asr, as in its ASR pipeline (Apache-2.0).
 https://github.com/huggingface/transformers.js/blob/3.8.1/src/models.js
 https://github.com/huggingface/transformers.js/blob/3.8.1/src/pipelines.js
+
+Live recognition uses whisper-live-runtime.mjs. It shares encoder outputs
+between language detection and generation, enables that supported input in
+Whisper's 3.8.1 forward-parameter allow-list, streams complete audio words with
+TextStreamer (skip_prompt), and checks cancellation between decoder steps.
+The separate offline comparison retains the original transcription path.
+https://github.com/huggingface/transformers.js/blob/3.8.1/src/generation/streamers.js
+https://github.com/huggingface/transformers.js/blob/3.8.1/src/generation/stopping_criteria.js

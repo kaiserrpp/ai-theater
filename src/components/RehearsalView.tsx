@@ -890,6 +890,7 @@ export const RehearsalView: React.FC<Props> = ({
     interimTranscript: speechRecognitionInterimTranscript,
     isAudioActive: isRecognitionAudioActive,
     hasReceivedTranscript: hasRecognitionReceivedText,
+    getRecognitionProcessingTiming,
     error: speechRecognitionError,
     errorCode: speechRecognitionErrorCode,
     errorDetail: speechRecognitionErrorDetail,
@@ -909,6 +910,7 @@ export const RehearsalView: React.FC<Props> = ({
     prepareLocal: hasConfirmedRehearsalSetup && isIntelligentListenMode,
     engine: recognitionEngine,
     context: shouldUseIntelligentRecognition ? recognitionContext : undefined,
+    whisperLanguage: shouldListenForSceneCommand ? 'spanish' : 'auto',
   });
 
   const startCurrentScene = useCallback(() => {
@@ -1025,6 +1027,7 @@ export const RehearsalView: React.FC<Props> = ({
         recognitionEngine: recognitionEngine === 'whisper' ? 'whisper' : isLocalSpeechRecognition ? 'vosk' : 'native',
         scriptContextEnabled: recognitionEngine === 'whisper' && Boolean(recognitionContext.prompt),
         scriptContextTermCount: recognitionEngine === 'whisper' ? recognitionContext.names.length + recognitionContext.vocabulary.length : 0,
+        recognitionTiming: recognitionEngine === 'whisper' ? getRecognitionProcessingTiming() : null,
         lineIndex: currentLineIndexInScript,
         character: currentLine.p,
         sceneTitle: currentSceneTitle,
@@ -1061,6 +1064,7 @@ export const RehearsalView: React.FC<Props> = ({
       speechRecognitionTranscript,
       recognitionEngine,
       recognitionContext,
+      getRecognitionProcessingTiming,
       isLocalSpeechRecognition,
     ]
   );
