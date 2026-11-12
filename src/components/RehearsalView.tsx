@@ -50,7 +50,7 @@ import {
   scoreLineMatch,
 } from '../utils/lineMatching';
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
-import { getAutomaticRehearsalTargetIndex, isSceneAdvanceCommand, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
+import { getAutomaticRehearsalTargetIndex, getSceneAdvanceRecognitionAction, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
 
@@ -924,14 +924,19 @@ export const RehearsalView: React.FC<Props> = ({
   }, [currentIndex, filteredGuion, resetSpeechRecognitionTranscript]);
 
   useEffect(() => {
-    if (!shouldListenForSceneCommand || !speechRecognitionFinalTranscript.trim()) return;
-    if (isSceneAdvanceCommand(speechRecognitionFinalTranscript)) {
+    if (!shouldListenForSceneCommand) return;
+    const action = getSceneAdvanceRecognitionAction({
+      finalTranscript: speechRecognitionFinalTranscript,
+      interimTranscript: speechRecognitionInterimTranscript,
+      acceptInterim: recognitionEngine === 'whisper',
+    });
+    if (action === 'start') {
       startCurrentScene();
-    } else if (!speechRecognitionInterimTranscript.trim()) {
+    } else if (action === 'discard') {
       // Discard conversation while waiting, so a later "adelante" stands alone.
       resetSpeechRecognitionTranscript();
     }
-  }, [resetSpeechRecognitionTranscript, shouldListenForSceneCommand, speechRecognitionFinalTranscript,
+  }, [recognitionEngine, resetSpeechRecognitionTranscript, shouldListenForSceneCommand, speechRecognitionFinalTranscript,
     speechRecognitionInterimTranscript, startCurrentScene]);
 
   const intelligentLineMatch = useMemo(
