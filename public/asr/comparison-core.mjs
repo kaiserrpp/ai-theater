@@ -6,12 +6,17 @@ export const WHISPER_MODEL = 'Xenova/whisper-tiny';
 export const WHISPER_REVISION = '5332fcc35e32a33b86612b9a57a89be7906102b1';
 export const TRANSFORMERS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js';
 export const PHRASES = [
+  'Sí.',
+  'Ya me diste uno hoy.',
+  'Reconoces esto?',
+  'No, pero espera.',
+  'Pero es que yo traté de llamar.',
+  'Abuela, ¿qué pasó? ¿Por qué gritas? ¿Pasó algo malo?',
   'Ey, Sonny.',
   'Tengo noticias. My English is getting much better.',
   'Really?',
   'Sure (se ríe).',
   'Ya lo sé, pero hay dos idiomas distintos: Dominican English y Puerto Rican English. Necesito unas lecciones extras.',
-  'Abuela, ¿qué pasó? ¿Por qué gritas? ¿Pasó algo malo?',
   'Cada mañana abro la tienda, preparo el café y reviso todos los encargos antes de que mis vecinos salgan hacia el trabajo.',
 ];
 
@@ -70,6 +75,7 @@ export const compareSample = async ({ audio, expected, context = null, language 
       const output = await engines[engine](audio.slice(), { signal, language, context: engine === 'whisper' ? context : null, onProgress: (message) => { if (!signal?.aborted) onProgress(engine, message); } });
       checkAbort(signal);
       result = { engine, status: 'done', ...output, ...evaluateTranscript(expected, output.text), verdict: null };
+      if (output.replay) { result.finalAccepted = result.accepted; result.accepted = output.replay.acceptedAtMs !== null; }
     } catch (error) {
       if (signal?.aborted || error?.name === 'AbortError') throw abortError();
       result = { engine, status: 'error', text: '', error: error?.message || String(error), verdict: null };
@@ -81,7 +87,7 @@ export const compareSample = async ({ audio, expected, context = null, language 
 };
 
 export const makeFeedbackEntries = (trial) => trial.results.map((result) => ({
-  lineIndex: trial.phraseIndex, character: 'PRUEBA LOCAL', sceneTitle: 'Whisper frente a Vosk',
+  lineIndex: trial.phraseIndex, character: 'PRUEBA COMPARATIVA', sceneTitle: 'Safari, Vosk y Whisper',
   expectedText: trial.expected, heardText: result.text || '', score: result.score || 0,
   coverageScore: result.coverageScore, orderScore: result.orderScore, finalScore: result.finalScore,
   finalPhraseScore: result.finalPhraseScore, finalPhraseWordCount: result.finalPhraseWordCount,
@@ -90,13 +96,17 @@ export const makeFeedbackEntries = (trial) => trial.results.map((result) => ({
   matchedReferenceText: result.referenceText || trial.expected, matchedReferenceIndex: result.referenceIndex || 0,
   language: result.engine === 'vosk' ? 'es-ES' : trial.language, createdAt: trial.createdAt,
   recognitionComparison: { sampleId: trial.sampleId || trial.id, engine: result.engine, status: result.status,
-    model: result.engine === 'vosk' ? 'vosk-model-small-es-0.42' : WHISPER_MODEL,
-    backend: 'wasm', modelRevision: result.engine === 'whisper' ? WHISPER_REVISION : '0.42',
+    comparisonId: trial.caseId || trial.sampleId || trial.id,
+    sameAudioPair: result.engine !== 'native',
+    model: result.engine === 'native' ? 'browser-speech-recognition' : result.engine === 'vosk' ? 'vosk-model-small-es-0.42' : WHISPER_MODEL,
+    backend: result.backend || 'wasm', modelRevision: result.engine === 'whisper' ? WHISPER_REVISION : result.engine === 'vosk' ? '0.42' : null,
     sampleDurationMs: trial.durationMs, processingMs: result.processingMs, loadMs: result.loadMs,
     languageUsed: result.engine === 'vosk' ? 'spanish' : result.languageUsed,
     contextUsed: result.contextUsed === true, contextTermCount: result.contextTermCount || 0,
     contextPrompt: result.contextUsed ? result.contextPrompt ?? trial.context?.prompt : null,
     accepted: result.accepted ?? false, literalDifference: result.literalDifference,
     verdict: result.verdict, error: result.error || null, order: trial.order.join(','),
-    timingKind: 'offline_processing', audioUploaded: false },
+    encoderDevice: result.encoderDevice, encoderDtype: result.encoderDtype, fallbackReason: result.fallbackReason,
+    replay: result.replay || null, native: result.native || null,
+    timingKind: result.timingKind || trial.timingKind || 'offline_processing', audioUploaded: false },
 }));

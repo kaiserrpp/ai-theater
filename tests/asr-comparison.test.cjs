@@ -122,12 +122,47 @@ test('the feedback endpoint keeps both engines and their paired sample IDs', asy
   t.after(() => { if (token === undefined) delete process.env.BLOB_READ_WRITE_TOKEN; else process.env.BLOB_READ_WRITE_TOKEN = token; });
   const response = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; }, setHeader() {} };
   const { makeFeedbackEntries } = await coreModule;
-  const entries = makeFeedbackEntries({ id: 'paired', expected: 'Really', phraseIndex: 0, durationMs: 1200, language: 'auto', order: ['vosk', 'whisper'],
-    results: [{ engine: 'vosk', status: 'done', text: 'riley' }, { engine: 'whisper', status: 'done', text: 'Really' }] });
+  const entries = makeFeedbackEntries({ id: 'paired', caseId: 'all-three', expected: 'Really', phraseIndex: 0, durationMs: 1200, language: 'auto', order: ['vosk', 'whisper'],
+    results: [{ engine: 'vosk', status: 'done', text: 'riley' }, { engine: 'whisper', status: 'done', text: 'Really',
+      backend: 'webgpu', encoderDevice: 'webgpu', encoderDtype: 'fp32', timingKind: 'paced_replay',
+      replay: { firstTextMs: 500, acceptedAtMs: 600, speechEndMs: 800, decisionAfterSpeechMs: -200,
+        speechEndKind: 'sample_rms_estimate', events: [{ atMs: 500, audioMs: 700, text: 'Really', interim: true }] } }] });
+  entries.push(...makeFeedbackEntries({ id: 'different-take', caseId: 'all-three', expected: 'Really', durationMs: 2000,
+    language: 'spanish', order: ['native'], results: [{ engine: 'native', status: 'done', text: 'Really',
+      backend: 'browser', timingKind: 'native_live', native: { firstTextMs: 400, acceptedAtMs: 450, speechEndMs: 500,
+        speechEndKind: 'browser_speechend_event', events: [{ atMs: 400, text: 'Really', interim: false }] } }] }));
   Object.assign(entries[1], { recognitionEngine: 'whisper', scriptContextEnabled: true, scriptContextTermCount: 42 });
   await handler({ method: 'POST', headers: {}, body: { sessionId: 'comparison-test', scriptId: 'local-test', entries } }, response);
-  assert.equal(response.statusCode, 200); assert.equal(stored.entryCount, 2);
-  assert.deepEqual(stored.entries.map((entry) => entry.recognitionComparison.engine), ['vosk', 'whisper']);
-  assert.ok(stored.entries.every((entry) => entry.recognitionComparison.sampleId === 'paired'));
+  assert.equal(response.statusCode, 200); assert.equal(stored.entryCount, 3);
+  assert.deepEqual(stored.entries.map((entry) => entry.recognitionComparison.engine), ['vosk', 'whisper', 'native']);
+  assert.ok(stored.entries.slice(0, 2).every((entry) => entry.recognitionComparison.sampleId === 'paired'));
+  assert.ok(stored.entries.every((entry) => entry.recognitionComparison.comparisonId === 'all-three'));
+  const measured = stored.entries[1].recognitionComparison;
+  assert.equal(measured.backend, 'webgpu'); assert.equal(measured.timingKind, 'paced_replay');
+  assert.equal(measured.replay.decisionAfterSpeechMs, -200); assert.equal(measured.replay.events[0].text, 'Really');
+  assert.equal(stored.entries[2].recognitionComparison.sameAudioPair, false);
+  assert.equal(stored.entries[2].recognitionComparison.sampleId, 'different-take');
+  assert.equal(stored.entries[2].recognitionComparison.native.firstTextMs, 400);
   assert.equal(stored.entries[1].recognitionEngine, 'whisper'); assert.equal(stored.entries[1].scriptContextEnabled, true); assert.equal(stored.entries[1].scriptContextTermCount, 42);
+});
+
+test('the newest comparison report is ordered by its date, including Thursday to Friday', async t => {
+  const blobPath = require.resolve('@vercel/blob'), original = require(blobPath);
+  const oldFetch = global.fetch;
+  const oldEnv = Object.fromEntries(['BLOB_READ_WRITE_TOKEN', 'SONG_ADMIN_PASSWORD', 'SHARED_STORAGE_NAMESPACE'].map(key => [key, process.env[key]]));
+  Object.assign(process.env, { BLOB_READ_WRITE_TOKEN: 'test-only', SONG_ADMIN_PASSWORD: 'test-only', SHARED_STORAGE_NAMESPACE: 'test' });
+  t.after(() => { global.fetch = oldFetch; require.cache[blobPath].exports = original;
+    for (const [key, value] of Object.entries(oldEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  require.cache[blobPath].exports = { ...original,
+    list: async () => ({ blobs: [
+      { pathname: 'thursday.json', uploadedAt: 'Thu Nov 12 2026 23:00:00 GMT+0000' },
+      { pathname: 'friday.json', uploadedAt: 'Fri Nov 13 2026 00:19:00 GMT+0000' },
+    ] }), head: async pathname => ({ url: `https://report.test/${pathname}` }) };
+  global.fetch = async url => ({ ok: true, json: async () => ({ source: url }) });
+  const handlerPath = require.resolve('../api/shared-script/intelligent-feedback'); delete require.cache[handlerPath];
+  const handler = require(handlerPath);
+  const response = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; }, setHeader() {} };
+  await handler({ method: 'GET', headers: { 'x-song-admin-password': 'test-only' }, query: {} }, response);
+  assert.equal(response.statusCode, 200); assert.equal(response.body.reports[0].pathname, 'friday.json');
+  assert(response.body.latestReport.source.includes('friday.json'));
 });

@@ -271,6 +271,24 @@ export interface RehearsalResponseTiming {
   voiceRequestToStartEventMs: number;
 }
 
+export interface RecognitionComparisonTiming {
+  firstTextMs: number | null;
+  acceptedAtMs: number | null;
+  decisionText: string | null;
+  speechEndMs: number | null;
+  speechEndKind: 'sample_rms_estimate' | 'browser_speechend_event' | null;
+  decisionAfterSpeechMs: number | null;
+  maxFeedLagMs?: number | null;
+  inputEndMs?: number | null;
+  inputEndSignal?: 'audioend' | 'end' | null;
+  matchToInputEndMs?: number | null;
+  serviceEndMs?: number | null;
+  replayMs?: number | null;
+  startMs?: number | null;
+  endWaitMs?: number | null;
+  events: { atMs: number | null; audioMs: number | null; text: string | null; interim: boolean }[];
+}
+
 export interface IntelligentLineFeedbackEntry {
   recognitionEngine?: 'native' | 'vosk' | 'whisper';
   scriptContextEnabled?: boolean;
@@ -278,13 +296,15 @@ export interface IntelligentLineFeedbackEntry {
   recognitionTiming?: RecognitionProcessingTiming | null;
   responseTiming?: RehearsalResponseTiming | null;
   recognitionComparison?: {
-    sampleId: string | null; engine: 'vosk' | 'whisper'; status: 'done' | 'error';
-    model: string | null; modelRevision: string | null; backend: 'wasm';
+    sampleId: string | null; engine: 'native' | 'vosk' | 'whisper'; status: 'done' | 'error';
+    comparisonId?: string | null; sameAudioPair?: boolean;
+    replay?: RecognitionComparisonTiming | null; native?: RecognitionComparisonTiming | null;
+    model: string | null; modelRevision: string | null; backend: 'wasm' | 'webgpu' | 'browser';
     languageUsed: 'english' | 'spanish' | null;
     contextUsed?: boolean; contextTermCount?: number; contextPrompt?: string | null;
     sampleDurationMs: number | null; loadMs: number | null; processingMs: number | null;
     accepted: boolean; literalDifference: number | null; verdict: 'correct' | 'incorrect' | null;
-    error: string | null; order: string | null; timingKind: 'offline_processing'; audioUploaded: false;
+    error: string | null; order: string | null; timingKind: 'offline_processing' | 'paced_replay' | 'native_live'; audioUploaded: false;
   };
   lineIndex: number;
   character: string;

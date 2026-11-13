@@ -176,7 +176,7 @@ const handleGetFeedback = async (request, response) => {
   const reports = result.blobs
     .filter((blob) => blob.pathname.endsWith('.json'))
     .sort((leftBlob, rightBlob) =>
-      String(rightBlob.uploadedAt ?? '').localeCompare(String(leftBlob.uploadedAt ?? ''))
+      (Date.parse(rightBlob.uploadedAt) || 0) - (Date.parse(leftBlob.uploadedAt) || 0)
     )
     .slice(0, 25)
     .map((blob) => ({
