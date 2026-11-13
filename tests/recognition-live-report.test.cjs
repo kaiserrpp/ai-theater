@@ -18,15 +18,16 @@ test('feedback preserves bounded live processing timings separately from offline
   finally { Module._load = previousLoad; }
   const timing = { kind: 'live_processing', processingMs: 2200.4, requestToTextMs: 2310.6, queueMs: 100, audioDurationMs: 1800, audio: [0.7], encoderDevice: 'webgpu', decoderDevice: 'wasm', encoderDtype: 'fp32',
     segmentFinalization: 'speech_gap', trailingQuietMs: 640, segmentationThreshold: 0.003 };
-  const responseTiming = { kind: 'browser_events', matchToVoiceRequestMs: 23, matchToVoiceStartEventMs: 47, inputCloseMs: 1, voiceRequestToStartEventMs: 24 };
+  const responseTiming = { kind: 'browser_events', origin: 'native_bridge', matchToVoiceRequestMs: 23, matchToVoiceStartEventMs: 47, inputCloseMs: 1, voiceRequestToStartEventMs: 24 };
   const entry = { expectedText: 'Ey, Sonny.', heardText: 'Hey, Sonny.', recognitionEngine: 'whisper', recognitionTiming: timing, responseTiming };
   const response = { status(code) { this.code = code; return this; }, json(body) { this.body = body; } };
-  await handler({ method: 'POST', body: { sessionId: 'speed-test', scriptId: 'script', entries: [
+  await handler({ method: 'POST', body: { runtime: 'native_ios', nativeAppVersion: '2026.11.224', sessionId: 'speed-test', scriptId: 'script', entries: [
     entry, { ...entry, recognitionEngine: 'vosk' },
     { ...entry, recognitionTiming: { ...timing, processingMs: Infinity, queueMs: -5, audioDurationMs: 1000000 } },
   ] } }, response);
   assert.equal(response.code, 200);
   assert.equal(saved.environment, 'development');
+  assert.equal(saved.runtime,'native_ios');assert.equal(saved.nativeAppVersion,'2026.11.224');
   assert.deepEqual(saved.entries[0].recognitionTiming, { kind: 'live_processing', requestToTextMs: 2311, processingMs: 2200, queueMs: 100, audioDurationMs: 1800,
     encoderDevice: 'webgpu', decoderDevice: 'wasm', encoderDtype: 'fp32', fallbackReason: null,
     segmentFinalization: 'speech_gap', trailingQuietMs: 640, segmentationThreshold: 0.003 });

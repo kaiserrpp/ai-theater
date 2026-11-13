@@ -6,6 +6,7 @@ import { needsNaturalRecognitionEnd } from './speechRecognitionCompatibility';
 import { prepareRecognitionRestart } from './rehearsalSpeech';
 import type { LocalRecognizer } from './localSpeechRecognitionSession';
 import type { SpeechRecognitionHandle } from './speechRecognitionSession';
+import { getNativePrototypeInfo } from './nativePrototype';
 
 type SessionOptions = Pick<Parameters<typeof createRehearsalComparisonSession>[0], 'onChange' | 'onResult' | 'speechThreshold'>;
 export const createBrowserRehearsalComparison = (options: SessionOptions) => {
@@ -18,7 +19,7 @@ export const createBrowserRehearsalComparison = (options: SessionOptions) => {
       result.forEach((item, i) => { if (item.status === 'rejected') errors[i ? 'whisper' : 'vosk'] = item.reason?.message || 'No se pudo preparar el modelo.'; });
       return errors;
     },
-    prepareNative: () => !nativeNeedsCue || !needsNaturalRecognitionEnd(navigator) ? Promise.resolve() : new Promise<void>((resolve, reject) => {
+    prepareNative: () => !nativeNeedsCue || getNativePrototypeInfo() || !needsNaturalRecognitionEnd(navigator) ? Promise.resolve() : new Promise<void>((resolve, reject) => {
       const cancel = prepareRecognitionRestart({ onDone: () => { cancelNativePreparation = null; resolve(); }, onError: error => { cancelNativePreparation = null; reject(error); } });
       cancelNativePreparation = () => { cancel(); cancelNativePreparation = null; resolve(); };
     }),
@@ -67,7 +68,7 @@ export const createBrowserRehearsalComparison = (options: SessionOptions) => {
       let recognition: SpeechRecognitionHandle | null = null, settled = false, ending = false;
       let resolveClosed: () => void = () => {}, timer: ReturnType<typeof setTimeout> | null = null;
       const closed = new Promise<void>(resolve => { resolveClosed = resolve; });
-      const natural = needsNaturalRecognitionEnd(navigator);
+      const natural = !getNativePrototypeInfo() && needsNaturalRecognitionEnd(navigator);
       const ended = () => { if (settled) return; settled = true; if (timer !== null) clearTimeout(timer); callbacks.ended(); resolveClosed(); };
       const abandon = () => {
         if (recognition) recognition.onresult = recognition.onend = recognition.onerror = recognition.onaudiostart = recognition.onspeechend = null;

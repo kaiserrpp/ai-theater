@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "AI-Theatre",
-    "slug": "teatro-ia",
-    "version": "2026.11.223",
+    "slug": "ai-theatre",
+    "version": "2026.11.224",
     "orientation": "portrait",
     "icon": "./assets/images/caras-teatro.png",
     "userInterfaceStyle": "light",
@@ -15,13 +15,24 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kaiserrpp.aitheatre.prototype",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Permite reconocer tus palabras para el modo Inteligente.",
+        "NSMicrophoneUsageDescription": "Permite el micrófono para ensayar tus réplicas."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/caras-teatro.png",
         "backgroundColor": "#5f0c14"
-      }
+      },
+      "package": "com.kaiserrpp.aitheatre.prototype",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/images/caras-teatro.png",
@@ -35,6 +46,29 @@
           "start_url": "/"
         }
       }
-    }
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Permite el micrófono para ensayar tus réplicas.",
+          "speechRecognitionPermission": "Permite reconocer tus palabras para el modo Inteligente.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.tts"
+          ]
+        }
+      ]
+    ],
+    "extra": {
+      "nativePrototype": {
+        "webUrl": "https://ai-theater.vercel.app/?share=d92b33981047&nativePrototype=1",
+        "bridgeProtocol": 1
+      },
+      "eas": {
+        "projectId": "7f254bd3-5532-490c-8114-a149d7c28132"
+      }
+    },
+    "owner": "kaiserpps-team"
   }
 }

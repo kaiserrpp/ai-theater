@@ -29,10 +29,11 @@ test('an upgrade starts with Safari, while subsequent explicit Vosk, Whisper and
   assert.equal(enginePreferences.resolveRecognitionEngine('invalid'), 'native');
 });
 
-const hookFixture = ({ engine, nativeAvailable = true, voskAvailable = true, ios = true } = {}) => {
+const hookFixture = ({ engine, nativeAvailable = true, voskAvailable = true, ios = true, controlledEnd = false } = {}) => {
   const calls = [];
   const effects = [];
   class Native {}
+  Native.controlledInputEnd = controlledEnd;
   class Vosk {}
   class Whisper {}
   let configured;
@@ -74,6 +75,13 @@ test('default Safari uses the native session and retains the iPhone natural-end 
   assert.equal(typeof f.configured.prepareRestart, 'function');
   assert(!f.calls.some(call => /:constructor|:load/.test(call)));
   f.dispose();
+});
+
+test('only the installed bridge owns explicit native closure and bypasses the Safari restart cue', () => {
+  const f=hookFixture({controlledEnd:true});
+  assert.equal(f.configured.Constructor,f.Native);assert.equal(f.configured.controlledEnd,true);
+  assert.equal(f.configured.naturalEnd,false);assert.equal(f.configured.prepareRestart,undefined);
+  assert.equal(f.result.isLocal,false);f.dispose();
 });
 
 test('explicit Vosk uses Vosk even outside iOS and never silently substitutes Safari', () => {

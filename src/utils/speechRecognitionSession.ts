@@ -22,7 +22,7 @@ export type SpeechRecognitionHandle = {
   finishInput?: () => boolean;
 };
 
-export type SpeechRecognitionConstructor = new () => SpeechRecognitionHandle;
+export type SpeechRecognitionConstructor = { new (): SpeechRecognitionHandle; controlledInputEnd?: boolean };
 export type SpeechRecognitionSnapshot = {
   status: SpeechRecognitionStatus;
   transcript: string;
@@ -37,6 +37,9 @@ export type SpeechRecognitionSnapshot = {
 
 type RecognitionOptions = {
   naturalEnd?: boolean;
+  // Only the installed prototype owns native capture and can explicitly stop
+  // it. Browser Safari keeps its existing natural-end protection.
+  controlledEnd?: boolean;
   startTimeoutMs?: number;
   pageVisible?: boolean;
   prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
@@ -97,6 +100,7 @@ export const createSpeechRecognitionSession = (
   const usage = options.usage || documentRecognitionUsage;
   let needsCue = Boolean(options.naturalEnd && usage.started);
   let closingForChange = false;
+  let controlledStopRequested = false;
   let audioEnded = false;
   let inputIsFinishing = false;
   let playbackCompletedAfterInput = false;
@@ -144,11 +148,17 @@ export const createSpeechRecognitionSession = (
     finishWaiters();
     finishInputWaiters('fin de servicio');
   };
+  const requestControlledEnd = () => {
+    if (!options.controlledEnd || !recognition || controlledStopRequested) return;
+    controlledStopRequested = true;
+    try { recognition.abort(); } catch { /* Wait for the real native terminal event. */ }
+  };
   const fail = (message: string, code: string | null = null, detail: string | null = null) => {
     blocked = true;
     clearEvidence(); cancelCue();
-    if (options.naturalEnd && recognition) {
+    if ((options.naturalEnd || options.controlledEnd) && recognition) {
       clearTimers(); closingForChange = true;
+      requestControlledEnd();
     } else detach();
     update({ status: 'error', isAudioActive: false, error: message, errorCode: code, errorDetail: detail });
   };
@@ -169,7 +179,8 @@ export const createSpeechRecognitionSession = (
     clearTimers(); clearEvidence(); cancelCue();
     committedTranscript = snapshot.transcript;
     closingForChange = true;
-    if (!options.naturalEnd) detach();
+    if (options.controlledEnd) requestControlledEnd();
+    else if (!options.naturalEnd) detach();
     update({ status: blocked ? 'error' : 'suspended', isAudioActive: false });
   };
   const start = () => {
@@ -208,6 +219,7 @@ export const createSpeechRecognitionSession = (
       inputIsFinishing = false;
       inputEndReason = null;
       closingForChange = false;
+      controlledStopRequested = false;
       update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null });
       current.onstart = () => {
         if (recognition === current && enabled && pageVisible && !blocked && !closingForChange) update({ status: 'listening' });
@@ -271,6 +283,15 @@ export const createSpeechRecognitionSession = (
           detach(false); closingForChange = false; needsCue = true;
           return;
         }
+        if (options.controlledEnd) {
+          committedTranscript = snapshot.transcript;
+          detach(false); closingForChange = false;
+          if (blocked) return;
+          update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false,
+            finalTranscript: committedTranscript, interimTranscript: '' });
+          if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(); }, 0);
+          return;
+        }
         if (options.naturalEnd) {
           // Calling abort() even after a normal end can poison later iOS runs.
           committedTranscript = snapshot.transcript;
@@ -305,7 +326,7 @@ export const createSpeechRecognitionSession = (
     } catch (error) {
       // A synchronous start failure never opened a native capture. Waiting for
       // its end event would leave every explicit retry stuck behind that handle.
-      if (options.naturalEnd) detach(false);
+      if (options.naturalEnd || options.controlledEnd) detach(false);
       const code = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
       const detail = error instanceof Error ? error.message : '';
       fail(recognitionErrorMessage(code === 'NotAllowedError' ? 'not-allowed' : undefined, detail), code || null, detail || null);
@@ -314,9 +335,10 @@ export const createSpeechRecognitionSession = (
   const stop = () => {
     enabled = false;
     clearEvidence(); cancelCue();
-    if (options.naturalEnd && recognition) {
+    if ((options.naturalEnd || options.controlledEnd) && recognition) {
       clearTimers(); closingForChange = true;
       update({ status: blocked ? 'error' : pageVisible ? 'finishing' : 'suspended' });
+      requestControlledEnd();
       return;
     }
     detach();
@@ -345,7 +367,7 @@ export const createSpeechRecognitionSession = (
     activate: (next: { lang: string; lineKey: string; preserveTranscript?: boolean }) => {
       const preserveTranscript = next.preserveTranscript === true && language === next.lang && lineKey === next.lineKey;
       cancelCue(); clearEvidence();
-      if (!options.naturalEnd) detach();
+      if (!options.naturalEnd && !options.controlledEnd) detach();
       enabled = true;
       blocked = false;
       language = next.lang;
@@ -354,8 +376,8 @@ export const createSpeechRecognitionSession = (
       if (preserveTranscript) committedTranscript = snapshot.transcript;
       else resetTranscript();
       armEvidence();
-      if (options.naturalEnd && recognition) {
-        closingForChange = true; needsCue = true; update({ status: 'finishing' }); return;
+      if ((options.naturalEnd || options.controlledEnd) && recognition) {
+        closingForChange = true; needsCue = true; update({ status: 'finishing' }); requestControlledEnd(); return;
       }
       start();
     },
@@ -373,8 +395,8 @@ export const createSpeechRecognitionSession = (
       enabled = true;
       armEvidence();
       if (languageChanged || (lineChanged && hadPartialResult)) {
-        if (options.naturalEnd && recognition) {
-          closingForChange = true; update({ status: 'finishing' }); return;
+        if ((options.naturalEnd || options.controlledEnd) && recognition) {
+          closingForChange = true; update({ status: 'finishing' }); requestControlledEnd(); return;
         }
         detach();
       }
@@ -386,9 +408,9 @@ export const createSpeechRecognitionSession = (
       if (!enabled) return;
       blocked = false;
       cancelCue(); clearEvidence();
-      if (options.naturalEnd && recognition) {
+      if ((options.naturalEnd || options.controlledEnd) && recognition) {
         closingForChange = true; needsCue = true;
-        resetTranscript(); armEvidence(); update({ status: 'finishing' }); return;
+        resetTranscript(); armEvidence(); update({ status: 'finishing' }); requestControlledEnd(); return;
       }
       detach();
       latestResults = { length: 0 };

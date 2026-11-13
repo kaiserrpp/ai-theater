@@ -73,7 +73,7 @@ const normalizeEntry = (entry) => {
       ...(['speech_gap', 'window_limit', 'speech_resume', 'input_end'].includes(timing.segmentFinalization) ? {
         segmentFinalization: timing.segmentFinalization, trailingQuietMs: timingMs(timing.trailingQuietMs),
         segmentationThreshold: clampScore(timing.segmentationThreshold) } : {}) } : null,
-    responseTiming: responseTiming ? { kind: 'browser_events', matchToVoiceRequestMs: timingMs(responseTiming.matchToVoiceRequestMs),
+    responseTiming: responseTiming ? { kind: 'browser_events', ...(responseTiming.origin === 'native_bridge' ? { origin: 'native_bridge' } : {}), matchToVoiceRequestMs: timingMs(responseTiming.matchToVoiceRequestMs),
       matchToVoiceStartEventMs: timingMs(responseTiming.matchToVoiceStartEventMs), inputCloseMs: timingMs(responseTiming.inputCloseMs),
       voiceRequestToStartEventMs: timingMs(responseTiming.voiceRequestToStartEventMs) } : null,
     lineIndex: typeof entry.lineIndex === 'number' ? entry.lineIndex : -1,
@@ -237,6 +237,8 @@ module.exports = async (request, response) => {
       shareId: typeof payload.shareId === 'string' ? payload.shareId.trim() || null : null,
       scriptTitle: clampText(payload.scriptTitle).slice(0, 180),
       appVersion: clampText(payload.appVersion).slice(0, 40),
+      runtime: ['native_ios', 'native_android'].includes(payload.runtime) ? payload.runtime : 'browser',
+      nativeAppVersion: clampText(payload.nativeAppVersion).slice(0, 40) || null,
       userRoles: normalizeStringArray(payload.userRoles).slice(0, 80),
       userAgent: typeof payload.userAgent === 'string' ? clampText(payload.userAgent).slice(0, 280) : null,
       entryCount: entries.length,

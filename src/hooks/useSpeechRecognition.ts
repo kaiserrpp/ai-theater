@@ -45,15 +45,16 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = fa
     engine === 'vosk' ? getLocalSpeechRecognitionConstructor() : null, [engine]);
   const Constructor = engine === 'native' ? NativeConstructor : LocalConstructor;
   const isLocal = Boolean(LocalConstructor);
-  const naturalEnd = useMemo(() => !isLocal && needsNaturalRecognitionEnd(typeof navigator === 'undefined' ? null : navigator), [isLocal]);
+  const controlledEnd = Constructor?.controlledInputEnd === true;
+  const naturalEnd = useMemo(() => !isLocal && !controlledEnd && needsNaturalRecognitionEnd(typeof navigator === 'undefined' ? null : navigator), [isLocal, controlledEnd]);
   const [snapshot, setSnapshot] = useState<SpeechRecognitionSnapshot>({
     status: Constructor ? 'idle' : 'unsupported', transcript: '', finalTranscript: '',
     interimTranscript: '', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null,
   });
   const session = useMemo(() => createSpeechRecognitionSession(Constructor, setSnapshot, {
-    naturalEnd, prepareRestart: isLocal ? undefined : prepareRecognitionRestart,
+    naturalEnd, controlledEnd, prepareRestart: isLocal || controlledEnd ? undefined : prepareRecognitionRestart,
     pageVisible: isPageVisible(), startTimeoutMs: isLocal ? 120000 : 15000,
-  }), [Constructor, naturalEnd, isLocal]);
+  }), [Constructor, naturalEnd, controlledEnd, isLocal]);
 
   useEffect(() => {
     if (engine !== 'vosk') disposeLocalSpeechRecognition();

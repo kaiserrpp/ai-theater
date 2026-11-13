@@ -36,3 +36,25 @@ test('visibility and back/forward-cache transitions suspend a page, while permis
   window.dispatchEvent(new Event('pageshow'));
   assert.equal(changes.length, 5);
 });
+
+test('native foreground state suspends a WebView even if its document is still visible', t => {
+  const previousDocument = global.document, previousWindow = global.window;
+  const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  const window = Object.assign(new EventTarget(), { __AI_THEATRE_NATIVE_V1__: {
+    protocol: 1, platform: 'ios', appVersion: '2026.11.224', foreground: true,
+  } });
+  global.document = document; global.window = window;
+  t.after(() => { global.document = previousDocument; global.window = previousWindow; });
+  const changes = [], dispose = observePageVisibility(value => changes.push(value));
+  window.__AI_THEATRE_NATIVE_V1__.foreground = false;
+  window.dispatchEvent(new Event('ai-theatre-native-visibility'));
+  assert.equal(isPageVisible(), false);
+  window.__AI_THEATRE_NATIVE_V1__.foreground = true;
+  window.dispatchEvent(new Event('ai-theatre-native-visibility'));
+  document.visibilityState = 'hidden';
+  window.dispatchEvent(new Event('ai-theatre-native-visibility'));
+  assert.deepEqual(changes, [true, false, true, false]);
+  dispose();
+  window.dispatchEvent(new Event('ai-theatre-native-visibility'));
+  assert.equal(changes.length, 4);
+});

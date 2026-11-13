@@ -4,6 +4,7 @@ import { ListenPreference } from '../utils/rehearsalPreferences';
 import { rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
 import { Button, Icon, usePracticeTheme } from './PracticeUI';
 import type { RecognitionEngine } from '../utils/scriptRecognitionContext';
+import { getNativePrototypeInfo } from '../utils/nativePrototype';
 
 export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, onRepeatPreparation, engine = 'native', onEngineChange }: {
   mode: ListenPreference; onModeChange: (mode: ListenPreference) => void;
@@ -14,6 +15,7 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   const { palette, ui } = usePracticeTheme();
   const preparation = useSyncExternalStore(rehearsalPreparationSession.subscribe, rehearsalPreparationSession.getSnapshot, rehearsalPreparationSession.getSnapshot);
   const [repeatRequested, setRepeatRequested] = useState(false);
+  const native = getNativePrototypeInfo();
   return <>
   <Text style={ui.text}>La app recuerda tu elección en este dispositivo. Las pruebas de audio se hacen una vez y se conservan hasta que cierres la app.</Text>
   {([
@@ -31,8 +33,8 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   {!supported ? <Text style={ui.text}>Este navegador no ofrece reconocimiento de voz. Puedes ensayar en modo manual.</Text> : null}
   {onEngineChange ? <View style={ui.card}>
     <Text style={ui.subtitle}>Reconocimiento de Inteligente</Text>
-    <Text style={ui.text}>Safari es la opción por defecto en iPhone; en otros dispositivos se usa el reconocimiento del navegador. Puedes elegir Vosk o Whisper y seguir comparando los tres. En Inteligente, las pausas se conservan.</Text>
-    {([['native', 'Safari / navegador · por defecto'], ['vosk', 'Vosk · local en español'], ['whisper', 'Whisper con contexto del guion'], ['comparison', 'Comparativa durante el ensayo · tres motores']] as const).map(([value, label]) =>
+    <Text style={ui.text}>{native ? 'El prototipo usa el reconocimiento integrado del teléfono. Inteligente conserva las pausas y decide el avance por tus palabras. Vosk, Whisper y la comparativa siguen disponibles para las pruebas.' : 'Safari es la opción por defecto en iPhone; en otros dispositivos se usa el reconocimiento del navegador. Puedes elegir Vosk o Whisper y seguir comparando los tres. En Inteligente, las pausas se conservan.'}</Text>
+    {([['native', native ? `${native.platform === 'ios' ? 'Apple · iPhone' : 'Android'} · reconocimiento nativo` : 'Safari / navegador · por defecto'], ['vosk', 'Vosk · local en español'], ['whisper', 'Whisper con contexto del guion'], ['comparison', 'Comparativa durante el ensayo · tres motores']] as const).map(([value, label]) =>
       <TouchableOpacity key={value} accessibilityRole="radio" aria-checked={engine === value} accessibilityState={{ checked: engine === value }}
         onPress={() => { if (value === 'comparison') onModeChange('intelligent'); onEngineChange(value); }} style={[ui.row, { paddingVertical: 12 }]}>
         <Icon name={engine === value ? 'radiobox-marked' : 'radiobox-blank'} /><Text style={ui.text}>{label}</Text>

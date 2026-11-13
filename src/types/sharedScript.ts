@@ -267,6 +267,7 @@ export interface RecognitionProcessingTiming {
 
 export interface RehearsalResponseTiming {
   kind: 'browser_events';
+  origin?: 'native_bridge';
   matchToVoiceRequestMs: number;
   matchToVoiceStartEventMs: number;
   inputCloseMs: number;
@@ -341,6 +342,8 @@ export interface IntelligentLineFeedbackEntry {
 }
 
 export interface IntelligentLineFeedbackSessionInput {
+  runtime?: 'browser' | 'native_ios' | 'native_android';
+  nativeAppVersion?: string;
   sessionId: string;
   scriptId: string;
   shareId?: string | null;

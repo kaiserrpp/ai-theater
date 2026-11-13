@@ -1,0 +1,18 @@
+# Only the native shell goes to Expo. The existing web app stays on Vercel.
+*
+!App.native.tsx
+!app.json
+!eas.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!assets
+assets/*
+!assets/images
+assets/images/*
+!assets/images/caras-teatro.png
+!assets/images/splash-icon.png
+!src
+src/*
+!src/nativePrototype
+!src/nativePrototype/**

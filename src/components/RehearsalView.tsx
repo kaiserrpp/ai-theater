@@ -54,6 +54,7 @@ import {
 } from '../utils/lineMatching';
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
+import { getNativePrototypeInfo } from '../utils/nativePrototype';
 import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
 import { getAutomaticRehearsalTargetIndex, getSceneAdvanceRecognitionAction, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
@@ -1243,6 +1244,8 @@ export const RehearsalView: React.FC<Props> = ({
         shareId,
         scriptTitle,
         appVersion: packageInfo.version,
+        runtime: getNativePrototypeInfo()?.platform === 'ios' ? 'native_ios' : getNativePrototypeInfo()?.platform === 'android' ? 'native_android' : 'browser',
+        nativeAppVersion: getNativePrototypeInfo()?.appVersion,
         userRoles: myRoles,
         userAgent: getUserAgent(),
         entries: entriesToSend,
@@ -2122,7 +2125,7 @@ export const RehearsalView: React.FC<Props> = ({
         if (isCancelled) return;
         if (responseEntry) {
           const responseTiming = getRehearsalResponseTiming(responseEntry.createdAt, requestedAt,
-            inputReadyAt, speechRequestedAt, Date.now());
+            inputReadyAt, speechRequestedAt, Date.now(), getNativePrototypeInfo() ? 'native_bridge' : undefined);
           if (responseTiming) {
             const updated = { ...responseEntry, responseTiming };
             setIntelligentFeedbackEntries(entries => entries.map(entry => entry === responseEntry ? updated : entry));
