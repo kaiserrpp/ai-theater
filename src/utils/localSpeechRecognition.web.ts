@@ -48,6 +48,7 @@ export const getLocalSpeechRecognitionConstructor = (): SpeechRecognitionConstru
 };
 
 export const preloadLocalSpeechRecognition = async (): Promise<void> => { await loadModel(); };
+export const getSharedVoskModel = loadModel;
 export const disposeLocalSpeechRecognition = () => {
   const previous = loadedModel; loadedModel = null; modelEpoch++;
   activeModel?.terminate(); activeModel = null;

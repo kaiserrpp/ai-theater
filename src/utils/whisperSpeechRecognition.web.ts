@@ -90,6 +90,15 @@ const loadModel = async (getLanguage: () => string, onTiming: OnTiming | undefin
   };
 };
 
+export const createSharedWhisperRecognizer = async (sampleRate: number, context: ScriptRecognitionContext,
+  getSpeechThreshold: () => number, onTiming: OnTiming, onFinished: () => void): Promise<LocalRecognizer> => {
+  await prepareModel(); const session = ++nextId;
+  return createWhisperStreamDecoder(sampleRate, context,
+    (audio, vocabulary, onText) => request({ type: 'transcribe', session, audio, context: vocabulary, language: 'auto' }, onText, onTiming),
+    () => cancelSession(session), { getSchedulingDelay: () => activeEncoderDevice === 'webgpu' ? 120 : 350,
+      getSpeechThreshold, allowFinishInput: true, onInputFinished: onFinished });
+};
+
 export const getWhisperSpeechRecognitionConstructor = (getContext: () => ScriptRecognitionContext | undefined, getLanguage: () => string = () => 'auto', onTiming?: OnTiming, isMicrophoneCheck: () => boolean = () => false, getSpeechThreshold: () => number = () => 0.0001) => {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof Worker === 'undefined' ||
     typeof WebAssembly === 'undefined' || typeof window.AudioContext === 'undefined') return null;

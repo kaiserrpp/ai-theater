@@ -32,11 +32,12 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   {onEngineChange ? <View style={ui.card}>
     <Text style={ui.subtitle}>Reconocimiento de Inteligente</Text>
     <Text style={ui.text}>Whisper puede usar los nombres y el vocabulario del guion. Es una prueba local y puede tardar más en transcribir. Las pausas se conservan.</Text>
-    {([['vosk', 'Reconocimiento actual'], ['whisper', 'Whisper con contexto del guion']] as const).map(([value, label]) =>
+    {([['vosk', 'Reconocimiento actual'], ['whisper', 'Whisper con contexto del guion'], ['comparison', 'Comparativa durante el ensayo · tres motores']] as const).map(([value, label]) =>
       <TouchableOpacity key={value} accessibilityRole="radio" accessibilityState={{ checked: engine === value }}
-        onPress={() => onEngineChange(value)} style={[ui.row, { paddingVertical: 12 }]}>
+        onPress={() => { if (value === 'comparison') onModeChange('intelligent'); onEngineChange(value); }} style={[ui.row, { paddingVertical: 12 }]}>
         <Icon name={engine === value ? 'radiobox-marked' : 'radiobox-blank'} /><Text style={ui.text}>{label}</Text>
       </TouchableOpacity>)}
+    {engine === 'comparison' ? <Text style={ui.text}>Di cada réplica una sola vez. Safari, Vosk y Whisper escuchan en paralelo. Solo en Comparativa, dos segundos sin voz cierran la toma y avanzamos al terminar los motores, aunque la coincidencia sea 0 %. El informe guarda los tres textos y puntuaciones.</Text> : null}
   </View> : null}
   <View style={[ui.card, ui.row]}><View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 16 }]}>Mostrar transcripción</Text>
     <Text style={ui.text}>Muestra lo que la app oye en modo inteligente.</Text></View>

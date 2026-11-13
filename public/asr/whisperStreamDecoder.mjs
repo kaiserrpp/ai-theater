@@ -5,6 +5,7 @@ export const createWhisperStreamDecoder = (sampleRate, context, transcribe, canc
     let frames = [], samples = 0, processed = 0, processedFrames = 0, lastVoiced = 0, lastSpeech = 0;
     let lastText = '';
     let disposed = false, busy = false, timer = null;
+    let finishingInput = false, inputFinished = false;
     const remove = () => {
         if (disposed)
             return;
@@ -41,10 +42,26 @@ export const createWhisperStreamDecoder = (sampleRate, context, transcribe, canc
         // still decides advancement; an incomplete replica remains listening.
         commit(processed, processedFrames, lastText, 'speech_gap');
     };
+    const finishDecodedInput = () => {
+        if (!finishingInput || inputFinished || disposed || busy)
+            return;
+        if (samples && lastVoiced > processed) {
+            schedule();
+            return;
+        }
+        if (lastText.trim())
+            commit(processed, processedFrames, lastText, 'input_end');
+        inputFinished = true;
+        options.onInputFinished?.();
+    };
     const pump = async () => {
         timer = null;
-        if (disposed || busy || lastVoiced <= processed || samples < sampleRate * 0.8)
+        if (disposed || busy || inputFinished)
             return;
+        if (lastVoiced <= processed || (!finishingInput && samples < sampleRate * 0.8)) {
+            finishDecodedInput();
+            return;
+        }
         busy = true;
         const count = frames.length, length = samples;
         const pcm = new Float32Array(length);
@@ -69,10 +86,10 @@ export const createWhisperStreamDecoder = (sampleRate, context, transcribe, canc
                 return;
             processed = length;
             processedFrames = count;
-            if (length >= sampleRate * 20) {
+            if (finishingInput || length >= sampleRate * 20) {
                 // Commit a bounded audio window, never a silence-based actor turn.
                 // SpeechRecognitionSession still decides advancement from its words.
-                commit(length, count, result.text, 'window_limit');
+                commit(length, count, result.text, finishingInput ? 'input_end' : 'window_limit');
             }
             else {
                 lastText = result.text;
@@ -87,19 +104,23 @@ export const createWhisperStreamDecoder = (sampleRate, context, transcribe, canc
         }
         finally {
             busy = false;
+            if (finishingInput) {
+                finishDecodedInput();
+                return;
+            }
             settleDecodedSpeech();
             if (!disposed && lastVoiced > processed)
                 schedule();
         }
     };
     const schedule = () => {
-        if (!disposed && !busy && timer === null)
-            timer = setTimeout(() => { void pump(); }, getSchedulingDelay());
+        if (!disposed && !busy && !inputFinished && timer === null)
+            timer = setTimeout(() => { void pump(); }, finishingInput ? 0 : getSchedulingDelay());
     };
     return {
         on: (event, listener) => { listeners[event] = listener; },
         acceptWaveform: (buffer) => {
-            if (disposed)
+            if (disposed || finishingInput)
                 return;
             const input = buffer.getChannelData(0).slice();
             let energy = 0, peak = 0;
@@ -135,6 +156,16 @@ export const createWhisperStreamDecoder = (sampleRate, context, transcribe, canc
             }
             schedule();
         },
+        ...(options.allowFinishInput ? { finishInput: () => {
+                if (disposed || finishingInput)
+                    return false;
+                finishingInput = true;
+                if (timer !== null)
+                    clearTimeout(timer);
+                timer = null;
+                finishDecodedInput();
+                return true;
+            } } : {}),
         remove,
     };
 };

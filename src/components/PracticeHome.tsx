@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
-import { Linking, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SavedScript } from '../hooks/useLibrary';
 import { resolveAuditionPreferences } from '../../shared/auditionScenes';
 import { getAuditionRehearsalPlan, type AuditionRehearsalMode } from '../utils/auditionRehearsal';
@@ -48,13 +48,10 @@ export const PracticeHome = (props: Props) => {
   const [storageNotice, setStorageNotice] = useState('');
   const [auditionUploadRequest, setAuditionUploadRequest] = useState(0);
   const shareId = props.manifest?.shareId;
-  const openRecognitionComparison = () => {
-    const web = typeof window !== 'undefined' && Boolean(window.location?.origin);
-    const url = new URL('/comparar-transcripcion.html', web ? window.location.origin : 'https://ai-theater.vercel.app');
-    const comparisonShareId = shareId || (web ? new URLSearchParams(window.location.search).get('share') : null);
-    if (comparisonShareId) url.searchParams.set('share', comparisonShareId);
-    if (web) window.location.assign(url.href);
-    else void Linking.openURL(url.href).catch(() => setStorageNotice('No se pudo abrir la comparación en el navegador.'));
+  const openRecognitionComparison = async () => {
+    await Promise.all([AsyncStorage.setItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, 'comparison'),
+      AsyncStorage.setItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY, 'intelligent')]).catch(() => setStorageNotice('La comparativa está seleccionada, pero no se pudo recordar.'));
+    setRecognitionEngine('comparison'); setMode('intelligent'); setSheet(null); setTab('scenes');
   };
 
   useEffect(() => {
@@ -112,7 +109,7 @@ export const PracticeHome = (props: Props) => {
         <TouchableOpacity accessibilityRole="button" onPress={() => chooseTab('songs')} style={ui.card}><View style={ui.row}><Icon name="music-note-outline" size={30} /><Text style={[ui.subtitle, { flex: 1 }]}>Escuchar y practicar</Text><Icon name="arrow-right" /></View><Text style={ui.text}>Aprende la canción con voz o ensaya con karaoke.</Text></TouchableOpacity>
       </>}
       {props.resumeChoice}
-      <Button label="Comparar transcripciones" secondary onPress={openRecognitionComparison} />
+      <Button label="Ensayar en Comparativa" secondary onPress={openRecognitionComparison} />
     </ScrollView> : null}
 
     {tab === 'scenes' ? <View style={{ flex: 1 }}>
@@ -137,7 +134,7 @@ export const PracticeHome = (props: Props) => {
 
     <Sheet title="Más opciones" visible={sheet === 'menu'} onClose={() => setSheet(null)}>
       <Button label="Micrófono y voz" secondary onPress={() => setSheet('mic')} />
-      <Button label="Comparar transcripciones" secondary onPress={openRecognitionComparison} />
+      <Button label="Ensayar en Comparativa" secondary onPress={openRecognitionComparison} />
       <Button label="Fondo y apariencia" secondary onPress={() => setSheet('appearance')} />
       <Button label="Materiales y gestión" secondary onPress={() => setSheet('materials')} />
       <Button label="Compartir obra" secondary disabled={!props.manifest} onPress={() => setSheet('share')} />
@@ -150,7 +147,7 @@ export const PracticeHome = (props: Props) => {
       <MicrophoneSettings mode={mode} supported={supportsRecognition()} onModeChange={(next) => { setMode(next); savePreference(REHEARSAL_LISTEN_MODE_STORAGE_KEY, next); }}
         engine={recognitionEngine} onEngineChange={(next) => { setRecognitionEngine(next); savePreference(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, next); }}
         showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
-      <Button label="Comparar transcripciones" secondary onPress={openRecognitionComparison} />
+      <Button label="Ensayar en Comparativa" secondary onPress={openRecognitionComparison} />
       {storageNotice ? <Text style={ui.error}>{storageNotice}</Text> : null}
     </Sheet>
     <Sheet title="Materiales y gestión" visible={sheet === 'materials'} onClose={() => setSheet(null)}>

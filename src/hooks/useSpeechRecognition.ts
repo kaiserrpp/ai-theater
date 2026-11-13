@@ -42,9 +42,9 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
   const processingTimingRef = useRef<RecognitionProcessingTiming | null>(null);
   const getRecognitionProcessingTiming = useCallback(() => processingTimingRef.current, []);
   const NativeConstructor = useMemo(getSpeechRecognitionConstructor, []);
-  const LocalConstructor = useMemo(() => engine === 'whisper' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }, () => microphoneCheckRef.current, () => speechThresholdRef.current) :
+  const LocalConstructor = useMemo(() => engine !== 'vosk' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }, () => microphoneCheckRef.current, () => speechThresholdRef.current) :
     preferLocal ? getLocalSpeechRecognitionConstructor() : null, [engine, preferLocal]);
-  const Constructor = engine === 'whisper' ? LocalConstructor : LocalConstructor ?? NativeConstructor;
+  const Constructor = engine !== 'vosk' ? LocalConstructor : LocalConstructor ?? NativeConstructor;
   const isLocal = Boolean(LocalConstructor);
   const naturalEnd = useMemo(() => !isLocal && needsNaturalRecognitionEnd(typeof navigator === 'undefined' ? null : navigator), [isLocal]);
   const [snapshot, setSnapshot] = useState<SpeechRecognitionSnapshot>({
@@ -57,8 +57,8 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
   }), [Constructor, naturalEnd, isLocal]);
 
   useEffect(() => {
-    if (engine === 'whisper') disposeLocalSpeechRecognition();
-    if (isLocal && prepareLocal) void (engine === 'whisper' ? preloadWhisperSpeechRecognition() : preloadLocalSpeechRecognition()).catch(() => undefined);
+    if (engine !== 'vosk') disposeLocalSpeechRecognition();
+    if (isLocal && prepareLocal) void (engine !== 'vosk' ? preloadWhisperSpeechRecognition() : preloadLocalSpeechRecognition()).catch(() => undefined);
   }, [isLocal, prepareLocal, engine]);
 
   useEffect(() => observePageVisibility(session.setPageVisible), [session]);
@@ -70,7 +70,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
 
   useEffect(() => () => {
     session.dispose();
-    if (engine === 'whisper') disposeWhisperSpeechRecognition();
+    if (engine !== 'vosk') disposeWhisperSpeechRecognition();
   }, [session, engine]);
 
   return {

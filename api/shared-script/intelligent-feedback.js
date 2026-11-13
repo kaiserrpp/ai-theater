@@ -1,5 +1,6 @@
 const { head, list, put } = require('@vercel/blob');
 const { normalizeRecognitionComparison } = require('../../shared/recognitionComparison');
+const { normalizeRehearsalComparison } = require('../../shared/rehearsalComparison');
 const {
   getSongAdminPasswordFromRequest,
   getStorageNamespace,
@@ -48,6 +49,7 @@ const normalizeEntry = (entry) => {
   const expectedText = clampText(entry.expectedText);
   const heardText = clampText(entry.heardText);
   const recognitionComparison = normalizeRecognitionComparison(entry.recognitionComparison);
+  const rehearsalComparison = normalizeRehearsalComparison(entry.rehearsalComparison);
   const timing = entry.recognitionEngine === 'whisper' && entry.recognitionTiming?.kind === 'live_processing'
     ? entry.recognitionTiming : null;
   const timingMs = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(180000, Math.round(value))) : null;
@@ -58,7 +60,8 @@ const normalizeEntry = (entry) => {
   }
 
   return {
-    recognitionEngine: ['native', 'vosk', 'whisper'].includes(entry.recognitionEngine) ? entry.recognitionEngine : null,
+    recognitionEngine: ['native', 'vosk', 'whisper', 'comparison'].includes(entry.recognitionEngine) ? entry.recognitionEngine : null,
+    ...(rehearsalComparison ? { rehearsalComparison } : {}),
     scriptContextEnabled: entry.scriptContextEnabled === true,
     scriptContextTermCount: typeof entry.scriptContextTermCount === 'number' && Number.isFinite(entry.scriptContextTermCount)
       ? Math.max(0, Math.min(100, Math.round(entry.scriptContextTermCount))) : null,
@@ -67,7 +70,7 @@ const normalizeEntry = (entry) => {
       ...(['webgpu', 'wasm'].includes(timing.encoderDevice) ? { encoderDevice: timing.encoderDevice, decoderDevice: 'wasm',
         encoderDtype: ['fp32', 'q8'].includes(timing.encoderDtype) ? timing.encoderDtype : null,
         fallbackReason: typeof timing.fallbackReason === 'string' ? timing.fallbackReason.slice(0, 180) : null } : {}),
-      ...(['speech_gap', 'window_limit', 'speech_resume'].includes(timing.segmentFinalization) ? {
+      ...(['speech_gap', 'window_limit', 'speech_resume', 'input_end'].includes(timing.segmentFinalization) ? {
         segmentFinalization: timing.segmentFinalization, trailingQuietMs: timingMs(timing.trailingQuietMs),
         segmentationThreshold: clampScore(timing.segmentationThreshold) } : {}) } : null,
     responseTiming: responseTiming ? { kind: 'browser_events', matchToVoiceRequestMs: timingMs(responseTiming.matchToVoiceRequestMs),

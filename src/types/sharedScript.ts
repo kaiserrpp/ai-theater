@@ -235,6 +235,7 @@ export interface SharedMusicalNumberAudioDeleteInput {
 }
 
 export type IntelligentLineFeedbackResult =
+  | 'comparacion_ensayo'
   | 'comparacion_local'
   | 'linea_buena'
   | 'reintentar'
@@ -258,7 +259,7 @@ export interface RecognitionProcessingTiming {
   decoderDevice?: 'wasm';
   encoderDtype?: 'fp32' | 'q8';
   fallbackReason?: string | null;
-  segmentFinalization?: 'speech_gap' | 'window_limit' | 'speech_resume';
+  segmentFinalization?: 'speech_gap' | 'window_limit' | 'speech_resume' | 'input_end';
   trailingQuietMs?: number;
   segmentationThreshold?: number;
 }
@@ -290,7 +291,16 @@ export interface RecognitionComparisonTiming {
 }
 
 export interface IntelligentLineFeedbackEntry {
-  recognitionEngine?: 'native' | 'vosk' | 'whisper';
+  recognitionEngine?: 'native' | 'vosk' | 'whisper' | 'comparison';
+  rehearsalComparison?: {
+    id: string; execution: 'parallel'; sameUtterance: true;
+    completion: 'speech_end' | 'button' | 'manual' | 'exit' | 'capture_failed'; elapsedMs: number; quietMs: number;
+    speechStartMs: number | null; speechEndMs: number | null; inputClosedMs: number | null;
+    speechTimingSource: 'shared_capture_rms' | 'native_result_event';
+    results: (import('../utils/rehearsalComparisonSession').ComparisonEngineResult & {
+      score: number; coverageScore: number; orderScore: number; precisionScore: number; finalScore: number;
+    })[];
+  };
   scriptContextEnabled?: boolean;
   scriptContextTermCount?: number;
   recognitionTiming?: RecognitionProcessingTiming | null;

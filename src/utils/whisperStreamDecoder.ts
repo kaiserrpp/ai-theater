@@ -5,7 +5,7 @@ export type WhisperAudioResult = { text: string };
 type Transcribe = (audio: Float32Array, context: ScriptRecognitionContext | undefined, onText: (text: string) => void) => Promise<WhisperAudioResult>;
 type Message = { result?: { text?: string; partial?: string }; error?: string };
 export type WhisperSegmentFinalization = {
-  segmentFinalization: 'speech_gap' | 'window_limit' | 'speech_resume';
+  segmentFinalization: 'speech_gap' | 'window_limit' | 'speech_resume' | 'input_end';
   trailingQuietMs: number;
   segmentationThreshold: number;
 };
@@ -13,6 +13,8 @@ type StreamOptions = {
   getSchedulingDelay?: () => number;
   getSpeechThreshold?: () => number;
   onFinalized?: (info: WhisperSegmentFinalization) => void;
+  allowFinishInput?: boolean;
+  onInputFinished?: () => void;
 };
 
 export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRecognitionContext | (() => ScriptRecognitionContext | undefined) | undefined, transcribe: Transcribe, cancel: () => void, options: StreamOptions = {}): LocalRecognizer => {
@@ -21,6 +23,7 @@ export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRe
   let frames: Float32Array[] = [], samples = 0, processed = 0, processedFrames = 0, lastVoiced = 0, lastSpeech = 0;
   let lastText = '';
   let disposed = false, busy = false, timer: ReturnType<typeof setTimeout> | null = null;
+  let finishingInput = false, inputFinished = false;
   const remove = () => {
     if (disposed) return;
     disposed = true;
@@ -46,9 +49,16 @@ export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRe
     // still decides advancement; an incomplete replica remains listening.
     commit(processed, processedFrames, lastText, 'speech_gap');
   };
+  const finishDecodedInput = () => {
+    if (!finishingInput || inputFinished || disposed || busy) return;
+    if (samples && lastVoiced > processed) { schedule(); return; }
+    if (lastText.trim()) commit(processed, processedFrames, lastText, 'input_end');
+    inputFinished = true; options.onInputFinished?.();
+  };
   const pump = async () => {
     timer = null;
-    if (disposed || busy || lastVoiced <= processed || samples < sampleRate * 0.8) return;
+    if (disposed || busy || inputFinished) return;
+    if (lastVoiced <= processed || (!finishingInput && samples < sampleRate * 0.8)) { finishDecodedInput(); return; }
     busy = true;
     const count = frames.length, length = samples;
     const pcm = new Float32Array(length);
@@ -70,10 +80,10 @@ export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRe
       });
       if (disposed) return;
       processed = length; processedFrames = count;
-      if (length >= sampleRate * 20) {
+      if (finishingInput || length >= sampleRate * 20) {
         // Commit a bounded audio window, never a silence-based actor turn.
         // SpeechRecognitionSession still decides advancement from its words.
-        commit(length, count, result.text, 'window_limit');
+        commit(length, count, result.text, finishingInput ? 'input_end' : 'window_limit');
       } else {
         lastText = result.text;
         listeners.partialresult?.({ result: { partial: result.text } });
@@ -85,17 +95,18 @@ export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRe
       }
     } finally {
       busy = false;
+      if (finishingInput) { finishDecodedInput(); return; }
       settleDecodedSpeech();
       if (!disposed && lastVoiced > processed) schedule();
     }
   };
   const schedule = () => {
-    if (!disposed && !busy && timer === null) timer = setTimeout(() => { void pump(); }, getSchedulingDelay());
+    if (!disposed && !busy && !inputFinished && timer === null) timer = setTimeout(() => { void pump(); }, finishingInput ? 0 : getSchedulingDelay());
   };
   return {
     on: (event, listener) => { listeners[event] = listener; },
     acceptWaveform: (buffer) => {
-      if (disposed) return;
+      if (disposed || finishingInput) return;
       const input = buffer.getChannelData(0).slice();
       let energy = 0, peak = 0;
       for (const value of input) { energy += value * value; peak = Math.max(peak, Math.abs(value)); }
@@ -120,6 +131,12 @@ export const createWhisperStreamDecoder = (sampleRate: number, context: ScriptRe
       }
       schedule();
     },
+    ...(options.allowFinishInput ? { finishInput: () => {
+      if (disposed || finishingInput) return false;
+      finishingInput = true;
+      if (timer !== null) clearTimeout(timer); timer = null;
+      finishDecodedInput(); return true;
+    } } : {}),
     remove,
   };
 };

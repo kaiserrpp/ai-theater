@@ -163,3 +163,30 @@ test('segmentation uses measured voice/noise levels without imposing the silence
   assert(getWhisperSegmentationThreshold(0.001, 0.03) < 0.006);
   assert.equal(getWhisperSegmentationThreshold(NaN, 0), 0.0001);
 });
+
+test('comparison can explicitly finish a short take without changing normal streaming', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  let finished=0;const events=[];
+  const decoder=createWhisperStreamDecoder(16000,undefined,async audio=>{assert.equal(audio.length,8000);return{text:'Sí'}},()=>{},
+    {allowFinishInput:true,onInputFinished:()=>finished++});
+  t.after(decoder.remove);decoder.on('result',message=>events.push(message.result.text));
+  decoder.acceptWaveform({getChannelData:()=>new Float32Array(8000).fill(.1)});
+  assert.equal(decoder.finishInput(),true);t.mock.timers.tick(0);await settle();
+  assert.deepEqual(events,['Sí']);assert.equal(finished,1);assert.equal(decoder.finishInput(),false);
+  const normal=createWhisperStreamDecoder(16000,undefined,async()=>({text:'nada'}),()=>{});
+  assert.equal(normal.finishInput,undefined);normal.remove();
+});
+
+test('finishing during an inference preserves and decodes the later words before reporting completion', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  const first=deferred(),second=deferred(),calls=[],finals=[];let finished=0;
+  const decoder=createWhisperStreamDecoder(16000,undefined,async audio=>{calls.push(audio);return calls.length===1?first.promise:second.promise},()=>{},
+    {allowFinishInput:true,onInputFinished:()=>finished++});
+  t.after(decoder.remove);decoder.on('result',m=>finals.push(m.result.text));
+  decoder.acceptWaveform({getChannelData:()=>new Float32Array(16000).fill(.1)});t.mock.timers.tick(350);await settle();
+  decoder.acceptWaveform({getChannelData:()=>new Float32Array(12800).fill(.2)});decoder.finishInput();
+  first.resolve({text:'primera parte'});await settle();t.mock.timers.tick(0);await settle();
+  assert.equal(calls.length,2);assert.equal(calls[1].length,12800);assert.equal(finished,0);
+  second.resolve({text:'últimas palabras'});await settle();assert.equal(finished,1);
+  assert.deepEqual(finals,['primera parte','últimas palabras']);
+});
