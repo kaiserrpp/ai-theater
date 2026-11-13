@@ -55,6 +55,7 @@ import {
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
 import { getNativePrototypeInfo } from '../utils/nativePrototype';
+import { getSpeechOutputErrorMessage, getSpeechOutputHelp } from '../utils/speechOutputHelp';
 import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
 import { getAutomaticRehearsalTargetIndex, getSceneAdvanceRecognitionAction, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
@@ -2281,12 +2282,12 @@ export const RehearsalView: React.FC<Props> = ({
     setRehearsalMediaStatus('Escucha la frase de prueba.');
     setRehearsalPreflightPhase('audio-check');
     // Synthesis starts in this tap, before any await, to unlock Safari output.
-    const finish = (error = false) => {
+    const finish = (error: Error | null = null) => {
       if (preparationRunRef.current !== run) return;
       setIsPreparingRehearsalMedia(false);
       setHasPreparedRehearsalMedia(!error);
       setRehearsalMediaStatus(error
-        ? 'No se pudo completar la prueba de voz. Pulsa Probar voz para reiniciarla.'
+        ? getSpeechOutputErrorMessage(error)
         : '¿Has oído claramente la frase de la app?');
     };
     void playCalibrationVoice('Hola, hola, dime si me oyes.', {
@@ -2302,7 +2303,7 @@ export const RehearsalView: React.FC<Props> = ({
         },
       }),
       stop: () => { if (preparationRunRef.current === run) stopRehearsalSpeech(); },
-    }).then(() => finish(), () => finish(true));
+    }).then(() => finish(), error => finish(error instanceof Error ? error : new Error('speech-error')));
   }, [stopSongAudio]);
 
   const calibrateRehearsalMicrophone = useCallback(async () => {
@@ -2830,7 +2831,7 @@ export const RehearsalView: React.FC<Props> = ({
         <Text style={ui.text}>{myRoles.join(', ')} · {filterScenes.length} {filterScenes.length === 1 ? 'escena' : 'escenas'}</Text>
         <View style={ui.card}><Icon name={listenModeSelection === 'manual' ? 'gesture-tap' : 'microphone-outline'} size={32} /><Text style={ui.subtitle}>{recognitionEngine === 'comparison' && isIntelligentListenMode ? 'Comparativa en el ensayo' : listenModeSelection === 'intelligent' ? 'Modo inteligente' : listenModeSelection === 'auto' ? 'Avance al terminar de hablar' : 'Modo manual'}</Text><Text style={ui.text}>{recognitionEngine === 'comparison' && isIntelligentListenMode ? 'Ensaya las escenas una sola vez. Guardaremos las tres transcripciones de cada réplica y sus puntuaciones, sin exigir un mínimo para pasar a la siguiente.' : listenModeSelection === 'intelligent' ? 'La app interpreta los demás personajes y comprueba tus palabras cuando llega tu turno.' : listenModeSelection === 'auto' ? 'Prepararemos el micro para avanzar cuando termines tu réplica y guardes silencio.' : 'La app interpreta los demás personajes. Pulsa siguiente al terminar tu réplica.'}</Text></View>
         <Text style={ui.text}>Las pruebas de audio se hacen una sola vez mientras la app siga abierta. Puedes repetirlas desde «Micrófono y voz».</Text>
-        <Text style={ui.text}>En iPhone, desactiva Silencio (campana tachada) en el Centro de control. La música puede sonar aunque la voz esté silenciada.</Text>
+        <Text style={ui.text}>{getSpeechOutputHelp()}</Text>
         {isLocalSpeechRecognition && isIntelligentListenMode ? <Text style={ui.text}>{recognitionEngine === 'comparison'
           ? 'Safari, Vosk y Whisper escucharán en paralelo. En Comparativa, dos segundos sin voz cierran la toma. Los errores de un motor también quedarán guardados en el informe.' : usesWhisperRecognition(recognitionEngine)
           ? `Whisper usará el contexto del guion (${recognitionContext.names.length} nombres y ${recognitionContext.vocabulary.length} palabras). La primera preparación descarga el modelo y sus bibliotecas, hasta unos 100 MB con aceleración gráfica. Tus pausas no hacen avanzar la réplica.`
@@ -3165,7 +3166,7 @@ export const RehearsalView: React.FC<Props> = ({
         <View style={ui.card}>
           <Icon name={isCalibrating || isReadyToCalibrate || isReadyToListen ? 'microphone-outline' : 'volume-high'} size={34} />
           <Text style={ui.title}>{isCalibrating || isReadyToCalibrate ? 'Calibrar micrófono' : isReadyToListen ? 'Activar la escucha' : isReadyToStart ? 'Todo preparado' : '¿Oyes a la app?'}</Text>
-          {!speakerConfirmed ? <Text style={ui.text}>En iPhone, desactiva Silencio (campana tachada) en el Centro de control. La música puede sonar aunque la voz esté silenciada. Después repite la prueba de voz.</Text> : null}
+          {!speakerConfirmed ? <Text style={ui.text}>{getSpeechOutputHelp()} Después repite la prueba de voz.</Text> : null}
           <Text style={ui.text}>{isCalibrating ? 'Guarda silencio. Después del pitido, di «prueba de micro». Esperaremos a que empieces a hablar.' : isReadyToCalibrate ? 'Ya has comprobado la voz de la app. Ahora mediremos el ruido de fondo y tu voz.' : isReadyToListen ? 'La calibración ya está hecha. Ahora comprobaremos que el reconocimiento transcribe tus palabras.' : isReadyToStart ? listenModeSelection === 'manual' ? 'El altavoz está preparado. Ensayarás sin activar el micrófono.' : 'El altavoz y el micrófono ya están comprobados.' : 'Sube el volumen y escucha la frase. No entraremos al ensayo hasta que confirmes que la oyes.'}</Text>
           {rehearsalMediaStatus ? <Text accessibilityLiveRegion="polite" style={[ui.text, { color: palette.plum }]}>{rehearsalMediaStatus}</Text> : null}
           {isCalibrating ? <>

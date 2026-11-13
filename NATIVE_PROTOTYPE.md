@@ -14,6 +14,10 @@ El reconocedor instalado puede cancelar su captura propia al aceptar una réplic
 
 ## Verificación del 13/11/2026
 
+La web **2026.11.226** mejora el fallo de la prueba de voz de Android y es compatible con la APK **2026.11.225** existente; no se ha generado otro instalador para este cambio. Conserva el error del servicio y, tras fallar una voz seleccionada, permite al sistema elegir su voz española en el único reintento. No cambia las reglas de Inteligente ni sus pausas.
+
+La prueba observada del usuario se realizó en **BlueStacks Desktop / Android 16 Alpha**, no en un teléfono: «Entrada de voz: Ninguno», búsqueda de apps de voz sin resultados y Google Play sin sesión. Para probar APIs de voz del sistema en un emulador hacen falta los servicios correspondientes instalados/configurados dentro de él. Google Play requiere el inicio de sesión personal del usuario. La voz de salida y el reconocimiento de entrada son servicios distintos; instalar uno no demuestra que el otro esté disponible. Esta observación no valida el rendimiento físico de Android.
+
 - Soporte web **2026.11.225** publicado y verificado en [producción](https://ai-theater.vercel.app/?share=d92b33981047). Pasaron 317 pruebas, lint, TypeScript y exportación web.
 - [Compilación iOS 2026.11.225 para simulador](https://expo.dev/accounts/kaiserpps-team/projects/ai-theatre/builds/d4d09fe3-cd15-4432-b676-33da36c1ba84) terminada correctamente en Expo desde Windows. Esta compilación no sirve para instalar en el iPhone físico.
 - [Compilación de la APK Android 2026.11.225](https://expo.dev/accounts/kaiserpps-team/projects/ai-theatre/builds/100df53c-65a0-46c8-8cd0-5140621691f0): esta página muestra el estado y ofrece el instalador cuando finaliza.

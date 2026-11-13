@@ -1,4 +1,5 @@
 import * as Speech from 'expo-speech';
+import { getSpeechOutputPlatform } from './speechOutputHelp';
 
 type SpeechCallbacks = {
   onStart?: () => void;
@@ -138,14 +139,14 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
 
   const isCurrent = () => launched && speechRun === run && !finished && !cancelled;
 
-  const createUtterance = () => {
+  const createUtterance = (useSystemVoice = false) => {
     const utterance = new Utterance(text);
     utterance.lang = 'es-ES';
     utterance.rate = speechRate;
     utterance.pitch = 1;
     utterance.volume = 1;
 
-    const preferredVoice = getPreferredVoice(synth);
+    const preferredVoice = useSystemVoice ? null : getPreferredVoice(synth);
     if (preferredVoice) {
       utterance.voice = preferredVoice;
       utterance.lang = preferredVoice.lang || 'es-ES';
@@ -157,7 +158,7 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
   const attemptSpeak = (attempt: number) => {
     if (!isCurrent()) return;
     let started = false;
-    const utterance = attempt === 0 && preparedUtterance ? preparedUtterance : createUtterance();
+    const utterance = attempt === 0 && preparedUtterance ? preparedUtterance : createUtterance(attempt > 0 && getSpeechOutputPlatform() === 'android');
     utterance.rate = speechRate;
     activeUtterance = utterance;
 
@@ -176,7 +177,7 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
       callbacks.onDone?.();
     };
 
-    utterance.onerror = () => {
+    utterance.onerror = (event) => {
       if (!isCurrent()) return;
       clearSpeechTimers();
       detachUtterance();
@@ -189,7 +190,9 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
       }
 
       finished = true;
-      callbacks.onError?.(new Error(started ? 'speech-playback-error' : 'speech-start-error'));
+      const failure = event as { error?: string; message?: string } | undefined;
+      const detail = failure?.message?.trim() || failure?.error?.trim();
+      callbacks.onError?.(new Error(detail || (started ? 'speech-playback-error' : 'speech-start-error')));
     };
 
     activeStartWatchdog = setTimeout(() => {

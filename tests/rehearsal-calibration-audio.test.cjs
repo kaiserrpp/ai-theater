@@ -15,6 +15,7 @@ Module._load = function (name, ...args) {
 const { playCalibrationVoice: voice, playCalibrationBeep: beep,
   primeRehearsalAudioPlayer: prime } = require('../src/utils/rehearsalCalibrationAudio.ts');
 const { speakRehearsalSpeech: speak, stopRehearsalSpeech: stop, prepareRecognitionRestart } = require('../src/utils/rehearsalSpeech.ts');
+const { getSpeechOutputPlatform, getSpeechOutputHelp, getSpeechOutputErrorMessage } = require('../src/utils/speechOutputHelp.ts');
 Module._load = previousLoad;
 if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
@@ -152,6 +153,45 @@ const speechBrowser = (t) => {
   t.after(() => { stop(); global.window = previousWindow; });
   return { synth, utterances };
 };
+
+test('speaker guidance uses the actual phone or native shell and retains the verified iPhone silent-mode advice', () => {
+  assert.equal(getSpeechOutputPlatform({ userAgent: 'Android 16' }), 'android');
+  assert.equal(getSpeechOutputPlatform({ userAgent: 'iPhone' }), 'ios');
+  assert.equal(getSpeechOutputPlatform({ platform: 'MacIntel', maxTouchPoints: 5 }), 'ios');
+  assert.equal(getSpeechOutputPlatform({ platform: 'Win32' }), 'other');
+  assert.equal(getSpeechOutputPlatform({ platform: 'Win32' }, 'android'), 'android');
+  assert.match(getSpeechOutputHelp('ios'), /Silencio/);
+  assert.doesNotMatch(getSpeechOutputHelp('android'), /iPhone|campana/);
+  assert.match(getSpeechOutputHelp('android'), /texto a voz/);
+});
+
+test('the speaker failure retains its underlying cause and gives Android service guidance instead of a volume-only retry', () => {
+  const timeout = new Error('calibration-voice-unavailable', { cause: new Error('speech-start-timeout') });
+  assert.match(getSpeechOutputErrorMessage(timeout, 'android'), /no ha respondido/);
+  assert.match(getSpeechOutputErrorMessage(timeout, 'android'), /BlueStacks/);
+  assert.match(getSpeechOutputErrorMessage(timeout, 'android'), /speech-start-timeout/);
+  assert.doesNotMatch(getSpeechOutputErrorMessage(timeout, 'android'), /calibration-voice-unavailable/);
+  const missingVoice = new Error('calibration-voice-unavailable', { cause: new Error('voice-unavailable') });
+  assert.match(getSpeechOutputErrorMessage(missingVoice, 'other'), /voice-unavailable/);
+});
+
+test('Android retries a rejected explicit voice with the system Spanish voice and preserves the final service error', t => {
+  const { synth, utterances } = speechBrowser(t);
+  global.window.__AI_THEATRE_NATIVE_V1__ = { protocol: 1, platform: 'android', appVersion: '2026.11.225', foreground: true };
+  synth.getVoices = () => [{ id: 'bad-voice', lang: 'es-ES', name: 'Spanish' }];
+  let failure;
+  speak('La misma frase.', { rate: 1.1, onError: error => { failure = error; } });
+  assert.equal(utterances[0].voice.id, 'bad-voice');
+  utterances[0].onerror({ error: 'voice-unavailable' });
+  t.mock.timers.tick(250);
+  assert.equal(utterances.length, 2);
+  assert.equal(utterances[1].voice, undefined);
+  assert.equal(utterances[1].lang, 'es-ES');
+  assert.equal(utterances[1].rate, 1.1);
+  assert.equal(utterances[1].text, 'La misma frase.');
+  utterances[1].onerror({ error: 'synthesis-unavailable', message: 'Android no tiene un motor de voz disponible.' });
+  assert.equal(failure.message, 'Android no tiene un motor de voz disponible.');
+});
 
 test('a speaker check that starts but never ends is stopped, and its late callbacks cannot finish the next voice', async (t) => {
   const { synth, utterances } = speechBrowser(t);
