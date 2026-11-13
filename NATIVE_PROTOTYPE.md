@@ -12,6 +12,14 @@ El reconocedor instalado puede cancelar su captura propia al aceptar una réplic
 - El reconocimiento utiliza las API del sistema, sin claves de servicios de transcripción de pago. Puede requerir conexión según el servicio, el idioma y los modelos disponibles; esta entrega no promete uso totalmente sin conexión.
 - Vosk/Whisper/Comparativa continúan disponibles en la web y en la interfaz reutilizada; su funcionamiento en cada WebView instalada necesita validación independiente. La primera prueba debe seleccionar «Apple · iPhone · reconocimiento nativo» o «Android · reconocimiento nativo».
 
+## Verificación del 13/11/2026
+
+- Soporte web **2026.11.225** publicado y verificado en [producción](https://ai-theater.vercel.app/?share=d92b33981047). Pasaron 317 pruebas, lint, TypeScript y exportación web.
+- [Compilación iOS 2026.11.225 para simulador](https://expo.dev/accounts/kaiserpps-team/projects/ai-theatre/builds/d4d09fe3-cd15-4432-b676-33da36c1ba84) terminada correctamente en Expo desde Windows. Esta compilación no sirve para instalar en el iPhone físico.
+- [Compilación de la APK Android 2026.11.225](https://expo.dev/accounts/kaiserpps-team/projects/ai-theatre/builds/100df53c-65a0-46c8-8cd0-5140621691f0): esta página muestra el estado y ofrece el instalador cuando finaliza.
+- La prueba de navegador sobre producción usa el puente/controlador reales con captura y voz simuladas: dos escenas, espera de «adelante» final, pausa de 14 s, fondo/reanudación, informes parciales y reintento tras un error. La comparativa web se verificó con Vosk/Whisper reales y voz/nativo simulados. No son pruebas físicas de los teléfonos.
+- Al recargar la WebView, los identificadores de captura y voz cambian por documento. Se comprobó que los eventos tardíos de la pantalla anterior no terminan la escucha ni la voz nuevas.
+
 ## Qué hace falta y qué se paga
 
 | Concepto | Para esta prueba |
