@@ -132,3 +132,25 @@ test('an Android speech timeout reopens native input while keeping words across 
   assert.equal(f.session.getSnapshot().transcript,'Primera parte segunda parte');
   assert.equal(f.spoken.length,0);
 });
+
+test('a reloaded WebView cannot confuse the retired capture or speech callbacks with its new runs',async t=>{
+  const f=fixture(t);await f.open();
+  const firstInput=f.events.find(e=>e.type==='recognition.start').id;
+  const reload=()=>{
+    delete f.window.__AI_THEATRE_NATIVE_V1__;
+    vm.runInNewContext(nativeBridgeBootstrap({platform:'ios',appVersion:'2026.11.225'}),{window:f.window,Event,Map,JSON});
+  };
+  reload();
+  const next=new f.window.SpeechRecognition();let ended=0,text='';
+  next.onend=()=>ended++;next.onresult=e=>{text=e.results[0][0].transcript};next.start();await flush();
+  f.end();await flush();
+  assert.notEqual(next.id,firstInput);assert(next.id);assert.equal(ended,0);
+  f.words('Palabras nuevas',true);assert.equal(text,'Palabras nuevas');f.end();assert.equal(ended,1);
+  const oldSpeech=new f.window.SpeechSynthesisUtterance('Voz antigua');f.window.speechSynthesis.speak(oldSpeech);await flush();
+  const previous=f.spoken.at(-1);
+  reload();
+  const current=new f.window.SpeechSynthesisUtterance('Voz actual');let speechEnded=0;
+  current.onend=()=>speechEnded++;f.window.speechSynthesis.speak(current);await flush();
+  previous.options.onDone();assert.equal(speechEnded,0);assert.equal(f.window.speechSynthesis.speaking,true);
+  f.spoken.at(-1).options.onDone();assert.equal(speechEnded,1);
+});

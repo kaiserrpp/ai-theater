@@ -5,13 +5,16 @@ import type { NativePlatform } from './protocol';
 const BOOTSTRAP = String.raw`(function(config) {
   if (window.__AI_THEATRE_NATIVE_V1__) return;
   var info = { protocol: 1, platform: config.platform, appVersion: config.appVersion, foreground: true };
+  // A WebView navigation creates another JS world while the native host can
+  // still be closing the previous world's input/output. Never reuse its IDs.
+  var pageId = Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
   var count = 0, inputs = new Map(), speech = null, voices = [];
   function send(data) { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({channel:'ai-theatre-native',protocol:1},data))); }
   class Recognition {
     constructor() { this.lang='es-ES';this.continuous=false;this.interimResults=true;this.maxAlternatives=1;this.id=null;this.finals=[];this.ending=false; }
     start() {
       if(this.id) throw new Error('Recognition already started');
-      this.id='r-'+(++count);this.finals=[];this.ending=false;inputs.set(this.id,this);
+      this.id='r-'+pageId+'-'+(++count);this.finals=[];this.ending=false;inputs.set(this.id,this);
       send({type:'recognition.start',id:this.id,lang:this.lang,continuous:this.continuous});
     }
     abort() { if(this.id&&!this.ending){this.ending=true;send({type:'recognition.abort',id:this.id});} }
@@ -23,7 +26,7 @@ const BOOTSTRAP = String.raw`(function(config) {
     cancel:function(){speech=null;this.pending=false;this.speaking=false;send({type:'speech.cancel'});},
     speak:function(utterance){
       if(speech)this.cancel();
-      speech={id:'s-'+(++count),utterance:utterance};this.pending=true;
+      speech={id:'s-'+pageId+'-'+(++count),utterance:utterance};this.pending=true;
       send({type:'speech.start',id:speech.id,text:utterance.text,lang:utterance.lang,rate:utterance.rate,pitch:utterance.pitch,volume:utterance.volume,voice:utterance.voice&&utterance.voice.id});
     }
   };
