@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
+import packageInfo from '../../package.json';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { submitIntelligentLineFeedback } from '../api/sharedScripts';
@@ -527,6 +527,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [falsePositiveIssueNote, setFalsePositiveIssueNote] = useState('');
   const [feedbackStatusMessage, setFeedbackStatusMessage] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
+  const sendingFeedbackRef = useRef(false);
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -819,6 +820,8 @@ export const RehearsalView: React.FC<Props> = ({
     speakableLineText.length > 0;
   const shouldUseRehearsalComparison = shouldListenToActor && recognitionEngine === 'comparison';
   const shouldUseIntelligentRecognition = shouldListenToActor && recognitionEngine !== 'comparison';
+  const canReportCurrentLine = isIntelligentListenMode && hasCompletedRehearsalPreflight && !isFinished &&
+    Boolean(currentLine) && !isSceneMarker(currentLine) && !isCurrentMusicalSongBlock && isMyTurn && speakableLineText.length > 0;
   const shouldListenForSceneCommand =
     canRunRehearsalLinePlayback &&
     currentSceneTransitionKey !== null &&
@@ -953,7 +956,7 @@ export const RehearsalView: React.FC<Props> = ({
     onResult: result => comparisonHandlerRef.current(result),
   });
   const { stop: stopComparison, finish: finishComparison, waitForEnd: waitForComparisonEnd,
-    notifyPlaybackEnd: notifyComparisonPlaybackEnd } = comparison;
+    notifyPlaybackEnd: notifyComparisonPlaybackEnd, snapshotForReport: snapshotComparisonForReport } = comparison;
   const stopRecognition = useCallback(() => { stopOrdinaryRecognition(); stopComparison(); }, [stopOrdinaryRecognition, stopComparison]);
   const waitForRecognitionEnd = useCallback(async () => (await Promise.all([waitForOrdinaryRecognitionEnd(), waitForComparisonEnd()])).every(Boolean), [waitForOrdinaryRecognitionEnd, waitForComparisonEnd]);
   const waitForRecognitionInputEnd = useCallback(async () => (await Promise.all([waitForOrdinaryRecognitionInputEnd(), waitForComparisonEnd()])).every(Boolean), [waitForOrdinaryRecognitionInputEnd, waitForComparisonEnd]);
@@ -1099,6 +1102,7 @@ export const RehearsalView: React.FC<Props> = ({
         negationPenaltyApplied: feedbackLineMatch.negationPenaltyApplied,
         autoAdvanceReason,
         result,
+        ...(result === 'informe_parcial' && speechRecognitionError ? { issueType: 'otro' as const, issueNote: speechRecognitionError } : {}),
         matchedReferenceText: feedbackLineMatch.referenceText,
         matchedReferenceIndex: feedbackLineMatch.referenceIndex,
         language: intelligentRecognitionLanguage,
@@ -1118,6 +1122,7 @@ export const RehearsalView: React.FC<Props> = ({
       intelligentRecognitionLanguage,
       speakableLineText,
       speechRecognitionTranscript,
+      speechRecognitionError,
       recognitionEngine,
       recognitionContext,
       getRecognitionProcessingTiming,
@@ -1201,30 +1206,51 @@ export const RehearsalView: React.FC<Props> = ({
   ]);
 
   const handleSendIntelligentFeedback = useCallback(async () => {
-    if (isSendingFeedback) {
+    if (sendingFeedbackRef.current) {
       return;
     }
 
+    sendingFeedbackRef.current = true;
     setIsSendingFeedback(true);
     setFeedbackStatusMessage('Enviando informe de prueba...');
 
     try {
-      if (recognitionEngine === 'comparison' && shouldUseRehearsalComparison) {
-        finishComparison('button'); await waitForComparisonEnd();
+      let currentEntry: IntelligentLineFeedbackEntry | null = null;
+      if (canReportCurrentLine) {
+        if (recognitionEngine === 'comparison') {
+          const snapshot = snapshotComparisonForReport();
+          const metadata = currentLineVariantKey ? comparisonLineMetadataRef.current.get(currentLineVariantKey) : null;
+          const snapshotLineKey = snapshot?.turn.key.slice(0, snapshot.turn.key.lastIndexOf(':'));
+          if (snapshot && metadata && snapshotLineKey === currentLineVariantKey) {
+            currentEntry = makeRehearsalComparisonEntry(snapshot, metadata);
+            const entry = currentEntry;
+            setIntelligentFeedbackEntries(entries => [...entries, entry]);
+          }
+        } else if (!feedbackEntriesRef.current.some(entry => entry.result === 'informe_parcial' &&
+          entry.lineIndex === currentLineIndexInScript && entry.expectedText === currentLine?.t &&
+          entry.recognitionEngine === recognitionEngine && entry.heardText === speechRecognitionTranscript.trim())) {
+          currentEntry = recordIntelligentFeedback('informe_parcial');
+        }
       }
       const entriesToSend = feedbackEntriesRef.current.slice();
+      if (currentEntry && !entriesToSend.includes(currentEntry)) entriesToSend.push(currentEntry);
       if (!entriesToSend.length) { setFeedbackStatusMessage('Todavía no hay réplicas guardadas.'); return; }
+      setFeedbackStatusMessage('Enviando informe de prueba...');
+      void persistComparisonDraft(entriesToSend).catch(() => {});
       const result = await submitIntelligentLineFeedback({
         sessionId: intelligentSessionIdRef.current,
         scriptId: resolvedScriptId,
         shareId,
         scriptTitle,
-        appVersion: Constants.expoConfig?.version ?? 'dev',
+        appVersion: packageInfo.version,
         userRoles: myRoles,
         userAgent: getUserAgent(),
         entries: entriesToSend,
       });
 
+      // Each acknowledged batch gets its own blob; a later partial report must
+      // never overwrite the earlier scenes sent from this rehearsal.
+      intelligentSessionIdRef.current = createSessionId();
       const sent = new Set(entriesToSend);
       setIntelligentFeedbackEntries(current => {
         const remaining = current.filter(entry => !sent.has(entry)); feedbackEntriesRef.current = remaining;
@@ -1236,19 +1262,23 @@ export const RehearsalView: React.FC<Props> = ({
         error instanceof Error ? error.message : 'No se pudo enviar el informe de prueba.';
       setFeedbackStatusMessage(message);
     } finally {
+      sendingFeedbackRef.current = false;
       setIsSendingFeedback(false);
     }
   }, [
-    isSendingFeedback,
     myRoles,
     resolvedScriptId,
     scriptTitle,
     shareId,
     persistComparisonDraft,
     recognitionEngine,
-    shouldUseRehearsalComparison,
-    finishComparison,
-    waitForComparisonEnd,
+    canReportCurrentLine,
+    snapshotComparisonForReport,
+    currentLineVariantKey,
+    currentLineIndexInScript,
+    currentLine,
+    speechRecognitionTranscript,
+    recordIntelligentFeedback,
   ]);
 
   useEffect(() => {
@@ -2692,6 +2722,7 @@ export const RehearsalView: React.FC<Props> = ({
         <Text style={{ color: palette.plum, fontSize: 12, fontWeight: '700' }}>{listenModeSelection === 'intelligent' ? recognitionEngine === 'comparison' ? 'Comparativa' : 'Inteligente' : listenModeSelection === 'auto' ? 'Silencio' : 'Manual'} ⌄</Text>
       </TouchableOpacity>
     </View>
+    {!showMicrophoneMenu ? renderIntelligentFeedbackBar() : null}
     <Sheet title="Micrófono y voz" visible={showMicrophoneMenu} onClose={() => setShowMicrophoneMenu(false)}>
       <MicrophoneSettings mode={listenModeSelection === 'pending' ? 'intelligent' : listenModeSelection} supported={isSpeechRecognitionSupported}
         engine={recognitionEngine} onEngineChange={(next) => { void handleSelectRecognitionEngine(next); }}
@@ -2724,8 +2755,7 @@ export const RehearsalView: React.FC<Props> = ({
 
   const renderIntelligentFeedbackBar = () => {
     if (
-      listenModeSelection !== 'intelligent' ||
-      (!intelligentFeedbackEntries.length && !feedbackStatusMessage)
+      !intelligentFeedbackEntries.length && !canReportCurrentLine && !feedbackStatusMessage
     ) {
       return null;
     }
@@ -2734,22 +2764,21 @@ export const RehearsalView: React.FC<Props> = ({
       <View style={styles.intelligentFeedbackBar}>
         <View style={styles.intelligentFeedbackBarTextBlock}>
           <Text style={styles.intelligentFeedbackBarTitle}>
-            Informe de prueba
+            Informe del ensayo{intelligentFeedbackEntries.length ? ` · ${intelligentFeedbackEntries.length} réplica${intelligentFeedbackEntries.length === 1 ? '' : 's'}` : ''}
           </Text>
-          <Text style={styles.intelligentFeedbackBarText}>
-            {intelligentFeedbackEntries.length > 0
-              ? `${intelligentFeedbackEntries.length} linea${intelligentFeedbackEntries.length === 1 ? '' : 's'} guardada${intelligentFeedbackEntries.length === 1 ? '' : 's'}`
-              : feedbackStatusMessage}
+          <Text accessibilityLiveRegion="polite" style={styles.intelligentFeedbackBarText}>
+            {feedbackStatusMessage || 'Puedes enviarlo sin terminar las escenas. Incluye la réplica actual aunque esté incompleta.'}
           </Text>
         </View>
-        {intelligentFeedbackEntries.length > 0 ? (
+        {intelligentFeedbackEntries.length > 0 || canReportCurrentLine ? (
           <TouchableOpacity
+            accessibilityRole="button"
             style={[styles.intelligentFeedbackBarButton, isSendingFeedback && styles.buttonDisabled]}
             onPress={() => void handleSendIntelligentFeedback()}
             disabled={isSendingFeedback}
           >
             <Text style={styles.intelligentFeedbackBarButtonText}>
-              {isSendingFeedback ? 'Enviando...' : 'Enviar'}
+              {isSendingFeedback ? 'Enviando informe...' : 'Enviar informe'}
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -3116,19 +3145,6 @@ export const RehearsalView: React.FC<Props> = ({
             <Text style={styles.intelligentButtonText}>Siguiente linea</Text>
           </TouchableOpacity>
         </View>
-        {intelligentFeedbackEntries.length > 0 ? (
-          <TouchableOpacity
-            style={[styles.intelligentSendButton, isSendingFeedback && styles.buttonDisabled]}
-            onPress={() => void handleSendIntelligentFeedback()}
-            disabled={isSendingFeedback}
-          >
-            <Text style={styles.intelligentSendButtonText}>
-              {isSendingFeedback
-                ? 'Enviando informe...'
-                : `Enviar informe (${intelligentFeedbackEntries.length})`}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
         </> : null}
       </View>
     );
@@ -3291,19 +3307,6 @@ export const RehearsalView: React.FC<Props> = ({
         {isFinished ? (
           <View style={styles.finishedBox}>
             <Text style={styles.finishedTitle}>Fin del ensayo</Text>
-            {listenModeSelection === 'intelligent' && intelligentFeedbackEntries.length > 0 ? (
-              <TouchableOpacity
-                style={[styles.intelligentSendButton, isSendingFeedback && styles.buttonDisabled]}
-                onPress={() => void handleSendIntelligentFeedback()}
-                disabled={isSendingFeedback}
-              >
-                <Text style={styles.intelligentSendButtonText}>
-                  {isSendingFeedback
-                    ? 'Enviando informe...'
-                    : `Enviar informe de prueba (${intelligentFeedbackEntries.length})`}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
             {feedbackStatusMessage ? (
               <Text style={styles.intelligentFeedbackStatus}>{feedbackStatusMessage}</Text>
             ) : null}
@@ -3394,8 +3397,8 @@ export const RehearsalView: React.FC<Props> = ({
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Línea anterior" disabled={!canGoBack} onPress={goBackLine} style={[ui.icon, !canGoBack && { opacity: 0.3 }]}><Icon name="skip-previous" size={28} /></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel={isPaused ? 'Reanudar ensayo' : 'Pausar ensayo'} onPress={() => {
           if (isPaused) {
-            if (listenModeSelection === 'intelligent' && isMyTurn && !isCurrentMusicalSongBlock && !isSceneMarker(currentLine)) {
-              activateRecognition({ lang: intelligentRecognitionLanguage, lineKey: recognitionLineKey || recognitionPreparationKey });
+            if (listenModeSelection === 'intelligent' && recognitionEngine !== 'comparison' && isMyTurn && !isCurrentMusicalSongBlock && !isSceneMarker(currentLine)) {
+              activateRecognition({ lang: recognitionEngine === 'vosk' ? 'es-ES' : intelligentRecognitionLanguage, lineKey: recognitionLineKey || recognitionPreparationKey, preserveTranscript: true });
             }
             setIsPaused(false);
           } else {
@@ -4075,18 +4078,6 @@ const createStyles = (palette: PracticePalette) => StyleSheet.create({
   },
   intelligentRetryText: {
     color: '#8a5a00',
-    fontWeight: '800',
-  },
-  intelligentSendButton: {
-    marginTop: 2,
-    alignSelf: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: '#15515b',
-  },
-  intelligentSendButtonText: {
-    color: '#fff',
     fontWeight: '800',
   },
   speechMonitor: {

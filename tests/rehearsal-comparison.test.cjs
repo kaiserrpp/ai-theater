@@ -58,6 +58,39 @@ test('a short pause keeps listening, and an explicit pause preserves words for t
   assert(f.records[0].results.find(r=>r.engine==='vosk').text.startsWith('primera parte'));
 });
 
+test('a partial report snapshots three unfinished outputs without closing, advancing or replacing the live take',async t=>{
+  const f=fixture(t);await f.open('line:0');f.feed(.2);
+  f.callbacks.vosk.partial('primera');f.callbacks.whisper.partial('otra');f.nativeText('texto nativo');
+  const snapshot=f.session.snapshotForReport();
+  assert.equal(snapshot.completion,'report_snapshot');assert.equal(snapshot.inputClosedMs,null);
+  assert(snapshot.results.every(item=>item.status==='incomplete'));
+  assert.equal(f.captureCounts().closed,0);assert.equal(f.records.length,0);
+  assert.equal(f.snapshots.at(-1).phase,'listening');
+  const metadata={lineIndex:4,character:'ACTOR',sceneTitle:'ESCENA',expectedText:'Hola',speakableText:'Hola',language:'es-ES'};
+  const entry=makeRehearsalComparisonEntry(snapshot,metadata);
+  assert.equal(entry.result,'informe_parcial');
+  assert.equal(normalizeRehearsalComparison(entry.rehearsalComparison).completion,'report_snapshot');
+  f.callbacks.vosk.partial('primera segunda');
+  assert.equal(snapshot.results.find(item=>item.engine==='vosk').text,'primera');
+  assert.notEqual(f.session.snapshotForReport().turn.id,snapshot.turn.id);
+  f.nativeEnd();f.session.finish('button');
+  assert.equal(f.records.length,1);assert.equal(f.records[0].turn.id,'line:0');
+  assert.notEqual(f.records[0].turn.id,snapshot.turn.id);
+  assert.equal(f.session.snapshotForReport(),null);
+});
+
+test('sending a snapshot while paused keeps the words and permits resuming the same comparison',async t=>{
+  const f=fixture(t);await f.open('line:0');f.feed(.2);
+  f.callbacks.vosk.final('primera parte');f.nativeText('primera parte');
+  f.session.suspend();f.nativeEnd();
+  const before=f.captureCounts();const snapshot=f.session.snapshotForReport();
+  assert.equal(snapshot.results.find(item=>item.engine==='vosk').text,'primera parte');
+  assert.deepEqual(f.captureCounts(),before);assert.equal(f.records.length,0);
+  await f.open('line:0');f.nativeText('segunda parte');f.feed(.2);f.nativeEnd();f.session.finish('button');
+  assert.equal(f.records.length,1);
+  assert.equal(f.records[0].results.find(item=>item.engine==='native').text,'primera parte segunda parte');
+});
+
 test('a skipped line is retained before the next cue, and late results cannot rewrite it',async t=>{
   const f=fixture(t);await f.open('first:0');f.feed(.2);f.session.finish('manual');
   assert.equal(f.records.length,0,'native still closing');f.nativeEnd();assert.equal(f.records.length,1);

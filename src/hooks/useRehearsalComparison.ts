@@ -27,6 +27,7 @@ export const useRehearsalComparison = (options: Options) => {
   useEffect(() => () => { session?.finish('exit'); session?.dispose(); }, [session]);
   const finish = useCallback((reason: 'button' | 'manual' | 'exit' = 'manual') => session?.finish(reason), [session]);
   return { ...snapshot, finish,
+    snapshotForReport: useCallback(() => session?.snapshotForReport() ?? null, [session]),
     stop: useCallback(() => session?.suspend(), [session]),
     restart: useCallback(() => { session?.finish('manual'); setRetry(value => value + 1); }, [session]),
     waitForEnd: useCallback(() => session?.waitForEnd() || Promise.resolve(true), [session]),

@@ -342,7 +342,8 @@ export const createSpeechRecognitionSession = (
     },
     // The ordinary Start button can open the real recognizer immediately.
     // Volume calibration is not evidence that this separate service works.
-    activate: (next: { lang: string; lineKey: string }) => {
+    activate: (next: { lang: string; lineKey: string; preserveTranscript?: boolean }) => {
+      const preserveTranscript = next.preserveTranscript === true && language === next.lang && lineKey === next.lineKey;
       cancelCue(); clearEvidence();
       if (!options.naturalEnd) detach();
       enabled = true;
@@ -350,7 +351,8 @@ export const createSpeechRecognitionSession = (
       language = next.lang;
       lineKey = next.lineKey;
       latestResults = { length: 0 };
-      resetTranscript();
+      if (preserveTranscript) committedTranscript = snapshot.transcript;
+      else resetTranscript();
       armEvidence();
       if (options.naturalEnd && recognition) {
         closingForChange = true; needsCue = true; update({ status: 'finishing' }); return;

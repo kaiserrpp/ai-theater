@@ -5,7 +5,7 @@ import { scoreLineMatch } from './lineMatching';
 export type ComparisonLineMetadata = { lineIndex: number; character: string; sceneTitle: string | null;
   expectedText: string; speakableText: string; language: string };
 export const makeRehearsalComparisonEntry = (result: RehearsalComparisonResult, line: ComparisonLineMetadata): IntelligentLineFeedbackEntry => ({
-  recognitionEngine: 'comparison', result: 'comparacion_ensayo', ...line,
+  recognitionEngine: 'comparison', result: result.completion === 'report_snapshot' ? 'informe_parcial' : 'comparacion_ensayo', ...line,
   heardText: result.results.map(item => `${item.engine}: ${item.text || `[${item.error || 'sin texto'}]`}`).join('\n'),
   score: 0, matchedReferenceText: line.expectedText, matchedReferenceIndex: 0, createdAt: new Date().toISOString(),
   rehearsalComparison: { id: result.turn.id, execution: 'parallel', sameUtterance: true,

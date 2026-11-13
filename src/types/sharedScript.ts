@@ -235,6 +235,7 @@ export interface SharedMusicalNumberAudioDeleteInput {
 }
 
 export type IntelligentLineFeedbackResult =
+  | 'informe_parcial'
   | 'comparacion_ensayo'
   | 'comparacion_local'
   | 'linea_buena'
@@ -294,7 +295,7 @@ export interface IntelligentLineFeedbackEntry {
   recognitionEngine?: 'native' | 'vosk' | 'whisper' | 'comparison';
   rehearsalComparison?: {
     id: string; execution: 'parallel'; sameUtterance: true;
-    completion: 'speech_end' | 'button' | 'manual' | 'exit' | 'capture_failed'; elapsedMs: number; quietMs: number;
+    completion: 'speech_end' | 'button' | 'manual' | 'exit' | 'capture_failed' | 'report_snapshot'; elapsedMs: number; quietMs: number;
     speechStartMs: number | null; speechEndMs: number | null; inputClosedMs: number | null;
     speechTimingSource: 'shared_capture_rms' | 'native_result_event';
     results: (import('../utils/rehearsalComparisonSession').ComparisonEngineResult & {

@@ -16,7 +16,7 @@ export type ComparisonEngineResult = {
 export type RehearsalComparisonTurn = { key: string; id: string; lang: string; context: ScriptRecognitionContext };
 export type RehearsalComparisonResult = {
   turn: RehearsalComparisonTurn;
-  completion: 'speech_end' | 'button' | 'manual' | 'exit' | 'capture_failed';
+  completion: 'speech_end' | 'button' | 'manual' | 'exit' | 'capture_failed' | 'report_snapshot';
   elapsedMs: number;
   quietMs: number;
   speechStartMs: number | null;
@@ -60,6 +60,7 @@ export const createRehearsalComparisonSession = (deps: Dependencies) => {
   let speechTimingSource: RehearsalComparisonResult['speechTimingSource'] = 'shared_capture_rms';
   let finalTexts: Partial<Record<ComparisonEngine, string>> = {};
   let captureRequest: Promise<ComparisonCapture> | null = null;
+  let reportSnapshotNumber = 0;
   const reportWaiters = new Set<() => void>();
   const waitForReport = () => reported ? Promise.resolve() : new Promise<void>(resolve => reportWaiters.add(resolve));
   const snapshot = (message: string) => deps.onChange({ phase, results: values.map(value => ({ ...value })), message });
@@ -226,6 +227,12 @@ export const createRehearsalComparisonSession = (deps: Dependencies) => {
   };
   return {
     open, finish,
+    snapshotForReport: (): RehearsalComparisonResult | null => !turn || reported || disposed ? null : ({
+      turn: { ...turn, id: `${turn.id}-snapshot-${++reportSnapshotNumber}` }, completion: 'report_snapshot',
+      elapsedMs: Math.round(now() - started), quietMs: 2000, speechStartMs, speechEndMs, inputClosedMs, speechTimingSource,
+      sameUtterance: true, execution: 'parallel',
+      results: values.map(item => ({ ...item, status: item.status === 'listening' ? 'incomplete' : item.status })),
+    }),
     suspend: () => { if (!turn || reported || finishing) return; operation++; suspended = true; phase = 'paused'; deps.cancelPreparation?.(); closeCapture(); native?.finish(); snapshot('Comparativa en pausa. Conservamos las palabras de esta réplica.'); },
     waitForEnd: async () => {
       return new Promise<boolean>(resolve => { const timer = setTimeout(() => resolve(false), 12000);

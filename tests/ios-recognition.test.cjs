@@ -69,6 +69,24 @@ test('the iOS 27 policy also recognizes a frozen iPhone OS user agent and standa
   assert.equal(naturalEnd({ userAgent: 'Windows NT 10.0 Chrome/157.0 Safari/537.36' }), false);
 });
 
+test('resuming the same paused line preserves provisional words after the native input has ended',t=>{
+  const f=fixture(t);f.session.configure(options());f.handles[0].receive('Ey',false);
+  f.session.stop();f.handles[0].end();
+  f.session.activate({lang:'es-ES',lineKey:'my-line-1',preserveTranscript:true});
+  f.cues.at(-1).onDone();f.handles[1].receive('Sonny');
+  assert.equal(f.session.getSnapshot().transcript,'Ey Sonny');
+  assert.equal(f.poisoned(),false);assert(!f.handles.some(handle=>handle.aborted));
+});
+
+test('resuming before Safari finishes its old capture waits naturally and retains the actor words',t=>{
+  const f=fixture(t);f.session.configure(options());f.handles[0].receive('primera parte',false);
+  f.session.stop();f.session.activate({lang:'es-ES',lineKey:'my-line-1',preserveTranscript:true});
+  assert.equal(f.handles.length,1);assert.equal(f.cues.length,0);
+  f.handles[0].end();t.mock.timers.tick(250);f.cues.at(-1).onDone();f.handles[1].receive('segunda parte');
+  assert.equal(f.session.getSnapshot().transcript,'primera parte segunda parte');
+  assert.equal(f.poisoned(),false);
+});
+
 test('opening the microphone and confirming speaker output cannot verify speech recognition', () => {
   const preparation = createRehearsalPreparationSession();
   preparation.confirmSpeaker();

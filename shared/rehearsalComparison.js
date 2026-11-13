@@ -5,7 +5,7 @@ const normalizeRehearsalComparison = value => {
   const seen = new Set();
   return { id: text(value.id, 100), execution: 'parallel', sameUtterance: true,
     sharedPcm: ['vosk', 'whisper'], nativeIndependentCapture: true,
-    completion: ['speech_end', 'button', 'manual', 'exit', 'capture_failed'].includes(value.completion) ? value.completion : 'manual',
+    completion: ['speech_end', 'button', 'manual', 'exit', 'capture_failed', 'report_snapshot'].includes(value.completion) ? value.completion : 'manual',
     elapsedMs: bounded(value.elapsedMs, 600000), quietMs: bounded(value.quietMs, 10000),
     speechStartMs: bounded(value.speechStartMs, 600000), speechEndMs: bounded(value.speechEndMs, 600000), inputClosedMs: bounded(value.inputClosedMs, 600000),
     speechTimingSource: value.speechTimingSource === 'native_result_event' ? 'native_result_event' : 'shared_capture_rms',
