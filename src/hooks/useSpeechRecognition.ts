@@ -9,14 +9,13 @@ import { prepareRecognitionRestart } from '../utils/rehearsalSpeech';
 import { isPageVisible, observePageVisibility } from '../utils/pageVisibility';
 import { getLocalSpeechRecognitionConstructor, preloadLocalSpeechRecognition, disposeLocalSpeechRecognition } from '../utils/localSpeechRecognition';
 import { getWhisperSpeechRecognitionConstructor, preloadWhisperSpeechRecognition, disposeWhisperSpeechRecognition } from '../utils/whisperSpeechRecognition';
-import type { RecognitionEngine, ScriptRecognitionContext } from '../utils/scriptRecognitionContext';
+import { usesWhisperRecognition, type RecognitionEngine, type ScriptRecognitionContext } from '../utils/scriptRecognitionContext';
 import type { RecognitionProcessingTiming } from '../types/sharedScript';
 
 type UseSpeechRecognitionOptions = {
   enabled: boolean;
   lang: string;
   lineKey: string | null;
-  preferLocal?: boolean;
   prepareLocal?: boolean;
   engine?: RecognitionEngine;
   context?: ScriptRecognitionContext;
@@ -34,7 +33,7 @@ const getSpeechRecognitionConstructor = () => {
   return scopedWindow.SpeechRecognition ?? scopedWindow.webkitSpeechRecognition ?? null;
 };
 
-export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = false, prepareLocal = false, engine = 'vosk', context, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
+export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = false, engine = 'native', context, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
   const contextRef = useRef(context); contextRef.current = context;
   const whisperLanguageRef = useRef(whisperLanguage); whisperLanguageRef.current = whisperLanguage;
   const microphoneCheckRef = useRef(whisperMicrophoneCheck); microphoneCheckRef.current = whisperMicrophoneCheck;
@@ -42,9 +41,9 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
   const processingTimingRef = useRef<RecognitionProcessingTiming | null>(null);
   const getRecognitionProcessingTiming = useCallback(() => processingTimingRef.current, []);
   const NativeConstructor = useMemo(getSpeechRecognitionConstructor, []);
-  const LocalConstructor = useMemo(() => engine !== 'vosk' ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }, () => microphoneCheckRef.current, () => speechThresholdRef.current) :
-    preferLocal ? getLocalSpeechRecognitionConstructor() : null, [engine, preferLocal]);
-  const Constructor = engine !== 'vosk' ? LocalConstructor : LocalConstructor ?? NativeConstructor;
+  const LocalConstructor = useMemo(() => usesWhisperRecognition(engine) ? getWhisperSpeechRecognitionConstructor(() => contextRef.current, () => whisperLanguageRef.current, timing => { processingTimingRef.current = timing; }, () => microphoneCheckRef.current, () => speechThresholdRef.current) :
+    engine === 'vosk' ? getLocalSpeechRecognitionConstructor() : null, [engine]);
+  const Constructor = engine === 'native' ? NativeConstructor : LocalConstructor;
   const isLocal = Boolean(LocalConstructor);
   const naturalEnd = useMemo(() => !isLocal && needsNaturalRecognitionEnd(typeof navigator === 'undefined' ? null : navigator), [isLocal]);
   const [snapshot, setSnapshot] = useState<SpeechRecognitionSnapshot>({
@@ -58,7 +57,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
 
   useEffect(() => {
     if (engine !== 'vosk') disposeLocalSpeechRecognition();
-    if (isLocal && prepareLocal) void (engine !== 'vosk' ? preloadWhisperSpeechRecognition() : preloadLocalSpeechRecognition()).catch(() => undefined);
+    if (isLocal && prepareLocal) void (usesWhisperRecognition(engine) ? preloadWhisperSpeechRecognition() : preloadLocalSpeechRecognition()).catch(() => undefined);
   }, [isLocal, prepareLocal, engine]);
 
   useEffect(() => observePageVisibility(session.setPageVisible), [session]);
@@ -70,7 +69,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, preferLocal = fal
 
   useEffect(() => () => {
     session.dispose();
-    if (engine !== 'vosk') disposeWhisperSpeechRecognition();
+    if (usesWhisperRecognition(engine)) disposeWhisperSpeechRecognition();
   }, [session, engine]);
 
   return {

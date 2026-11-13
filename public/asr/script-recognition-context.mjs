@@ -1,5 +1,6 @@
 // Generated from src/utils/scriptRecognitionContext.ts.
-export const resolveRecognitionEngine = (stored) => stored === 'whisper' || stored === 'comparison' ? stored : 'vosk';
+export const resolveRecognitionEngine = (stored) => stored === 'vosk' || stored === 'whisper' || stored === 'comparison' ? stored : 'native';
+export const usesWhisperRecognition = (engine) => engine === 'whisper' || engine === 'comparison';
 const words = (text) => text.normalize('NFKC').match(/[\p{L}][\p{L}'’-]*/gu) || [];
 const key = (text) => text.toLocaleLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
 const title = (text) => text.toLocaleLowerCase().replace(/(^|[\s-])\p{L}/gu, (letter) => letter.toLocaleUpperCase());

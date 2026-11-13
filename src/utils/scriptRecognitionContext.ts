@@ -1,5 +1,7 @@
-export type RecognitionEngine = 'vosk' | 'whisper' | 'comparison';
-export const resolveRecognitionEngine = (stored: string | null): RecognitionEngine => stored === 'whisper' || stored === 'comparison' ? stored : 'vosk';
+export type RecognitionEngine = 'native' | 'vosk' | 'whisper' | 'comparison';
+export const resolveRecognitionEngine = (stored: string | null): RecognitionEngine =>
+  stored === 'vosk' || stored === 'whisper' || stored === 'comparison' ? stored : 'native';
+export const usesWhisperRecognition = (engine: RecognitionEngine) => engine === 'whisper' || engine === 'comparison';
 export type ScriptRecognitionContext = { names: string[]; vocabulary: string[]; prompt: string };
 type ContextLine = { p?: string; r?: string[]; t?: string; k?: string };
 const words = (text: string) => text.normalize('NFKC').match(/[\p{L}][\p{L}'’-]*/gu) || [];

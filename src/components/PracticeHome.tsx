@@ -44,7 +44,7 @@ export const PracticeHome = (props: Props) => {
   const [initialAudition, setInitialAudition] = useState<string | null>(null);
   const [mode, setMode] = useState<ListenPreference>(() => resolveListenPreference(null, supportsRecognition()));
   const [showTranscript, setShowTranscript] = useState(true);
-  const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('vosk');
+  const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('native');
   const [storageNotice, setStorageNotice] = useState('');
   const [auditionUploadRequest, setAuditionUploadRequest] = useState(0);
   const shareId = props.manifest?.shareId;

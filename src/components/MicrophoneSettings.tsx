@@ -5,7 +5,7 @@ import { rehearsalPreparationSession } from '../utils/rehearsalPreparationSessio
 import { Button, Icon, usePracticeTheme } from './PracticeUI';
 import type { RecognitionEngine } from '../utils/scriptRecognitionContext';
 
-export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, onRepeatPreparation, engine = 'vosk', onEngineChange }: {
+export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, onRepeatPreparation, engine = 'native', onEngineChange }: {
   mode: ListenPreference; onModeChange: (mode: ListenPreference) => void;
   showTranscript: boolean; onTranscriptChange: (visible: boolean) => void; supported: boolean;
   onRepeatPreparation?: () => void;
@@ -31,9 +31,9 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   {!supported ? <Text style={ui.text}>Este navegador no ofrece reconocimiento de voz. Puedes ensayar en modo manual.</Text> : null}
   {onEngineChange ? <View style={ui.card}>
     <Text style={ui.subtitle}>Reconocimiento de Inteligente</Text>
-    <Text style={ui.text}>Whisper puede usar los nombres y el vocabulario del guion. Es una prueba local y puede tardar más en transcribir. Las pausas se conservan.</Text>
-    {([['vosk', 'Reconocimiento actual'], ['whisper', 'Whisper con contexto del guion'], ['comparison', 'Comparativa durante el ensayo · tres motores']] as const).map(([value, label]) =>
-      <TouchableOpacity key={value} accessibilityRole="radio" accessibilityState={{ checked: engine === value }}
+    <Text style={ui.text}>Safari es la opción por defecto en iPhone; en otros dispositivos se usa el reconocimiento del navegador. Puedes elegir Vosk o Whisper y seguir comparando los tres. En Inteligente, las pausas se conservan.</Text>
+    {([['native', 'Safari / navegador · por defecto'], ['vosk', 'Vosk · local en español'], ['whisper', 'Whisper con contexto del guion'], ['comparison', 'Comparativa durante el ensayo · tres motores']] as const).map(([value, label]) =>
+      <TouchableOpacity key={value} accessibilityRole="radio" aria-checked={engine === value} accessibilityState={{ checked: engine === value }}
         onPress={() => { if (value === 'comparison') onModeChange('intelligent'); onEngineChange(value); }} style={[ui.row, { paddingVertical: 12 }]}>
         <Icon name={engine === value ? 'radiobox-marked' : 'radiobox-blank'} /><Text style={ui.text}>{label}</Text>
       </TouchableOpacity>)}
