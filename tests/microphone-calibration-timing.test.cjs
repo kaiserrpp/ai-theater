@@ -214,6 +214,15 @@ test('an old input release waiting for close cannot stop a new calibration strea
   assert.equal((await noise).status, 'ready');
 });
 
+test('the physical capture is already ended when the audio backend starts closing', async (t) => {
+  const f = fixture(t, { close: () => {
+    assert.equal(f.streams[0].getTracks()[0].readyState, 'ended');
+    return Promise.resolve();
+  } });
+  await f.hook.startListening(); await f.hook.releaseListeningInput();
+  assert.equal(f.contexts[0].state, 'closed');
+});
+
 test('a cancelled permission request rejected later cannot replace a working retry with an error', async (t) => {
   let rejectOld;
   let calls = 0;

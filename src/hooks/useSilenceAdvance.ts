@@ -357,11 +357,11 @@ export const useSilenceAdvance = ({
   const stopListening = useCallback(async () => {
     const version = ++requestVersionRef.current;
     const stream = getReusableStream();
-    await teardownAudioGraph();
-    if (requestVersionRef.current !== version) return;
     stream?.getAudioTracks().forEach((track) => {
       track.enabled = false;
     });
+    await teardownAudioGraph();
+    if (requestVersionRef.current !== version) return;
     processedLineKeyRef.current = null;
     resetTrackingState();
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
@@ -372,11 +372,12 @@ export const useSilenceAdvance = ({
     const version = ++requestVersionRef.current;
     const currentStream = streamRef.current;
     streamRef.current = null;
-    await teardownAudioGraph();
-
+    // Release the owned physical input before waiting for AudioContext.close().
+    // A mobile audio backend must not have to wait for a still-live capture.
     if (currentStream) {
       currentStream.getTracks().forEach((track) => track.stop());
     }
+    await teardownAudioGraph();
 
     if (requestVersionRef.current !== version) return;
     processedLineKeyRef.current = null;
