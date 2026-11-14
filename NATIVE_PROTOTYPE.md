@@ -18,7 +18,7 @@ La web **2026.11.227** conserva el error real al abrir la captura de calibració
 
 Es compatible con la APK **2026.11.225**: basta cerrar y abrir AI-Theatre para cargar la web publicada, sin reinstalar ni borrar datos. No cambia el reconocimiento seleccionado, Inteligente, los umbrales ni las pausas. El altavoz ya confirmado se conserva al reintentar la calibración.
 
-Pasaron 329 pruebas, lint, TypeScript y exportación web. En navegador se comprobaron errores de permiso y entrada inyectados, las rutas distintas de APK/Chrome y el reintento de calibración sin repetir altavoz; también dos escenas, «adelante» final, pausa de 14 s, fondo e informes parciales mediante el puente real con captura/voz simuladas. **La calibración del micrófono físico de la tablet sigue pendiente de confirmación del usuario**; no se ha establecido que su causa sea el permiso denegado.
+Pasaron 329 pruebas, lint, TypeScript y exportación web. En navegador se comprobaron errores de permiso y entrada inyectados, las rutas distintas de APK/Chrome y el reintento de calibración sin repetir altavoz; también dos escenas, «adelante» final, pausa de 14 s, fondo e informes parciales mediante el puente real con captura/voz simuladas. **La calibración del micrófono físico de la tablet sigue pendiente de confirmación del usuario**; la captura de Ajustes de AI-Theatre enviada por el usuario muestra Micrófono en «Con permiso», sin permisos denegados. Por tanto, el permiso Android de la APK ya está concedido. Quedan pendientes el reintento con la 227 y el mensaje exacto si falla; no repetir la concesión de ese permiso como diagnóstico.
 
 ## Verificación del prototipo y de BlueStacks · 13–14/11/2026
 
