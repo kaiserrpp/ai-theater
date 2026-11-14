@@ -37,10 +37,13 @@ if (command === 'check') {
     if (!ignore.ignores(file)) throw Error(`No debe enviarse a Expo: ${file}`);
   }
   if (pkg.version !== app.version || !app.ios.bundleIdentifier || !app.android.package) throw Error('Versiones o identificadores incompletos.');
+  for (const permission of ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS']) {
+    if (!app.android.permissions?.includes(permission)) throw Error(`Falta ${permission}: la WebView necesita ambos permisos para abrir la entrada de audio.`);
+  }
   if (eas.build.prototype.distribution !== 'internal' || eas.build.prototype.android.buildType !== 'apk') throw Error('La prueba debe usar distribución interna y APK.');
   if (!app.extra.nativePrototype.webUrl.startsWith('https://ai-theater.vercel.app/')) throw Error('La URL del prototipo debe apuntar a la app publicada.');
   console.log(`Prototipo ${pkg.version}: configuración de iPhone y Android correcta.`);
-  console.log('La captura y la voz son nativas; la interfaz y los guiones proceden de la web existente.');
+  console.log('El reconocimiento y la voz son nativos; la calibración usa getUserMedia en la interfaz web existente.');
   console.log('Paquete de compilación limitado a la app nativa, sin .env, servidor, guiones PDF ni archivos temporales.');
   console.log(app.extra.eas?.projectId ? `Proyecto Expo vinculado: ${app.extra.eas.projectId}` : 'Pendiente: iniciar sesión en Expo y vincular el proyecto (npm run prototype:login / prototype:link).');
   console.log('iPhone: requiere una membresía Apple Developer activa y registrar el dispositivo antes de firmar el instalador.');

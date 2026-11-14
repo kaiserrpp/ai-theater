@@ -2,7 +2,7 @@
   "expo": {
     "name": "AI-Theatre",
     "slug": "ai-theatre",
-    "version": "2026.11.227",
+    "version": "2026.11.228",
     "orientation": "portrait",
     "icon": "./assets/images/caras-teatro.png",
     "userInterfaceStyle": "light",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.kaiserrpp.aitheatre.prototype",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Permite reconocer tus palabras para el modo Inteligente.",
         "NSMicrophoneUsageDescription": "Permite el micrófono para ensayar tus réplicas."
@@ -29,9 +29,10 @@
         "backgroundColor": "#5f0c14"
       },
       "package": "com.kaiserrpp.aitheatre.prototype",
-      "versionCode": 2,
+      "versionCode": 3,
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
