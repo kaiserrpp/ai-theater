@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { asMicrophoneInputError, getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
+import { asMicrophoneInputError, getMicrophoneInputContext, getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
+import { captureMicrophoneInput, type MicrophoneCaptureProfile, type MicrophoneInputDiagnostic } from '../utils/microphoneCapture';
 
 type ListeningStatus = 'unsupported' | 'idle' | 'requesting' | 'active' | 'error';
 type MicrophoneCalibrationStatus =
@@ -53,6 +54,7 @@ interface UseSilenceAdvanceResult {
   resetMicrophoneCalibration: () => void;
   startListening: () => Promise<void>;
   getMicrophoneInputFailure: () => Error | null;
+  getMicrophoneInputDiagnostic: () => MicrophoneInputDiagnostic | null;
   stopListening: () => Promise<void>;
   releaseListeningInput: () => Promise<void>;
   releaseListening: () => Promise<void>;
@@ -192,6 +194,9 @@ export const useSilenceAdvance = ({
   const requestVersionRef = useRef(0);
   const microphoneInputFailureRef = useRef<Error | null>(null);
   const getMicrophoneInputFailure = useCallback(() => microphoneInputFailureRef.current, []);
+  const microphoneInputDiagnosticRef = useRef<MicrophoneInputDiagnostic | null>(null);
+  const captureProfileRef = useRef<MicrophoneCaptureProfile>('processed');
+  const getMicrophoneInputDiagnostic = useCallback(() => microphoneInputDiagnosticRef.current, []);
 
   const isListeningSupported = useMemo(isListeningSupportedOnDevice, []);
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>(
@@ -756,28 +761,33 @@ export const useSilenceAdvance = ({
     setListeningStatus('requesting');
     setListeningError(null);
     microphoneInputFailureRef.current = null;
+    microphoneInputDiagnosticRef.current = { kind: 'microphone_input', stage: 'capture', status: 'ready',
+      attempts: [], errorName: null, errorMessage: null };
 
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
     try {
       const reusableStream = getReusableStream();
-      const mediaStream =
-        reusableStream ??
-        (await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        }));
+      const capture = reusableStream ? null : await captureMicrophoneInput({
+        android: getMicrophoneInputContext().startsWith('android-'), preferredProfile: captureProfileRef.current,
+        isCurrent: () => requestVersionRef.current === requestVersion,
+        record: attempt => {
+          const diagnostic = microphoneInputDiagnosticRef.current!;
+          microphoneInputDiagnosticRef.current = { ...diagnostic, attempts: [...diagnostic.attempts, attempt] };
+        },
+      });
+      const mediaStream = reusableStream ?? capture?.stream;
+      if (!mediaStream) return;
 
       if (requestVersionRef.current !== requestVersion) {
         if (!reusableStream) mediaStream.getTracks().forEach((track) => track.stop());
         return;
       }
+      if (capture) captureProfileRef.current = capture.profile;
       // Own resources as soon as they are acquired, so a failed AudioContext
       // or graph cannot leave a physical microphone open during a retry.
       streamRef.current = mediaStream;
+      microphoneInputDiagnosticRef.current = { ...microphoneInputDiagnosticRef.current!, stage: 'processor' };
       mediaStream.getAudioTracks().forEach((track) => {
         track.enabled = true;
       });
@@ -815,6 +825,9 @@ export const useSilenceAdvance = ({
       await releaseListening();
       if (requestVersionRef.current !== requestVersion + 1) return;
       microphoneInputFailureRef.current = asMicrophoneInputError(error);
+      microphoneInputDiagnosticRef.current = { ...microphoneInputDiagnosticRef.current!, status: 'error',
+        errorName: microphoneInputFailureRef.current.name.slice(0, 80),
+        errorMessage: microphoneInputFailureRef.current.message.slice(0, 300) };
       setListeningError(getMicrophoneInputErrorMessage(error));
       setListeningStatus('error');
     }
@@ -849,6 +862,7 @@ export const useSilenceAdvance = ({
     resetMicrophoneCalibration,
     startListening,
     getMicrophoneInputFailure,
+    getMicrophoneInputDiagnostic,
     stopListening,
     releaseListeningInput,
     releaseListening,

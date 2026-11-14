@@ -37,7 +37,7 @@ export const getMicrophoneInputErrorMessage = (cause: unknown, context = getMicr
     return 'No se encuentra un micrófono disponible. Comprueba que el dispositivo tenga una entrada de audio conectada y vuelve a intentar la calibración.';
   }
   if (error.name === 'NotReadableError' || error.name === 'TrackStartError' || error.name === 'AbortError') {
-    return 'No se ha podido utilizar el micrófono. Puede estar ocupado por una llamada u otra app de grabación. Ciérrala y pulsa Reintentar calibración.';
+    return 'El dispositivo no ha podido abrir la entrada de audio. Pulsa Reintentar calibración.';
   }
   if (error.message === 'audio-context-not-running') {
     return 'No se ha activado el procesamiento de audio. Mantén la app visible y pulsa Reintentar calibración.';

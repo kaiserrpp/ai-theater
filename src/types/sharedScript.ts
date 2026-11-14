@@ -342,6 +342,7 @@ export interface IntelligentLineFeedbackEntry {
 }
 
 export interface IntelligentLineFeedbackSessionInput {
+  microphoneDiagnostic?: import('../utils/microphoneCapture').MicrophoneInputDiagnostic;
   runtime?: 'browser' | 'native_ios' | 'native_android';
   nativeAppVersion?: string;
   sessionId: string;

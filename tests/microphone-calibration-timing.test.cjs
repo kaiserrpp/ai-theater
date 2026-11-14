@@ -49,8 +49,8 @@ const fixture = (t, options = {}) => {
     }
   }
   setGlobal('window', { AudioContext: Context });
-  setGlobal('navigator', { mediaDevices: { getUserMedia: async () => {
-    if (options.beforeCapture) await options.beforeCapture();
+  setGlobal('navigator', { userAgent: options.userAgent || '', mediaDevices: { getUserMedia: async (constraints) => {
+    if (options.beforeCapture) await options.beforeCapture(constraints);
     const track = { enabled: true, readyState: 'live', stop() { this.readyState = 'ended'; } };
     const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
     streams.push(stream);
@@ -97,6 +97,68 @@ test('a denied capture retains its actual error for calibration and a permitted 
   assert.equal(f.hook.getMicrophoneInputFailure(), null);
   assert.equal(f.streams[0].getTracks()[0].readyState, 'live');
   assert.equal((await f.measureNoise()).status, 'ready');
+});
+
+test('Android recovers a rejected processed input and keeps the same raw profile for noise and voice', async (t) => {
+  const requests = [];
+  const f = fixture(t, { userAgent: 'Android Chrome/135.0.0.0', beforeCapture: constraints => {
+    requests.push(constraints);
+    if (constraints.audio.echoCancellation) throw Object.assign(new Error('Could not start audio source'), { name: 'NotReadableError' });
+  } });
+  assert.equal((await f.measureNoise()).status, 'ready');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].audio.echoCancellation, false);
+  assert.equal(requests[1].audio.noiseSuppression, false);
+  assert.equal(requests[1].audio.autoGainControl, false);
+  await f.hook.releaseListeningInput();
+  await f.hook.startListening();
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2].audio.echoCancellation, false);
+  const voice = f.hook.calibrateVoiceLevel(2200); f.advance(2500, 135);
+  assert.ok(['ready', 'weak'].includes((await voice).status));
+});
+
+test('Android retains both actual capture failures for diagnosis and opens no audio graph', async (t) => {
+  let calls = 0;
+  const f = fixture(t, { userAgent: 'Android Chrome/135.0.0.0', beforeCapture: () => {
+    throw Object.assign(new Error(++calls === 1 ? 'processed failed' : 'raw failed'), { name: 'NotReadableError' });
+  } });
+  await f.hook.startListening();
+  assert.equal(calls, 2);
+  assert.equal(f.contexts.length, 0);
+  assert.equal(f.hook.getMicrophoneInputFailure().message, 'raw failed');
+  const diagnostic = f.hook.getMicrophoneInputDiagnostic();
+  assert.equal(diagnostic.stage, 'capture'); assert.equal(diagnostic.status, 'error');
+  assert.deepEqual(diagnostic.attempts.map(attempt => [attempt.profile, attempt.errorMessage]),
+    [['processed', 'processed failed'], ['unprocessed', 'raw failed']]);
+});
+
+test('Android permission denial never retries with a different input profile', async (t) => {
+  let calls = 0;
+  const f = fixture(t, { userAgent: 'Android Chrome/135.0.0.0', beforeCapture: () => {
+    calls++; throw Object.assign(new Error('denied'), { name: 'NotAllowedError' });
+  } });
+  await f.hook.startListening();
+  assert.equal(calls, 1);
+  assert.equal(f.hook.getMicrophoneInputFailure().name, 'NotAllowedError');
+});
+
+test('Safari input failures keep their single capture attempt', async (t) => {
+  let calls = 0;
+  const f = fixture(t, { userAgent: 'iPhone Safari/604.1', beforeCapture: () => {
+    calls++; throw Object.assign(new Error('source failed'), { name: 'NotReadableError' });
+  } });
+  await f.hook.startListening(); assert.equal(calls, 1);
+});
+
+test('a cancelled Android failure cannot trigger a fallback capture', async (t) => {
+  let reject, calls = 0;
+  const f = fixture(t, { userAgent: 'Android Chrome/135.0.0.0', beforeCapture: () => {
+    calls++; return new Promise((resolve, fail) => { reject = fail; });
+  } });
+  const pending = f.hook.startListening(); await f.hook.releaseListeningInput();
+  reject(Object.assign(new Error('stale'), { name: 'NotReadableError' })); await pending;
+  assert.equal(calls, 1); assert.equal(f.contexts.length, 0);
 });
 
 test('an audio processor failure releases the acquired microphone before the next calibration attempt', async (t) => {

@@ -28,7 +28,7 @@ test('an unavailable device or busy input is not described as a denied browser p
   for (const name of ['NotReadableError', 'AbortError', 'NotFoundError']) {
     const message = getMicrophoneInputErrorMessage({ name, message: 'capture failed' }, 'android-app');
     assert.doesNotMatch(message, /bloqueado|Permisos|navegador/);
-    assert.match(message, name === 'NotFoundError' ? /No se encuentra/ : /ocupado/);
+    assert.match(message, name === 'NotFoundError' ? /No se encuentra/ : /abrir la entrada/);
   }
 });
 

@@ -41,6 +41,20 @@ const clampScore = (value) =>
     ? Math.max(0, Math.min(1, value))
     : null;
 
+const normalizeMicrophoneDiagnostic = value => {
+  if (!value || value.kind !== 'microphone_input' || value.status !== 'error' ||
+    !['capture', 'processor'].includes(value.stage) || typeof value.errorName !== 'string') return null;
+  return { kind: 'microphone_input', status: 'error', stage: value.stage,
+    errorName: clampText(value.errorName).slice(0, 80), errorMessage: clampText(value.errorMessage).slice(0, 300),
+    attempts: Array.isArray(value.attempts) ? value.attempts.slice(0, 2)
+      .filter(attempt => attempt && ['processed', 'unprocessed'].includes(attempt.profile) && ['ready', 'error'].includes(attempt.status))
+      .map(attempt => ({ profile: attempt.profile, status: attempt.status,
+        elapsedMs: typeof attempt.elapsedMs === 'number' && Number.isFinite(attempt.elapsedMs)
+          ? Math.max(0, Math.min(180000, Math.round(attempt.elapsedMs))) : null,
+        errorName: clampText(attempt.errorName).slice(0, 80) || null,
+        errorMessage: clampText(attempt.errorMessage).slice(0, 300) || null })) : [] };
+};
+
 const normalizeEntry = (entry) => {
   if (!entry || typeof entry !== 'object') {
     return null;
@@ -224,7 +238,8 @@ module.exports = async (request, response) => {
       ? payload.entries.slice(0, MAX_ENTRIES).map(normalizeEntry).filter(Boolean)
       : [];
 
-    if (!entries.length) {
+    const microphoneDiagnostic = normalizeMicrophoneDiagnostic(payload.microphoneDiagnostic);
+    if (!entries.length && !microphoneDiagnostic) {
       response.status(400).json({ error: 'No hay resultados de prueba para enviar.' });
       return;
     }
@@ -243,6 +258,7 @@ module.exports = async (request, response) => {
       userAgent: typeof payload.userAgent === 'string' ? clampText(payload.userAgent).slice(0, 280) : null,
       entryCount: entries.length,
       entries,
+      ...(microphoneDiagnostic ? { microphoneDiagnostic } : {}),
       createdAt: new Date().toISOString(),
     };
     const pathname = `intelligent-feedback/${body.environment}/${scriptId}/${sessionId}.json`;

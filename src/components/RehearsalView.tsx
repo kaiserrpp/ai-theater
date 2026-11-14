@@ -531,6 +531,9 @@ export const RehearsalView: React.FC<Props> = ({
   const [feedbackStatusMessage, setFeedbackStatusMessage] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const sendingFeedbackRef = useRef(false);
+  const [microphoneReportMessage, setMicrophoneReportMessage] = useState<string | null>(null);
+  const [showMicrophoneDiagnostic, setShowMicrophoneDiagnostic] = useState(false);
+  const microphoneReportIdRef = useRef(createSessionId());
   const [blockedAutoplayAudio, setBlockedAutoplayAudio] = useState<{
     audioId: string;
     audioUrl: string;
@@ -885,6 +888,7 @@ export const RehearsalView: React.FC<Props> = ({
     applyMicrophoneCalibration,
     startListening,
     getMicrophoneInputFailure,
+    getMicrophoneInputDiagnostic,
     stopListening,
     releaseListeningInput,
     releaseListening,
@@ -2311,6 +2315,8 @@ export const RehearsalView: React.FC<Props> = ({
   const calibrateRehearsalMicrophone = useCallback(async () => {
     const run = ++preparationRunRef.current;
     const isCurrent = () => preparationRunRef.current === run;
+    microphoneReportIdRef.current = createSessionId();
+    setMicrophoneReportMessage(null); setShowMicrophoneDiagnostic(false);
     stopRehearsalSpeech(); stopSongAudio(); disposeCalibrationAudio(); stopRecognition();
     setIsPreparingRehearsalMedia(true); setHasPreparedRehearsalMedia(false);
     setHasCompletedRehearsalPreflight(false); setIsRehearsalMediaReady(false);
@@ -2380,6 +2386,26 @@ export const RehearsalView: React.FC<Props> = ({
   }, [calibrateAmbientNoise, calibrateVoiceLevel, disposeCalibrationAudio, getCalibrationAudioPlayer,
     listenModeSelection, playMicroCalibrationBeep, releaseListeningInput, resetMicrophoneCalibration,
     getMicrophoneInputFailure, startListening, stopRecognition, stopSongAudio]);
+
+  const sendMicrophoneDiagnostic = useCallback(async () => {
+    const microphoneDiagnostic = getMicrophoneInputDiagnostic();
+    if (sendingFeedbackRef.current || microphoneDiagnostic?.status !== 'error') return;
+    const run = preparationRunRef.current;
+    sendingFeedbackRef.current = true; setIsSendingFeedback(true);
+    setMicrophoneReportMessage('Enviando diagnóstico del micrófono…');
+    try {
+      const native = getNativePrototypeInfo();
+      await submitIntelligentLineFeedback({ sessionId: microphoneReportIdRef.current, scriptId: resolvedScriptId,
+        shareId, scriptTitle, appVersion: packageInfo.version, userRoles: myRoles, userAgent: getUserAgent(),
+        runtime: native ? native.platform === 'android' ? 'native_android' : 'native_ios' : 'browser',
+        nativeAppVersion: native?.appVersion, entries: [], microphoneDiagnostic });
+      if (preparationRunRef.current === run) setMicrophoneReportMessage('Diagnóstico enviado. Incluye el error y las versiones, sin grabaciones.');
+    } catch (cause) {
+      if (preparationRunRef.current === run) setMicrophoneReportMessage(cause instanceof Error ? cause.message : 'No se pudo enviar el diagnóstico. Reintenta el envío.');
+    } finally {
+      sendingFeedbackRef.current = false; setIsSendingFeedback(false);
+    }
+  }, [getMicrophoneInputDiagnostic, resolvedScriptId, shareId, scriptTitle, myRoles]);
 
   const advancePastMusicalNumber = useCallback((musicalNumberId: string | null) => {
     const musicalNumber = musicalNumberId
@@ -3180,6 +3206,13 @@ export const RehearsalView: React.FC<Props> = ({
             <Text style={ui.text}>Nivel de entrada: {Math.round(rawLevel * 100)}% · {Math.round(microphoneCalibrationProgress * 100)}%</Text>
             {listeningError ? <Text style={ui.error}>{listeningError}</Text> : null}
             <Button label={isPreparingRehearsalMedia ? 'Calibrando…' : 'Reintentar calibración'} disabled={isPreparingRehearsalMedia} onPress={() => void calibrateRehearsalMicrophone()} />
+            {!isPreparingRehearsalMedia && getMicrophoneInputDiagnostic()?.status === 'error' ? <>
+              <Button label={isSendingFeedback ? 'Enviando diagnóstico…' : 'Enviar diagnóstico'} secondary disabled={isSendingFeedback} onPress={() => void sendMicrophoneDiagnostic()} />
+              <Text style={ui.text}>Envía el error de apertura y las versiones de la app para revisar el fallo, sin audio.</Text>
+              {microphoneReportMessage ? <Text accessibilityLiveRegion="polite" style={ui.text}>{microphoneReportMessage}</Text> : null}
+              <Button label="Ver detalle técnico" secondary onPress={() => setShowMicrophoneDiagnostic(value => !value)} />
+              {showMicrophoneDiagnostic ? <Text selectable style={ui.text}>{`Web ${packageInfo.version} · APK ${getNativePrototypeInfo()?.appVersion || 'navegador'}\n${JSON.stringify(getMicrophoneInputDiagnostic(), null, 2)}`}</Text> : null}
+            </> : null}
           </> : isReadyToCalibrate ? <Button label="Calibrar micrófono" onPress={() => void calibrateRehearsalMicrophone()} />
             : isReadyToListen ? <Button label="Comprobar escucha" onPress={enableIntelligentListenForDevice} />
             : isReadyToStart ? <Button label="Empezar ensayo" onPress={() => finishRehearsalPreparation()} />
