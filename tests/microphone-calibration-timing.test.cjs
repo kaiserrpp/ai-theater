@@ -31,6 +31,7 @@ const fixture = (t, options = {}) => {
   const frames = new Map();
   const streams = [];
   const contexts = [];
+  const nativeCaptures = [];
   const originals = new Map();
   const setGlobal = (name, value) => {
     originals.set(name, Object.getOwnPropertyDescriptor(global, name));
@@ -48,7 +49,14 @@ const fixture = (t, options = {}) => {
       return { fftSize: 2048, disconnect() {}, getByteTimeDomainData: (samples) => samples.fill(sample) };
     }
   }
-  setGlobal('window', { AudioContext: Context });
+  setGlobal('window', { AudioContext: Context, ...(options.nativeInput ? {
+    __AI_THEATRE_NATIVE_V1__: { protocol: 1, platform: 'android', appVersion: '2026.11.231', nativeLevelInput: true },
+    __AI_THEATRE_NATIVE_LEVEL_INPUT__: { open: (onLevel, onError) => {
+      const capture = { active: true, onLevel, onError, ready: Promise.resolve(),
+        stop: async () => { capture.active = false; } };
+      nativeCaptures.push(capture); return capture;
+    } },
+  } : {}) });
   setGlobal('navigator', { userAgent: options.userAgent || '', mediaDevices: { getUserMedia: async (constraints) => {
     if (options.beforeCapture) await options.beforeCapture(constraints);
     const track = { enabled: true, readyState: 'live', stop() { this.readyState = 'ended'; } };
@@ -59,7 +67,7 @@ const fixture = (t, options = {}) => {
   setGlobal('performance', { now: () => now });
   setGlobal('requestAnimationFrame', (callback) => { frames.set(++frameId, callback); return frameId; });
   setGlobal('cancelAnimationFrame', (id) => frames.delete(id));
-  const hook = useSilenceAdvance({ enabledForCurrentLine: false, lineKey: null, onSilenceDetected() {} });
+  const hook = useSilenceAdvance({ preferNativeInput: !!options.nativeInput, enabledForCurrentLine: false, lineKey: null, onSilenceDetected() {} });
   t.after(async () => {
     await hook.releaseListening();
     for (const [name, descriptor] of originals) {
@@ -72,6 +80,7 @@ const fixture = (t, options = {}) => {
     const until = now + durationMs;
     while (now < until) {
       now += 16;
+      if (!options.freezeNativeLevels) nativeCaptures.filter(capture => capture.active).forEach(capture => capture.onLevel(Math.abs(sample - 128) / 128));
       const callbacks = [...frames.values()]; frames.clear();
       callbacks.forEach((callback) => callback(now));
     }
@@ -82,8 +91,34 @@ const fixture = (t, options = {}) => {
     advance(1900, 129);
     return pending;
   };
-  return { hook, advance, measureNoise, streams, contexts };
+  return { hook, advance, measureNoise, streams, contexts, nativeCaptures };
 };
+
+test('native Android preparation measures noise and voice without opening a WebView microphone or AudioContext', async t => {
+  const f = fixture(t, { nativeInput: true });
+  assert.equal((await f.measureNoise()).measurement, 'native_peak');
+  await f.hook.releaseListeningInput(); assert.equal(f.nativeCaptures[0].active, false);
+  await f.hook.startListening(); const voice = f.hook.calibrateVoiceLevel(2200); f.advance(2500, 135);
+  const result = await voice; assert.ok(['ready', 'weak'].includes(result.status)); assert.equal(result.measurement, 'native_peak');
+  assert.equal(f.streams.length, 0); assert.equal(f.contexts.length, 0); assert.equal(f.nativeCaptures.length, 2);
+});
+
+test('late native levels from a retired calibration cannot supply voice to a new silent attempt', async t => {
+  const f = fixture(t, { nativeInput: true }); await f.measureNoise();
+  await f.hook.releaseListeningInput(); await f.hook.startListening();
+  f.nativeCaptures[0].onLevel(0.8);
+  const voice = f.hook.calibrateVoiceLevel(2200); f.advance(10100, 129);
+  assert.equal((await voice).status, 'error');
+});
+
+test('a native meter which stalls cannot pass calibration from cached levels', async t => {
+  const options = { nativeInput: true }, f = fixture(t, options);
+  await f.hook.startListening(); const noise = f.hook.calibrateAmbientNoise(1800);
+  f.advance(200, 129); options.freezeNativeLevels = true; f.advance(1800, 129);
+  assert.equal((await noise).status, 'error');
+  assert.equal(f.hook.getMicrophoneInputDiagnostic().stage, 'processor');
+  assert.match(f.hook.getMicrophoneInputFailure().message, /niveles recientes/);
+});
 
 test('a denied capture retains its actual error for calibration and a permitted retry clears it', async (t) => {
   const denied = Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });

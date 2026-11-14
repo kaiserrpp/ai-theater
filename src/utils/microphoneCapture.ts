@@ -2,7 +2,7 @@ import { asMicrophoneInputError } from './microphoneInputHelp';
 
 export type MicrophoneCaptureProfile = 'processed' | 'unprocessed';
 export type MicrophoneCaptureAttempt = {
-  profile: MicrophoneCaptureProfile; status: 'ready' | 'error'; elapsedMs: number;
+  profile: MicrophoneCaptureProfile | 'native_peak'; status: 'ready' | 'error'; elapsedMs: number;
   errorName: string | null; errorMessage: string | null;
 };
 export type MicrophoneInputDiagnostic = {

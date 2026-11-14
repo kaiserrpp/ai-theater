@@ -20,7 +20,7 @@ if (command === 'check') {
   const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
   const ignore = require('ignore')().add(fs.readFileSync(path.join(root, '.easignore'), 'utf8'));
   const required = ['App.native.tsx', 'app.json', 'package.json', 'package-lock.json', 'eas.json', 'tsconfig.json',
-    'src/nativePrototype/controller.ts', 'src/nativePrototype/bridgeBootstrap.ts', 'src/nativePrototype/protocol.ts',
+    'src/nativePrototype/controller.ts', 'src/nativePrototype/bridgeBootstrap.ts', 'src/nativePrototype/protocol.ts', 'src/nativePrototype/levelInput.ts',
     'assets/images/caras-teatro.png', 'assets/images/splash-icon.png'];
   for (const file of required) {
     if (!fs.existsSync(path.join(root, file)) || ignore.ignores(file)) throw Error(`Falta en el paquete nativo: ${file}`);
@@ -43,7 +43,7 @@ if (command === 'check') {
   if (eas.build.prototype.distribution !== 'internal' || eas.build.prototype.android.buildType !== 'apk') throw Error('La prueba debe usar distribución interna y APK.');
   if (!app.extra.nativePrototype.webUrl.startsWith('https://ai-theater.vercel.app/')) throw Error('La URL del prototipo debe apuntar a la app publicada.');
   console.log(`Prototipo ${pkg.version}: configuración de iPhone y Android correcta.`);
-  console.log('El reconocimiento y la voz son nativos; la calibración usa getUserMedia en la interfaz web existente.');
+  console.log('Android: el reconocimiento, la voz y la calibración de Inteligente/nativo usan las API nativas; la interfaz y los guiones siguen en la web.');
   console.log('Paquete de compilación limitado a la app nativa, sin .env, servidor, guiones PDF ni archivos temporales.');
   console.log(app.extra.eas?.projectId ? `Proyecto Expo vinculado: ${app.extra.eas.projectId}` : 'Pendiente: iniciar sesión en Expo y vincular el proyecto (npm run prototype:login / prototype:link).');
   console.log('iPhone: requiere una membresía Apple Developer activa y registrar el dispositivo antes de firmar el instalador.');

@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.11.230",
+  "version": "2026.11.231",
   "scripts": {
     "comparison:build": "node scripts/build-asr-comparison.cjs",
     "pretest": "node scripts/build-asr-comparison.cjs --check",
@@ -33,6 +33,7 @@
     "@react-navigation/native": "^7.1.8",
     "@vercel/blob": "^2.3.3",
     "expo": "~54.0.33",
+    "expo-audio": "~1.1.1",
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.21",

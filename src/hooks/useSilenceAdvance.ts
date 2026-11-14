@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { asMicrophoneInputError, getMicrophoneInputContext, getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
 import { captureMicrophoneInput, type MicrophoneCaptureProfile, type MicrophoneInputDiagnostic } from '../utils/microphoneCapture';
+import { getNativeLevelInput, waitForNativeLevelInput, type NativeLevelCapture } from '../utils/nativePrototype';
 
 type ListeningStatus = 'unsupported' | 'idle' | 'requesting' | 'active' | 'error';
 type MicrophoneCalibrationStatus =
@@ -12,6 +13,7 @@ type MicrophoneCalibrationStatus =
   | 'error';
 
 export type MicrophoneCalibrationResult = {
+  measurement?: 'rms' | 'native_peak';
   status: MicrophoneCalibrationStatus;
   noiseFloor: number;
   voiceLevel: number;
@@ -20,6 +22,7 @@ export type MicrophoneCalibrationResult = {
 };
 
 export type MicrophoneCalibrationSnapshot = {
+  measurement?: 'rms' | 'native_peak';
   status?: MicrophoneCalibrationStatus;
   noiseFloor: number;
   voiceLevel: number;
@@ -27,6 +30,7 @@ export type MicrophoneCalibrationSnapshot = {
 };
 
 interface UseSilenceAdvanceOptions {
+  preferNativeInput?: boolean;
   enabledForCurrentLine: boolean;
   lineKey: string | null;
   onSilenceDetected: () => void;
@@ -47,6 +51,7 @@ interface UseSilenceAdvanceResult {
   microphoneCalibrationProgress: number;
   microphoneNoiseFloor: number;
   microphoneVoiceLevel: number;
+  microphoneCalibrationMeasurement: 'rms' | 'native_peak';
   lineStateLabel: string;
   calibrateAmbientNoise: (durationMs?: number) => Promise<MicrophoneCalibrationResult>;
   calibrateVoiceLevel: (durationMs?: number) => Promise<MicrophoneCalibrationResult>;
@@ -80,6 +85,9 @@ type CalibrationRun = {
   maxWaitMs: number;
   samples: number[];
   voiceBurstMs: number;
+  nativeSamples: number;
+  firstNativeAt: number;
+  lastNativeAt: number;
   timeout: ReturnType<typeof setTimeout>;
   resolve: (result: MicrophoneCalibrationResult) => void;
 };
@@ -162,6 +170,7 @@ const hasUsableVoiceCalibration = (noiseFloor: number, voiceLevel: number) =>
   );
 
 export const useSilenceAdvance = ({
+  preferNativeInput = false,
   enabledForCurrentLine,
   lineKey,
   onSilenceDetected,
@@ -171,6 +180,10 @@ export const useSilenceAdvance = ({
   const currentEnabledRef = useRef(enabledForCurrentLine);
   const processedLineKeyRef = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const nativeCaptureRef = useRef<NativeLevelCapture | null>(null);
+  const nativeSampleRef = useRef<{ level: number; at: number } | null>(null);
+  const measurementRef = useRef<'rms' | 'native_peak'>('rms');
+  const [microphoneCalibrationMeasurement, setMicrophoneCalibrationMeasurement] = useState<'rms' | 'native_peak'>('rms');
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -198,7 +211,7 @@ export const useSilenceAdvance = ({
   const captureProfileRef = useRef<MicrophoneCaptureProfile>('processed');
   const getMicrophoneInputDiagnostic = useCallback(() => microphoneInputDiagnosticRef.current, []);
 
-  const isListeningSupported = useMemo(isListeningSupportedOnDevice, []);
+  const isListeningSupported = useMemo(() => Boolean(preferNativeInput && getNativeLevelInput()) || isListeningSupportedOnDevice(), [preferNativeInput]);
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>(
     isListeningSupported ? 'idle' : 'unsupported'
   );
@@ -258,6 +271,8 @@ export const useSilenceAdvance = ({
   }, []);
 
   const applyMicrophoneCalibration = useCallback((snapshot: MicrophoneCalibrationSnapshot) => {
+    measurementRef.current = snapshot.measurement || 'rms';
+    setMicrophoneCalibrationMeasurement(measurementRef.current);
     const safeNoiseFloor = Math.max(0, snapshot.noiseFloor);
     const safeVoiceLevel = Math.max(0, snapshot.voiceLevel);
     const safeThreshold = Math.max(MIN_VOICE_THRESHOLD, snapshot.voiceThreshold);
@@ -356,11 +371,13 @@ export const useSilenceAdvance = ({
 
   const stopListening = useCallback(async () => {
     const version = ++requestVersionRef.current;
+    const nativeCapture = nativeCaptureRef.current; nativeCaptureRef.current = null; nativeSampleRef.current = null;
     const stream = getReusableStream();
     stream?.getAudioTracks().forEach((track) => {
       track.enabled = false;
     });
     await teardownAudioGraph();
+    if (nativeCapture) await waitForNativeLevelInput(nativeCapture.stop());
     if (requestVersionRef.current !== version) return;
     processedLineKeyRef.current = null;
     resetTrackingState();
@@ -372,18 +389,20 @@ export const useSilenceAdvance = ({
     const version = ++requestVersionRef.current;
     const currentStream = streamRef.current;
     streamRef.current = null;
+    const nativeCapture = nativeCaptureRef.current; nativeCaptureRef.current = null; nativeSampleRef.current = null;
     // Release the owned physical input before waiting for AudioContext.close().
     // A mobile audio backend must not have to wait for a still-live capture.
     if (currentStream) {
       currentStream.getTracks().forEach((track) => track.stop());
     }
     await teardownAudioGraph();
+    if (nativeCapture) await waitForNativeLevelInput(nativeCapture.stop());
 
     if (requestVersionRef.current !== version) return;
     processedLineKeyRef.current = null;
     resetTrackingState();
-    setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
-    setListeningError(null);
+    setListeningStatus(microphoneInputFailureRef.current ? 'error' : isListeningSupported ? 'idle' : 'unsupported');
+    setListeningError(microphoneInputFailureRef.current ? getMicrophoneInputErrorMessage(microphoneInputFailureRef.current) : null);
   }, [isListeningSupported, resetTrackingState, teardownAudioGraph]);
 
   const releaseListening = useCallback(async () => {
@@ -403,24 +422,35 @@ export const useSilenceAdvance = ({
     }
   }, [enabledForCurrentLine, lineKey, resetTrackingState]);
 
+  const hasNativeMeasurements = useCallback((run: CalibrationRun) => {
+    if (measurementRef.current !== 'native_peak' || (run.nativeSamples >= 8 && run.lastNativeAt - run.firstNativeAt >= run.durationMs / 2 && getNow() - run.lastNativeAt < 300)) return true;
+    const failure = new Error('El grabador nativo dejó de entregar suficientes niveles recientes.'); failure.name = 'NativeCaptureError';
+    microphoneInputFailureRef.current = failure;
+    microphoneInputDiagnosticRef.current = { ...microphoneInputDiagnosticRef.current!, status: 'error', stage: 'processor', errorName: failure.name, errorMessage: failure.message };
+    return false;
+  }, []);
+
   const monitorSignal = useCallback(() => {
     const analyser = analyserRef.current;
     const samples = samplesRef.current;
 
-    if (!analyser || !samples || typeof requestAnimationFrame !== 'function') {
+    if ((!nativeCaptureRef.current && (!analyser || !samples)) || typeof requestAnimationFrame !== 'function') {
       return;
     }
 
-    analyser.getByteTimeDomainData(samples as unknown as Uint8Array<ArrayBuffer>);
+    const now = getNow();
+    const nativeSample = nativeSampleRef.current;
     let sumSquares = 0;
-
-    for (let index = 0; index < samples.length; index += 1) {
-      const normalizedSample = (samples[index] - 128) / 128;
-      sumSquares += normalizedSample * normalizedSample;
+    if (analyser && samples) {
+      analyser.getByteTimeDomainData(samples as unknown as Uint8Array<ArrayBuffer>);
+      for (let index = 0; index < samples.length; index += 1) {
+        const normalizedSample = (samples[index] - 128) / 128;
+        sumSquares += normalizedSample * normalizedSample;
+      }
     }
 
-    const rms = Math.sqrt(sumSquares / samples.length);
-    const now = getNow();
+    const rms = nativeCaptureRef.current ? nativeSample && now - nativeSample.at < 300 ? nativeSample.level : 0
+      : Math.sqrt(sumSquares / samples!.length);
     const frameDeltaMs = lastFrameTimestampRef.current > 0 ? now - lastFrameTimestampRef.current : 16;
     lastFrameTimestampRef.current = now;
 
@@ -438,6 +468,7 @@ export const useSilenceAdvance = ({
           if (calibrationRun.voiceBurstMs >= VOICE_CONFIRM_MS) {
             calibrationRun.sampleStartedAt = now;
             calibrationRun.samples = [rms];
+            calibrationRun.nativeSamples = 0; calibrationRun.firstNativeAt = 0; calibrationRun.lastNativeAt = 0;
           }
         } else {
           calibrationRun.voiceBurstMs = 0;
@@ -447,6 +478,7 @@ export const useSilenceAdvance = ({
         setMicrophoneCalibrationProgress(Math.min(0.08, waitElapsedMs / calibrationRun.maxWaitMs));
 
         if (waitElapsedMs >= calibrationRun.maxWaitMs) {
+          hasNativeMeasurements(calibrationRun);
           clearTimeout(calibrationRun.timeout);
           calibrationRunRef.current = null;
           const fallbackResult = buildCalibrationResult({
@@ -460,7 +492,7 @@ export const useSilenceAdvance = ({
           calibrationRun.resolve(fallbackResult);
         }
       } else {
-        calibrationRun.samples.push(rms);
+        if (measurementRef.current !== 'native_peak') calibrationRun.samples.push(rms);
         const sampleStartedAt = calibrationRun.sampleStartedAt || calibrationRun.startedAt;
         const elapsedMs = now - sampleStartedAt;
         const progress = Math.max(0, Math.min(1, elapsedMs / calibrationRun.durationMs));
@@ -470,7 +502,11 @@ export const useSilenceAdvance = ({
           clearTimeout(calibrationRun.timeout);
           calibrationRunRef.current = null;
 
-          if (calibrationRun.mode === 'silence') {
+          if (!hasNativeMeasurements(calibrationRun)) {
+            setMicrophoneCalibrationStatus('error'); setMicrophoneCalibrationProgress(0);
+            calibrationRun.resolve(buildCalibrationResult({ status: 'error', noiseFloor: microphoneNoiseFloorRef.current,
+              voiceLevel: 0, voiceThreshold: currentThresholdRef.current }));
+          } else if (calibrationRun.mode === 'silence') {
             const noiseFloor = Math.max(getPercentile(calibrationRun.samples, 0.82), 0);
             microphoneNoiseFloorRef.current = noiseFloor;
             const nextThreshold = calculateSessionThreshold(
@@ -613,11 +649,11 @@ export const useSilenceAdvance = ({
     }
 
     frameRef.current = requestAnimationFrame(monitorSignal);
-  }, [prepareLineTracking]);
+  }, [prepareLineTracking, hasNativeMeasurements]);
 
   const runMicrophoneCalibration = useCallback(
     async (mode: 'silence' | 'voice', durationMs: number) => {
-      if (!analyserRef.current || !samplesRef.current) {
+      if (!nativeCaptureRef.current && (!analyserRef.current || !samplesRef.current)) {
         const result = buildCalibrationResult({
           status: 'error',
           noiseFloor: microphoneNoiseFloorRef.current,
@@ -648,7 +684,7 @@ export const useSilenceAdvance = ({
           calibrationRunRef.current = null;
           const samples = currentRun.samples;
 
-          if (currentRun.mode === 'voice' && currentRun.sampleStartedAt === 0) {
+          if (!hasNativeMeasurements(currentRun) || (currentRun.mode === 'voice' && currentRun.sampleStartedAt === 0)) {
             const result = buildCalibrationResult({
               status: 'error',
               noiseFloor: microphoneNoiseFloorRef.current,
@@ -728,21 +764,22 @@ export const useSilenceAdvance = ({
           maxWaitMs,
           samples: [],
           voiceBurstMs: 0,
+          nativeSamples: 0, firstNativeAt: 0, lastNativeAt: 0,
           timeout,
           resolve,
         };
       });
     },
-    []
+    [hasNativeMeasurements]
   );
 
   const calibrateAmbientNoise = useCallback(
-    (durationMs = 1800) => runMicrophoneCalibration('silence', durationMs),
+    (durationMs = 1800) => runMicrophoneCalibration('silence', durationMs).then(result => ({ ...result, measurement: measurementRef.current })),
     [runMicrophoneCalibration]
   );
 
   const calibrateVoiceLevel = useCallback(
-    (durationMs = 3200) => runMicrophoneCalibration('voice', durationMs),
+    (durationMs = 3200) => runMicrophoneCalibration('voice', durationMs).then(result => ({ ...result, measurement: measurementRef.current })),
     [runMicrophoneCalibration]
   );
 
@@ -767,7 +804,35 @@ export const useSilenceAdvance = ({
 
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
+    let nativeStartedAt: number | null = null;
     try {
+      const nativeInput = preferNativeInput ? getNativeLevelInput() : null;
+      if (nativeInput) {
+        const started = Date.now();
+        nativeStartedAt = started;
+        const capture = nativeInput.open(level => {
+          if (requestVersionRef.current !== requestVersion) return;
+          const at = getNow(); nativeSampleRef.current = { level, at };
+          const run = calibrationRunRef.current;
+          if (run) {
+            run.nativeSamples++; if (!run.firstNativeAt) run.firstNativeAt = at; run.lastNativeAt = at;
+            if (run.sampleStartedAt > 0) run.samples.push(level);
+          }
+        }, cause => {
+          if (requestVersionRef.current !== requestVersion) return;
+          microphoneInputFailureRef.current = cause;
+          microphoneInputDiagnosticRef.current = { ...microphoneInputDiagnosticRef.current!, status: 'error', errorName: cause.name, errorMessage: cause.message.slice(0, 300) };
+          void releaseListeningInput().catch(() => {});
+        });
+        nativeCaptureRef.current = capture;
+        await waitForNativeLevelInput(capture.ready);
+        if (requestVersionRef.current !== requestVersion) return;
+        measurementRef.current = 'native_peak'; setMicrophoneCalibrationMeasurement('native_peak');
+        microphoneInputDiagnosticRef.current = { ...microphoneInputDiagnosticRef.current!, attempts: [{ profile: 'native_peak', status: 'ready', elapsedMs: Date.now() - started, errorName: null, errorMessage: null }] };
+        processedLineKeyRef.current = null; resetTrackingState(); setListeningStatus('active'); monitorSignal();
+        return;
+      }
+      measurementRef.current = 'rms'; setMicrophoneCalibrationMeasurement('rms');
       const reusableStream = getReusableStream();
       const capture = reusableStream ? null : await captureMicrophoneInput({
         android: getMicrophoneInputContext().startsWith('android-'), preferredProfile: captureProfileRef.current,
@@ -823,9 +888,14 @@ export const useSilenceAdvance = ({
       monitorSignal();
     } catch (error) {
       if (requestVersionRef.current !== requestVersion) return;
-      await releaseListening();
+      try { await releaseListening(); } catch { /* The native controller keeps unconfirmed input closed to TTS/ASR. */ }
       if (requestVersionRef.current !== requestVersion + 1) return;
       microphoneInputFailureRef.current = asMicrophoneInputError(error);
+      if (nativeStartedAt !== null && !microphoneInputDiagnosticRef.current?.attempts.length) {
+        microphoneInputDiagnosticRef.current = { ...microphoneInputDiagnosticRef.current!, attempts: [{ profile: 'native_peak', status: 'error',
+          elapsedMs: Math.max(0, Date.now() - nativeStartedAt), errorName: microphoneInputFailureRef.current.name.slice(0, 80),
+          errorMessage: microphoneInputFailureRef.current.message.slice(0, 300) }] };
+      }
       microphoneInputDiagnosticRef.current = { ...microphoneInputDiagnosticRef.current!, status: 'error',
         errorName: microphoneInputFailureRef.current.name.slice(0, 80),
         errorMessage: microphoneInputFailureRef.current.message.slice(0, 300) };
@@ -837,6 +907,8 @@ export const useSilenceAdvance = ({
     isListeningSupported,
     listeningStatus,
     monitorSignal,
+    preferNativeInput,
+    releaseListeningInput,
     releaseListening,
     resetTrackingState,
   ]);
@@ -856,6 +928,7 @@ export const useSilenceAdvance = ({
     microphoneCalibrationProgress,
     microphoneNoiseFloor,
     microphoneVoiceLevel,
+    microphoneCalibrationMeasurement,
     lineStateLabel,
     calibrateAmbientNoise,
     calibrateVoiceLevel,

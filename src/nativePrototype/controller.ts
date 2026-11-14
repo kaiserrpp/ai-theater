@@ -1,6 +1,6 @@
 import type { BridgeCommand, BridgeEvent } from './protocol';
 
-type Run = { id: string; cancelled: boolean; started: boolean; closing: boolean; audioEnded: boolean; closed: Promise<void>; resolve: () => void };
+type Run = { id: string; kind: 'recognition' | 'microphone'; cancelled: boolean; started: boolean; closing: boolean; audioEnded: boolean; closed: Promise<void>; resolve: () => void };
 type SpeechOptions = { lang: string; rate: number; pitch: number; volume: number; voice?: string;
   onStart: () => void; onDone: () => void; onError: (message: string) => void };
 type Dependencies = {
@@ -13,6 +13,8 @@ type Dependencies = {
   speak: (text: string, options: SpeechOptions) => void;
   stopSpeech: () => Promise<void>;
   voices: () => Promise<NonNullable<BridgeEvent['voices']>>;
+  startLevelInput?: (onLevel: (level: number) => void, onError: (message: string) => void) => Promise<void>;
+  stopLevelInput?: () => Promise<void>;
 };
 
 // This controller exclusively owns the installed app's native recognizer. Its
@@ -23,20 +25,25 @@ export const createNativePrototypeController = (deps: Dependencies) => {
   let pendingSpeech: BridgeCommand | null = null, speaking: string | null = null;
   let speechStop: Promise<void> = Promise.resolve();
   const emit = (event: BridgeEvent) => { if (!disposed) deps.emit(event); };
-  const error = (id: string | undefined, message: string, kind = 'audio-capture') =>
-    emit({ type: 'recognition.error', id, error: kind, message });
+  const error = (id: string | undefined, message: string, kind = 'audio-capture', source = 'recognition') =>
+    emit({ type: `${source}.error`, id, error: kind, message });
   const finishInput = (run: Run) => {
     if (input !== run) return;
-    if (!run.audioEnded) emit({ type: 'recognition.audioend', id: run.id });
-    input = null; run.resolve(); emit({ type: 'recognition.end', id: run.id });
+    if (run.kind === 'recognition' && !run.audioEnded) emit({ type: 'recognition.audioend', id: run.id });
+    input = null; run.resolve(); emit({ type: `${run.kind}.end`, id: run.id });
   };
   const cancelInput = (run: Run, final = false) => {
     if (run.closing) {
-      if (!final && !run.cancelled && run.started) { run.cancelled = true; deps.abortRecognition(); }
+      if (run.kind === 'recognition' && !final && !run.cancelled && run.started) { run.cancelled = true; deps.abortRecognition(); }
       return;
     }
     run.cancelled = !final; run.closing = true;
     if (!run.started) { finishInput(run); return; }
+    if (run.kind === 'microphone') {
+      void deps.stopLevelInput!().then(() => finishInput(run)).catch(cause =>
+        error(run.id, cause instanceof Error ? cause.message : 'No se pudo cerrar el grabador nativo.', 'audio-capture', run.kind));
+      return;
+    }
     try { if (final) deps.stopRecognition(); else deps.abortRecognition(); }
     catch (cause) { error(run.id, cause instanceof Error ? cause.message : 'No se pudo cerrar la entrada nativa.'); }
   };
@@ -64,21 +71,42 @@ export const createNativePrototypeController = (deps: Dependencies) => {
       if (input) { const previous = input; cancelInput(previous); await waitClosed(previous); }
       if (pendingInput !== command || !foreground || disposed) return;
       let resolve: () => void = () => {};
-      const run: Run = { id: command.id, cancelled: false, started: false, closing: false, audioEnded: false,
+      const run: Run = { id: command.id, kind: command.type === 'microphone.start' ? 'microphone' : 'recognition', cancelled: false, started: false, closing: false, audioEnded: false,
         closed: new Promise<void>(done => { resolve = done; }), resolve: () => resolve() };
       input = run; pendingInput = null;
       const granted = await deps.requestPermission();
       if (input !== run || run.cancelled || !foreground || disposed) return;
-      if (!granted) { error(run.id, 'Permite el micrófono y el reconocimiento de voz en los ajustes de esta app.', 'not-allowed'); finishInput(run); return; }
+      if (!granted) { error(run.id, 'Permite el micrófono y el reconocimiento de voz en los ajustes de esta app.', 'not-allowed', run.kind); finishInput(run); return; }
+      if (run.kind === 'microphone') {
+        if (!deps.startLevelInput || !deps.stopLevelInput) {
+          error(run.id, 'Este instalador no ofrece captura nativa de nivel.', 'audio-capture', run.kind); finishInput(run); return;
+        }
+        run.started = true;
+        try {
+          await deps.startLevelInput(level => {
+            if (input === run && !run.closing && Number.isFinite(level)) emit({ type: 'microphone.level', id: run.id, level: Math.max(0, Math.min(1, level)) });
+          }, message => {
+            if (input !== run || run.closing) return;
+            error(run.id, message, 'audio-capture', run.kind); cancelInput(run);
+          });
+          if (input === run && !run.closing) emit({ type: 'microphone.start', id: run.id });
+        } catch (cause) {
+          error(run.id, cause instanceof Error ? cause.message : 'No se pudo iniciar el grabador nativo.', 'audio-capture', run.kind);
+          // startLevelInput cleans up a failed prepare before rejecting.
+          finishInput(run);
+        }
+        return;
+      }
       if (!deps.isRecognitionAvailable()) { error(run.id, 'El reconocedor del teléfono no está disponible.', 'service-not-allowed'); finishInput(run); return; }
       run.started = true;
       try { deps.startRecognition({ lang: command.lang || 'es-ES', continuous: command.continuous === true }); }
       catch (cause) { error(run.id, cause instanceof Error ? cause.message : 'No se pudo iniciar la escucha.'); finishInput(run); }
     } catch (cause) {
       if (pendingInput === command) pendingInput = null;
-      error(command.id, cause instanceof Error ? cause.message : 'No se pudo preparar la escucha.');
+      const source = command.type === 'microphone.start' ? 'microphone' : 'recognition';
+      error(command.id, cause instanceof Error ? cause.message : 'No se pudo preparar la escucha.', 'audio-capture', source);
       if (input && input.id === command.id && !input.started) finishInput(input);
-      else emit({ type: 'recognition.end', id: command.id });
+      else emit({ type: `${source}.end`, id: command.id });
     }
   };
   const startSpeech = async (command: BridgeCommand) => {
@@ -104,20 +132,25 @@ export const createNativePrototypeController = (deps: Dependencies) => {
     }
   };
   return {
+    resetDocument: () => {
+      pendingInput = null;
+      if (input) cancelInput(input);
+      void cancelSpeech().catch(() => {});
+    },
     handle: (command: BridgeCommand) => {
       if (disposed) return;
       if (command.type === 'hello') {
         emit({ type: 'visibility', foreground });
         void deps.voices().then(voices => emit({ type: 'voices', voices })).catch(() => {});
-      } else if (command.type === 'recognition.start') void startInput(command);
-      else if (command.type === 'recognition.abort' || command.type === 'recognition.stop') {
-        if (pendingInput && pendingInput.id === command.id) { pendingInput = null; emit({ type: 'recognition.end', id: command.id }); }
+      } else if (command.type === 'recognition.start' || command.type === 'microphone.start') void startInput(command);
+      else if (command.type === 'recognition.abort' || command.type === 'recognition.stop' || command.type === 'microphone.stop') {
+        if (pendingInput && pendingInput.id === command.id) { pendingInput = null; emit({ type: `${command.type === 'microphone.stop' ? 'microphone' : 'recognition'}.end`, id: command.id }); }
         if (input && input.id === command.id) cancelInput(input, command.type === 'recognition.stop');
       } else if (command.type === 'speech.start') void startSpeech(command);
       else if (command.type === 'speech.cancel') void cancelSpeech().catch(() => {});
     },
     recognitionEvent: (type: string, data: { text?: string; isFinal?: boolean; error?: string; message?: string } = {}) => {
-      if (!input || disposed) return;
+      if (!input || input.kind !== 'recognition' || disposed) return;
       const run = input;
       if (type === 'audioend') run.audioEnded = true;
       if (type === 'end') { finishInput(run); return; }
@@ -129,7 +162,7 @@ export const createNativePrototypeController = (deps: Dependencies) => {
     setForeground: (value: boolean) => {
       foreground = value; emit({ type: 'visibility', foreground });
       if (!value) {
-        if (pendingInput) { emit({ type: 'recognition.end', id: pendingInput.id }); pendingInput = null; }
+        if (pendingInput) { emit({ type: `${pendingInput.type === 'microphone.start' ? 'microphone' : 'recognition'}.end`, id: pendingInput.id }); pendingInput = null; }
         if (input) cancelInput(input);
         void cancelSpeech().catch(() => {});
       }

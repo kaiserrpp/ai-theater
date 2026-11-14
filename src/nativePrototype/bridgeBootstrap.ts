@@ -4,12 +4,19 @@ import type { NativePlatform } from './protocol';
 // as executable source. This runs before the existing web application loads.
 const BOOTSTRAP = String.raw`(function(config) {
   if (window.__AI_THEATRE_NATIVE_V1__) return;
-  var info = { protocol: 1, platform: config.platform, appVersion: config.appVersion, foreground: true };
+  var info = { protocol: 1, platform: config.platform, appVersion: config.appVersion, foreground: true, nativeLevelInput: config.platform==='android'&&config.nativeLevelInput===true };
   // A WebView navigation creates another JS world while the native host can
   // still be closing the previous world's input/output. Never reuse its IDs.
   var pageId = Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
-  var count = 0, inputs = new Map(), speech = null, voices = [];
+  var count = 0, inputs = new Map(), meters = new Map(), speech = null, voices = [];
   function send(data) { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({channel:'ai-theatre-native',protocol:1},data))); }
+  if(info.nativeLevelInput)window.__AI_THEATRE_NATIVE_LEVEL_INPUT__={open:function(onLevel,onError){
+    var item={id:'m-'+pageId+'-'+(++count),started:false,ending:false,onLevel:onLevel,onError:onError};
+    item.ready=new Promise(function(resolve,reject){item.resolveReady=resolve;item.rejectReady=reject;});
+    item.closed=new Promise(function(resolve){item.resolveClosed=resolve;});
+    item.stop=function(){if(!item.ending){item.ending=true;send({type:'microphone.stop',id:item.id});}return item.closed;};
+    meters.set(item.id,item);send({type:'microphone.start',id:item.id});return item;
+  }};
   class Recognition {
     constructor() { this.lang='es-ES';this.continuous=false;this.interimResults=true;this.maxAlternatives=1;this.id=null;this.finals=[];this.ending=false; }
     start() {
@@ -31,6 +38,19 @@ const BOOTSTRAP = String.raw`(function(config) {
     }
   };
   window.__AI_THEATRE_NATIVE_RECEIVE__=function(event){
+    if(event.type.indexOf('microphone.')===0){
+      var m=meters.get(event.id);if(!m)return;
+      if(event.type==='microphone.start'){m.started=true;m.resolveReady();}
+      else if(event.type==='microphone.level'){if(!m.ending&&typeof event.level==='number'&&isFinite(event.level))m.onLevel(Math.max(0,Math.min(1,event.level)));}
+      else if(event.type==='microphone.error'){
+        var cause=new Error(event.message||'Falló la captura nativa del micrófono.');cause.name=event.error==='not-allowed'?'NotAllowedError':'NativeCaptureError';
+        if(!m.started)m.rejectReady(cause);else if(m.onError)m.onError(cause);
+      }else if(event.type==='microphone.end'){
+        meters.delete(event.id);m.resolveClosed();
+        if(!m.started)m.rejectReady(new Error('microphone-input-cancelled'));
+        else if(!m.ending&&m.onError)m.onError(new Error('La captura nativa ha terminado antes de cerrar la medición.'));
+      }return;
+    }
     if(event.type==='visibility'){
       info.foreground=event.foreground===true;
       window.dispatchEvent(new Event('ai-theatre-native-visibility'));return;
@@ -62,5 +82,5 @@ const BOOTSTRAP = String.raw`(function(config) {
   send({type:'hello'});
 })`;
 
-export const nativeBridgeBootstrap = (config: { platform: NativePlatform; appVersion: string }) =>
+export const nativeBridgeBootstrap = (config: { platform: NativePlatform; appVersion: string; nativeLevelInput?: boolean }) =>
   `${BOOTSTRAP}(${JSON.stringify(config)});true;`;

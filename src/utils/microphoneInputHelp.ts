@@ -36,7 +36,7 @@ export const getMicrophoneInputErrorMessage = (cause: unknown, context = getMicr
   if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
     return 'No se encuentra un micrófono disponible. Comprueba que el dispositivo tenga una entrada de audio conectada y vuelve a intentar la calibración.';
   }
-  if (error.name === 'NotReadableError' || error.name === 'TrackStartError' || error.name === 'AbortError') {
+  if (error.name === 'NotReadableError' || error.name === 'TrackStartError' || error.name === 'AbortError' || error.name === 'NativeCaptureError') {
     return 'El dispositivo no ha podido abrir la entrada de audio. Pulsa Reintentar calibración.';
   }
   if (error.message === 'audio-context-not-running') {

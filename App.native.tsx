@@ -4,6 +4,9 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
 import * as Speech from 'expo-speech';
+import { AudioModule, RecordingPresets } from 'expo-audio';
+import { deleteAsync } from 'expo-file-system/legacy';
+import { createNativeLevelInput } from './src/nativePrototype/levelInput';
 import appManifest from './app.json';
 import packageInfo from './package.json';
 import { nativeBridgeBootstrap } from './src/nativePrototype/bridgeBootstrap';
@@ -17,7 +20,17 @@ function NativePrototype() {
   const web = useRef<WebView>(null);
   const [permission, setPermission] = useState<'checking' | 'needed' | 'ready'>('checking');
   const [error, setError] = useState('');
-  const bootstrap = useMemo(() => nativeBridgeBootstrap({ platform, appVersion: packageInfo.version }), []);
+  const bootstrap = useMemo(() => nativeBridgeBootstrap({ platform, appVersion: packageInfo.version, nativeLevelInput: platform === 'android' }), []);
+  const levelInput = useMemo(() => createNativeLevelInput({
+    createRecorder: () => {
+      const recorder = new AudioModule.AudioRecorder({ ...RecordingPresets.HIGH_QUALITY,
+        ...RecordingPresets.HIGH_QUALITY.android, numberOfChannels: 1, isMeteringEnabled: true });
+      return { get uri() { return recorder.uri; }, prepareToRecordAsync: () => recorder.prepareToRecordAsync(),
+        record: () => recorder.record({ forDuration: 30 }), getStatus: () => recorder.getStatus(),
+        stop: () => recorder.stop(), release: () => recorder.release() };
+    },
+    deleteRecording: uri => deleteAsync(uri, { idempotent: true }),
+  }), []);
   const controller = useMemo(() => createNativePrototypeController({
     emit: event => web.current?.injectJavaScript(`window.__AI_THEATRE_NATIVE_RECEIVE__ && window.__AI_THEATRE_NATIVE_RECEIVE__(${JSON.stringify(event)});true;`),
     requestPermission: async () => (await ExpoSpeechRecognitionModule.getPermissionsAsync()).granted,
@@ -40,7 +53,9 @@ function NativePrototype() {
     stopSpeech: () => Speech.stop(),
     voices: async () => (await Speech.getAvailableVoicesAsync()).map(voice => ({ id: voice.identifier,
       name: voice.name, lang: voice.language, default: voice.language.toLowerCase().startsWith('es-es') })),
-  }), []);
+    startLevelInput: levelInput.start,
+    stopLevelInput: levelInput.stop,
+  }), [levelInput]);
   useEffect(() => {
     let live = true;
     void ExpoSpeechRecognitionModule.getPermissionsAsync().then(value => {
@@ -100,6 +115,7 @@ function NativePrototype() {
           if (request.isTopFrame !== false && /^https:\/\//i.test(request.url)) void Linking.openURL(request.url);
           return false;
         }}
+        onLoadStart={() => controller.resetDocument()}
         onLoadEnd={() => controller.handle({ channel: 'ai-theatre-native', protocol: 1, type: 'hello' })}
         onError={() => { controller.setForeground(false); setError('No se ha podido abrir la obra. Comprueba la conexión y reintenta.'); }}
       />}

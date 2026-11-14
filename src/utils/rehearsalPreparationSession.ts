@@ -28,6 +28,7 @@ export const createRehearsalPreparationSession = () => {
       return () => { listeners.delete(listener); };
     },
     confirmSpeaker: () => update({ ...snapshot, speakerConfirmed: true }),
+    resetCalibration: () => update({ ...snapshot, calibration: null }),
     rememberCalibration: (calibration: MicrophoneCalibrationSnapshot) => {
       if ((calibration.status !== 'ready' && calibration.status !== 'weak') ||
         !Number.isFinite(calibration.noiseFloor) || calibration.noiseFloor < 0 ||

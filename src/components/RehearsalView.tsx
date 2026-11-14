@@ -54,7 +54,7 @@ import {
 } from '../utils/lineMatching';
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
-import { getNativePrototypeInfo } from '../utils/nativePrototype';
+import { getNativeLevelInput, getNativePrototypeInfo } from '../utils/nativePrototype';
 import { getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
 import { getSpeechOutputErrorMessage, getSpeechOutputHelp } from '../utils/speechOutputHelp';
 import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
@@ -868,6 +868,8 @@ export const RehearsalView: React.FC<Props> = ({
     );
   }, [filteredGuion]);
 
+  const preferNativeLevelInput = Boolean(getNativeLevelInput()) && recognitionEngine === 'native' && listenModeSelection === 'intelligent';
+
   const {
     listeningStatus,
     listeningError,
@@ -880,6 +882,7 @@ export const RehearsalView: React.FC<Props> = ({
     voiceThreshold,
     microphoneNoiseFloor,
     microphoneVoiceLevel,
+    microphoneCalibrationMeasurement,
     microphoneCalibrationProgress,
     lineStateLabel,
     calibrateAmbientNoise,
@@ -893,6 +896,7 @@ export const RehearsalView: React.FC<Props> = ({
     releaseListeningInput,
     releaseListening,
   } = useSilenceAdvance({
+    preferNativeInput: preferNativeLevelInput,
     enabledForCurrentLine: shouldArmListeningForCurrentLine,
     lineKey: currentDialogueKey,
     onSilenceDetected: advanceLine,
@@ -929,7 +933,8 @@ export const RehearsalView: React.FC<Props> = ({
     context: shouldUseIntelligentRecognition ? recognitionContext : undefined,
     whisperLanguage: shouldListenForSceneCommand ? 'spanish' : 'auto',
     whisperMicrophoneCheck: isCheckingIntelligentRecognition,
-    whisperSpeechThreshold: getWhisperSegmentationThreshold(microphoneNoiseFloor, microphoneVoiceLevel),
+    whisperSpeechThreshold: getWhisperSegmentationThreshold(microphoneCalibrationMeasurement === 'rms' ? microphoneNoiseFloor : 0,
+      microphoneCalibrationMeasurement === 'rms' ? microphoneVoiceLevel : 0),
   });
 
   const comparisonHandlerRef = useRef<(result: RehearsalComparisonResult) => void>(() => {});
@@ -960,7 +965,8 @@ export const RehearsalView: React.FC<Props> = ({
   });
   const comparison = useRehearsalComparison({ selected: recognitionEngine === 'comparison', enabled: shouldUseRehearsalComparison,
     pageVisible, lineKey: currentLineVariantKey, lang: intelligentRecognitionLanguage, context: recognitionContext,
-    speechThreshold: getWhisperSegmentationThreshold(microphoneNoiseFloor, microphoneVoiceLevel),
+    speechThreshold: getWhisperSegmentationThreshold(microphoneCalibrationMeasurement === 'rms' ? microphoneNoiseFloor : 0,
+      microphoneCalibrationMeasurement === 'rms' ? microphoneVoiceLevel : 0),
     onResult: result => comparisonHandlerRef.current(result),
   });
   const { stop: stopComparison, finish: finishComparison, waitForEnd: waitForComparisonEnd,
@@ -2373,10 +2379,12 @@ export const RehearsalView: React.FC<Props> = ({
       if (!isCurrent()) return;
       stopRehearsalSpeech();
       disposeCalibrationAudio();
+      const inputFailure = getMicrophoneInputFailure();
       setRehearsalMediaStatus(error instanceof Error && error.message === 'calibration-voice-unavailable'
         ? 'No se ha podido reproducir la voz. Pulsa Reintentar calibración para activar el audio.'
         : error instanceof Error && error.message === 'calibration-beep-unavailable'
         ? 'No se ha podido reproducir el pitido. Pulsa Reintentar calibración para activar el audio.'
+        : inputFailure ? getMicrophoneInputErrorMessage(inputFailure)
         : error instanceof Error && error.message === 'voice-not-detected'
         ? 'No se ha detectado suficiente voz. Repite la calibración y habla después del pitido.'
         : getMicrophoneInputErrorMessage(error));
@@ -2828,7 +2836,11 @@ export const RehearsalView: React.FC<Props> = ({
     rehearsalAudioModeSelection === 'pending';
   const handleStartConfiguredRehearsal = useCallback(() => {
     if (listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') return;
-    const preparation = rehearsalPreparationSession.getSnapshot();
+    let preparation = rehearsalPreparationSession.getSnapshot();
+    const measurement = preferNativeLevelInput ? 'native_peak' : 'rms';
+    if (preparation.calibration && (preparation.calibration.measurement || 'rms') !== measurement) {
+      rehearsalPreparationSession.resetCalibration(); preparation = rehearsalPreparationSession.getSnapshot();
+    }
     const step = getRehearsalPreparationStep(listenModeSelection, preparation);
     preparationRunRef.current += 1;
     setHasConfirmedRehearsalSetup(true); setSpeakerConfirmed(preparation.speakerConfirmed);
@@ -2845,7 +2857,7 @@ export const RehearsalView: React.FC<Props> = ({
     else finishRehearsalPreparation();
   }, [applyMicrophoneCalibration, calibrateRehearsalMicrophone, enableIntelligentListenForDevice,
     finishRehearsalPreparation, listenModeSelection, prepareRehearsalMedia, primeSongPlayback,
-    rehearsalAudioModeSelection, spokenOnly, stopRecognition]);
+    rehearsalAudioModeSelection, spokenOnly, stopRecognition, preferNativeLevelInput]);
 
   if (isExitingRehearsal) {
     return <View style={styles.container}>
@@ -3204,7 +3216,7 @@ export const RehearsalView: React.FC<Props> = ({
           {isCalibrating ? <>
             <View style={styles.microCalibrationMeterTrack}><View style={[styles.microCalibrationMeterFill, { width: `${Math.max(4, Math.round(signalLevel * 100))}%`, backgroundColor: palette.plum }]} /></View>
             <Text style={ui.text}>Nivel de entrada: {Math.round(rawLevel * 100)}% · {Math.round(microphoneCalibrationProgress * 100)}%</Text>
-            {listeningError ? <Text style={ui.error}>{listeningError}</Text> : null}
+            {listeningError && listeningError !== rehearsalMediaStatus ? <Text style={ui.error}>{listeningError}</Text> : null}
             <Button label={isPreparingRehearsalMedia ? 'Calibrando…' : 'Reintentar calibración'} disabled={isPreparingRehearsalMedia} onPress={() => void calibrateRehearsalMicrophone()} />
             {!isPreparingRehearsalMedia && getMicrophoneInputDiagnostic()?.status === 'error' ? <>
               <Button label={isSendingFeedback ? 'Enviando diagnóstico…' : 'Enviar diagnóstico'} secondary disabled={isSendingFeedback} onPress={() => void sendMicrophoneDiagnostic()} />

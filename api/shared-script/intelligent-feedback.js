@@ -47,7 +47,7 @@ const normalizeMicrophoneDiagnostic = value => {
   return { kind: 'microphone_input', status: 'error', stage: value.stage,
     errorName: clampText(value.errorName).slice(0, 80), errorMessage: clampText(value.errorMessage).slice(0, 300),
     attempts: Array.isArray(value.attempts) ? value.attempts.slice(0, 2)
-      .filter(attempt => attempt && ['processed', 'unprocessed'].includes(attempt.profile) && ['ready', 'error'].includes(attempt.status))
+      .filter(attempt => attempt && ['processed', 'unprocessed', 'native_peak'].includes(attempt.profile) && ['ready', 'error'].includes(attempt.status))
       .map(attempt => ({ profile: attempt.profile, status: attempt.status,
         elapsedMs: typeof attempt.elapsedMs === 'number' && Number.isFinite(attempt.elapsedMs)
           ? Math.max(0, Math.min(180000, Math.round(attempt.elapsedMs))) : null,

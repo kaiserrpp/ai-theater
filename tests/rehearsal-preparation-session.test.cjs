@@ -13,6 +13,15 @@ if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
 
 const calibration = { status: 'ready', noiseFloor: 0.01, voiceLevel: 0.2, voiceThreshold: 0.04, voiceToNoiseRatio: 20 };
+test('changing the measurement scale can retire calibration without losing the confirmed speaker or engine evidence', () => {
+  const session = createSession(); session.confirmSpeaker();
+  session.rememberCalibration({ ...calibration, measurement: 'native_peak' });
+  session.confirmRecognitionOutput('prueba de micro', 'native');
+  assert.equal(session.getSnapshot().calibration.measurement, 'native_peak');
+  session.resetCalibration(); assert.equal(session.getSnapshot().calibration, null);
+  assert.equal(session.getSnapshot().speakerConfirmed, true); assert.equal(session.hasConfirmedRecognitionEngine('native'), true);
+  assert.equal(nextStep('intelligent', session.getSnapshot()), 'microphone');
+});
 test('switching recognition engines preserves speaker and calibration but requires words from the new engine', () => {
   const session = createSession(); session.confirmSpeaker(); session.rememberCalibration(calibration);
   session.confirmRecognitionOutput('prueba de micro', 'vosk');

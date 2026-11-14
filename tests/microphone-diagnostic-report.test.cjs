@@ -33,7 +33,12 @@ test('a preparation diagnostic can be sent without scene results, with bounded e
   assert.equal(report.microphoneDiagnostic.attempts[1].elapsedMs, null);
   assert.equal(report.microphoneDiagnostic.attempts[1].errorMessage.length, 300);
   assert(!JSON.stringify(report).includes('0.42'));
+  const native = response();
+  await handler({ method: 'POST', body: { sessionId: 'native-meter', scriptId: 'work', entries: [], microphoneDiagnostic: {
+    ...diagnostic, attempts: [{ profile: 'native_peak', status: 'error', errorName: 'NativeCaptureError', errorMessage: 'native device failed', elapsedMs: 100 }],
+  } } }, native);
+  assert.equal(native.code, 200); assert.equal(saved[1].body.microphoneDiagnostic.attempts[0].profile, 'native_peak');
   const invalid = response();
   await handler({ method: 'POST', body: { entries: [], microphoneDiagnostic: { ...diagnostic, kind: 'anything' } } }, invalid);
-  assert.equal(invalid.code, 400); assert.equal(saved.length, 1);
+  assert.equal(invalid.code, 400); assert.equal(saved.length, 2);
 });
