@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { asMicrophoneInputError, getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
 
 type ListeningStatus = 'unsupported' | 'idle' | 'requesting' | 'active' | 'error';
 type MicrophoneCalibrationStatus =
@@ -51,6 +52,7 @@ interface UseSilenceAdvanceResult {
   applyMicrophoneCalibration: (snapshot: MicrophoneCalibrationSnapshot) => void;
   resetMicrophoneCalibration: () => void;
   startListening: () => Promise<void>;
+  getMicrophoneInputFailure: () => Error | null;
   stopListening: () => Promise<void>;
   releaseListeningInput: () => Promise<void>;
   releaseListening: () => Promise<void>;
@@ -188,6 +190,8 @@ export const useSilenceAdvance = ({
   const lastUiUpdateRef = useRef(0);
   const lastFrameTimestampRef = useRef(0);
   const requestVersionRef = useRef(0);
+  const microphoneInputFailureRef = useRef<Error | null>(null);
+  const getMicrophoneInputFailure = useCallback(() => microphoneInputFailureRef.current, []);
 
   const isListeningSupported = useMemo(isListeningSupportedOnDevice, []);
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>(
@@ -315,13 +319,13 @@ export const useSilenceAdvance = ({
       analyserRef.current = null;
     }
 
+    samplesRef.current = null;
+
     if (audioContextRef.current) {
       const context = audioContextRef.current;
       audioContextRef.current = null;
       await context.close().catch(() => undefined);
     }
-
-    samplesRef.current = null;
   }, []);
 
   const prepareLineTracking = useCallback((lineToken: string, timestamp: number) => {
@@ -346,9 +350,11 @@ export const useSilenceAdvance = ({
   }, []);
 
   const stopListening = useCallback(async () => {
-    requestVersionRef.current += 1;
+    const version = ++requestVersionRef.current;
+    const stream = getReusableStream();
     await teardownAudioGraph();
-    getReusableStream()?.getAudioTracks().forEach((track) => {
+    if (requestVersionRef.current !== version) return;
+    stream?.getAudioTracks().forEach((track) => {
       track.enabled = false;
     });
     processedLineKeyRef.current = null;
@@ -358,15 +364,16 @@ export const useSilenceAdvance = ({
   }, [getReusableStream, isListeningSupported, resetTrackingState, teardownAudioGraph]);
 
   const releaseListeningInput = useCallback(async () => {
-    requestVersionRef.current += 1;
+    const version = ++requestVersionRef.current;
+    const currentStream = streamRef.current;
+    streamRef.current = null;
     await teardownAudioGraph();
 
-    const currentStream = streamRef.current;
     if (currentStream) {
       currentStream.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
     }
 
+    if (requestVersionRef.current !== version) return;
     processedLineKeyRef.current = null;
     resetTrackingState();
     setListeningStatus(isListeningSupported ? 'idle' : 'unsupported');
@@ -374,8 +381,9 @@ export const useSilenceAdvance = ({
   }, [isListeningSupported, resetTrackingState, teardownAudioGraph]);
 
   const releaseListening = useCallback(async () => {
+    const version = requestVersionRef.current + 1;
     await releaseListeningInput();
-    resetMicrophoneCalibration();
+    if (requestVersionRef.current === version) resetMicrophoneCalibration();
   }, [releaseListeningInput, resetMicrophoneCalibration]);
 
   useEffect(() => () => {
@@ -734,8 +742,10 @@ export const useSilenceAdvance = ({
 
   const startListening = useCallback(async () => {
     if (!isListeningSupported) {
+      const error = new Error('microphone-input-unsupported');
+      microphoneInputFailureRef.current = error;
       setListeningStatus('unsupported');
-      setListeningError('La escucha automatica no esta disponible en este navegador.');
+      setListeningError(getMicrophoneInputErrorMessage(error));
       return;
     }
 
@@ -745,10 +755,11 @@ export const useSilenceAdvance = ({
 
     setListeningStatus('requesting');
     setListeningError(null);
+    microphoneInputFailureRef.current = null;
 
+    const requestVersion = requestVersionRef.current + 1;
+    requestVersionRef.current = requestVersion;
     try {
-      const requestVersion = requestVersionRef.current + 1;
-      requestVersionRef.current = requestVersion;
       const reusableStream = getReusableStream();
       const mediaStream =
         reusableStream ??
@@ -760,6 +771,13 @@ export const useSilenceAdvance = ({
           },
         }));
 
+      if (requestVersionRef.current !== requestVersion) {
+        if (!reusableStream) mediaStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      // Own resources as soon as they are acquired, so a failed AudioContext
+      // or graph cannot leave a physical microphone open during a retry.
+      streamRef.current = mediaStream;
       mediaStream.getAudioTracks().forEach((track) => {
         track.enabled = true;
       });
@@ -770,46 +788,34 @@ export const useSilenceAdvance = ({
       }
 
       const audioContext = new AudioContextConstructor();
+      audioContextRef.current = audioContext;
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
       }
 
+      // A release/new attempt can happen while resume() is pending. It owns
+      // the cleanup; the cancelled attempt must not touch the new graph.
+      if (requestVersionRef.current !== requestVersion) return;
+      if (audioContext.state !== 'running') throw new Error('audio-context-not-running');
+
       const sourceNode = audioContext.createMediaStreamSource(mediaStream);
+      sourceNodeRef.current = sourceNode;
       const analyser = audioContext.createAnalyser();
+      analyserRef.current = analyser;
       analyser.fftSize = 2048;
       sourceNode.connect(analyser);
 
-      if (requestVersionRef.current !== requestVersion) {
-        sourceNode.disconnect();
-        analyser.disconnect();
-        if (!reusableStream) {
-          mediaStream.getTracks().forEach((track) => track.stop());
-        }
-        void audioContext.close().catch(() => undefined);
-        return;
-      }
-
-      streamRef.current = mediaStream;
-      audioContextRef.current = audioContext;
-      sourceNodeRef.current = sourceNode;
-      analyserRef.current = analyser;
       samplesRef.current = new Uint8Array(analyser.fftSize);
       processedLineKeyRef.current = null;
       resetTrackingState();
       setListeningStatus('active');
       monitorSignal();
     } catch (error) {
+      if (requestVersionRef.current !== requestVersion) return;
       await releaseListening();
-
-      const errorName =
-        error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-
-      if (errorName === 'NotAllowedError' || errorName === 'SecurityError') {
-        setListeningError('Necesitamos permiso de microfono para activar la escucha automatica.');
-      } else {
-        setListeningError('No se pudo activar la escucha automatica.');
-      }
-
+      if (requestVersionRef.current !== requestVersion + 1) return;
+      microphoneInputFailureRef.current = asMicrophoneInputError(error);
+      setListeningError(getMicrophoneInputErrorMessage(error));
       setListeningStatus('error');
     }
   }, [
@@ -842,6 +848,7 @@ export const useSilenceAdvance = ({
     applyMicrophoneCalibration,
     resetMicrophoneCalibration,
     startListening,
+    getMicrophoneInputFailure,
     stopListening,
     releaseListeningInput,
     releaseListening,

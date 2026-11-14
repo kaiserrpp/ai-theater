@@ -8,11 +8,19 @@ El reconocedor instalado puede cancelar su captura propia al aceptar una réplic
 
 - Preparados el código de iPhone/Android, el puente con el ensayo existente y el perfil de compilación interna. Proyecto vinculado: [@kaiserpps-team/ai-theatre](https://expo.dev/accounts/kaiserpps-team/projects/ai-theatre), identificador público `7f254bd3-5532-490c-8114-a149d7c28132`.
 - El instalador y la rapidez/calidad física requieren una compilación firmada y una prueba en los teléfonos. Una exportación JavaScript o un ensayo con eventos simulados no demuestra funcionamiento físico.
-- El usuario tiene un iPhone 15 Pro Max y cuenta Expo. Aún no dispone de membresía Apple Developer ni de un Android para probar el micrófono real.
+- El usuario tiene un iPhone 15 Pro Max, cuenta Expo y, desde el 14/11, una tablet Lenovo física para probar Android. El modelo y la versión de Android aún no se conocen. No dispone de membresía Apple Developer.
 - El reconocimiento utiliza las API del sistema, sin claves de servicios de transcripción de pago. Puede requerir conexión según el servicio, el idioma y los modelos disponibles; esta entrega no promete uso totalmente sin conexión.
 - Vosk/Whisper/Comparativa continúan disponibles en la web y en la interfaz reutilizada; su funcionamiento en cada WebView instalada necesita validación independiente. La primera prueba debe seleccionar «Apple · iPhone · reconocimiento nativo» o «Android · reconocimiento nativo».
 
-## Verificación del 13/11/2026
+## Calibración en la tablet Lenovo · 14/11/2026
+
+La web **2026.11.227** conserva el error real al abrir la captura de calibración. Un permiso bloqueado muestra la ruta de la aplicación instalada (**Configuración/Ajustes → Aplicaciones → AI-Theatre → Permisos → Micrófono**) o la de Chrome (**⋮ → Configuración → Configuración de sitios → Micrófono**, además del permiso Android para Chrome). Una entrada ocupada/no disponible o un procesador de audio que no se activa tienen mensajes distintos. Si falla el arranque se libera el micro adquirido; un cierre o rechazo tardío de un intento anterior no borra una captura nueva.
+
+Es compatible con la APK **2026.11.225**: basta cerrar y abrir AI-Theatre para cargar la web publicada, sin reinstalar ni borrar datos. No cambia el reconocimiento seleccionado, Inteligente, los umbrales ni las pausas. El altavoz ya confirmado se conserva al reintentar la calibración.
+
+Pasaron 329 pruebas, lint, TypeScript y exportación web. En navegador se comprobaron errores de permiso y entrada inyectados, las rutas distintas de APK/Chrome y el reintento de calibración sin repetir altavoz; también dos escenas, «adelante» final, pausa de 14 s, fondo e informes parciales mediante el puente real con captura/voz simuladas. **La calibración del micrófono físico de la tablet sigue pendiente de confirmación del usuario**; no se ha establecido que su causa sea el permiso denegado.
+
+## Verificación del prototipo y de BlueStacks · 13–14/11/2026
 
 La web **2026.11.226** mejora el fallo de la prueba de voz de Android y es compatible con la APK **2026.11.225** existente; no se ha generado otro instalador para este cambio. Conserva el error del servicio y, tras fallar una voz seleccionada, permite al sistema elegir su voz española en el único reintento. No cambia las reglas de Inteligente ni sus pausas.
 

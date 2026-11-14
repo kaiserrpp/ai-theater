@@ -23,7 +23,7 @@ Module._load = previousLoad;
 if (previousLoader) require.extensions['.ts'] = previousLoader;
 else delete require.extensions['.ts'];
 
-const fixture = (t) => {
+const fixture = (t, options = {}) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let now = 100;
   let sample = 128;
@@ -37,16 +37,20 @@ const fixture = (t) => {
     Object.defineProperty(global, name, { configurable: true, value });
   };
   class Context {
-    constructor() { this.state = 'running'; contexts.push(this); }
-    resume() { this.state = 'running'; return Promise.resolve(); }
-    close() { this.state = 'closed'; return Promise.resolve(); }
-    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    constructor() { this.state = options.suspended ? 'suspended' : 'running'; contexts.push(this); }
+    async resume() { if (options.resume) await options.resume(); this.state = 'running'; }
+    close() { this.state = 'closed'; return options.close ? options.close() : Promise.resolve(); }
+    createMediaStreamSource() {
+      if (options.graphError) throw options.graphError;
+      return { connect() {}, disconnect() {} };
+    }
     createAnalyser() {
       return { fftSize: 2048, disconnect() {}, getByteTimeDomainData: (samples) => samples.fill(sample) };
     }
   }
   setGlobal('window', { AudioContext: Context });
   setGlobal('navigator', { mediaDevices: { getUserMedia: async () => {
+    if (options.beforeCapture) await options.beforeCapture();
     const track = { enabled: true, readyState: 'live', stop() { this.readyState = 'ended'; } };
     const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
     streams.push(stream);
@@ -80,6 +84,90 @@ const fixture = (t) => {
   };
   return { hook, advance, measureNoise, streams, contexts };
 };
+
+test('a denied capture retains its actual error for calibration and a permitted retry clears it', async (t) => {
+  const denied = Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
+  let rejectCapture = true;
+  const f = fixture(t, { beforeCapture: async () => { if (rejectCapture) throw denied; } });
+  await f.hook.startListening();
+  assert.equal(f.hook.getMicrophoneInputFailure(), denied);
+  assert.equal(f.streams.length, 0);
+  rejectCapture = false;
+  await f.hook.startListening();
+  assert.equal(f.hook.getMicrophoneInputFailure(), null);
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'live');
+  assert.equal((await f.measureNoise()).status, 'ready');
+});
+
+test('an audio processor failure releases the acquired microphone before the next calibration attempt', async (t) => {
+  const denied = new Error('AudioContext could not resume');
+  let fail = true;
+  const f = fixture(t, { suspended: true, resume: async () => { if (fail) throw denied; } });
+  await f.hook.startListening();
+  assert.equal(f.hook.getMicrophoneInputFailure(), denied);
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'ended');
+  assert.equal(f.contexts[0].state, 'closed');
+  fail = false;
+  await f.hook.startListening();
+  assert.equal(f.streams.length, 2);
+  assert.equal(f.streams[1].getTracks()[0].readyState, 'live');
+  assert.equal(f.hook.getMicrophoneInputFailure(), null);
+});
+
+test('a failed audio graph releases its stream and preserves the device error', async (t) => {
+  const failure = Object.assign(new Error('Audio input is unavailable'), { name: 'NotReadableError' });
+  const f = fixture(t, { graphError: failure });
+  await f.hook.startListening();
+  assert.equal(f.hook.getMicrophoneInputFailure(), failure);
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'ended');
+  assert.equal(f.contexts[0].state, 'closed');
+});
+
+test('a capture granted after cancellation is released before creating another audio processor', async (t) => {
+  let allow;
+  const f = fixture(t, { beforeCapture: () => new Promise(resolve => { allow = resolve; }) });
+  const pending = f.hook.startListening();
+  await f.hook.releaseListeningInput();
+  allow();
+  await pending;
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'ended');
+  assert.equal(f.contexts.length, 0);
+  assert.equal(f.hook.getMicrophoneInputFailure(), null);
+});
+
+test('an old input release waiting for close cannot stop a new calibration stream', async (t) => {
+  let finishClose;
+  const options = { close: () => new Promise(resolve => { finishClose = resolve; }) };
+  const f = fixture(t, options);
+  await f.hook.startListening();
+  const release = f.hook.releaseListeningInput();
+  await f.hook.startListening();
+  options.close = undefined;
+  finishClose();
+  await release;
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'ended');
+  assert.equal(f.streams[1].getTracks()[0].readyState, 'live');
+  const noise = f.hook.calibrateAmbientNoise(1800);
+  f.advance(1900, 129);
+  assert.equal((await noise).status, 'ready');
+});
+
+test('a cancelled permission request rejected later cannot replace a working retry with an error', async (t) => {
+  let rejectOld;
+  let calls = 0;
+  const f = fixture(t, { beforeCapture: () => ++calls === 1
+    ? new Promise((resolve, reject) => { rejectOld = reject; }) : Promise.resolve() });
+  const old = f.hook.startListening();
+  await f.hook.releaseListeningInput();
+  await f.hook.startListening();
+  rejectOld(Object.assign(new Error('Old permission denied'), { name: 'NotAllowedError' }));
+  await old;
+  assert.equal(f.hook.getMicrophoneInputFailure(), null);
+  assert.equal(f.streams[0].getTracks()[0].readyState, 'live');
+  const noise = f.hook.calibrateAmbientNoise(1800);
+  f.advance(1900, 129);
+  assert.equal((await noise).status, 'ready');
+});
 
 test('the actor can wait more than 2.2 seconds after the beep before starting a quiet phrase', async (t) => {
   const f = fixture(t);

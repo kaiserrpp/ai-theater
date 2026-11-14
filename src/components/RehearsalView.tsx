@@ -55,6 +55,7 @@ import {
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
 import { getNativePrototypeInfo } from '../utils/nativePrototype';
+import { getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
 import { getSpeechOutputErrorMessage, getSpeechOutputHelp } from '../utils/speechOutputHelp';
 import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
 import { getAutomaticRehearsalTargetIndex, getSceneAdvanceRecognitionAction, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
@@ -883,6 +884,7 @@ export const RehearsalView: React.FC<Props> = ({
     resetMicrophoneCalibration,
     applyMicrophoneCalibration,
     startListening,
+    getMicrophoneInputFailure,
     stopListening,
     releaseListeningInput,
     releaseListening,
@@ -2335,7 +2337,11 @@ export const RehearsalView: React.FC<Props> = ({
             }
           } finally { URL.revokeObjectURL(silentUrl); }
         },
-        start: startListening, measureNoise: calibrateAmbientNoise,
+        start: async () => {
+          await startListening();
+          const failure = getMicrophoneInputFailure();
+          if (failure) throw failure;
+        }, measureNoise: calibrateAmbientNoise,
         prompt: () => playCalibrationVoice('Di prueba de micro después del pitido.', {
           speak: speakRehearsalSpeech, stop: () => { if (isCurrent()) stopRehearsalSpeech(); },
         }),
@@ -2367,13 +2373,13 @@ export const RehearsalView: React.FC<Props> = ({
         ? 'No se ha podido reproducir el pitido. Pulsa Reintentar calibración para activar el audio.'
         : error instanceof Error && error.message === 'voice-not-detected'
         ? 'No se ha detectado suficiente voz. Repite la calibración y habla después del pitido.'
-        : 'No se pudo calibrar el micrófono. Comprueba el permiso del navegador y vuelve a intentarlo.');
+        : getMicrophoneInputErrorMessage(error));
     } finally {
       if (isCurrent()) setIsPreparingRehearsalMedia(false);
     }
   }, [calibrateAmbientNoise, calibrateVoiceLevel, disposeCalibrationAudio, getCalibrationAudioPlayer,
     listenModeSelection, playMicroCalibrationBeep, releaseListeningInput, resetMicrophoneCalibration,
-    startListening, stopRecognition, stopSongAudio]);
+    getMicrophoneInputFailure, startListening, stopRecognition, stopSongAudio]);
 
   const advancePastMusicalNumber = useCallback((musicalNumberId: string | null) => {
     const musicalNumber = musicalNumberId
