@@ -160,3 +160,38 @@ test('the versioned protocol rejects oversized or sentence hints before native A
   assert(parseBridgeCommand(JSON.stringify({...base,hints:plan('Really?').hints})));
   assert(parseBridgeCommand(JSON.stringify(base)),'old clients remain compatible');
 });
+
+test('Android language fallback follows real end, retains words, and cannot resume an intentional pause', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  let active=false;const starts=[];
+  const window=Object.assign(new EventTarget(),{ReactNativeWebView:{postMessage:text=>controller.handle(parseBridgeCommand(text))}});
+  const runtime=createNativeRecognitionRuntime({platform:'android',androidVersion:35,onDevice:true,
+    getSupportedLocales:async()=>({locales:['es-ES','en-US'],installedLocales:['es-ES','en-US']}),
+    start:options=>{assert.equal(active,false);active=true;starts.push(options);controller.recognitionEvent('start');controller.recognitionEvent('audiostart');}});
+  const controller=createNativePrototypeController({emit:event=>window.__AI_THEATRE_NATIVE_RECEIVE__?.(event),
+    requestPermission:async()=>true,isRecognitionAvailable:()=>true,startRecognition:runtime.start,
+    abortRecognition:()=>runtime.stopped(),stopRecognition:()=>runtime.stopped(),voices:async()=>[],stopSpeech:async()=>{},
+    speak:()=>assert.fail('a language error must not advance to a spoken response')});
+  vm.runInNewContext(nativeBridgeBootstrap({platform:'android',appVersion:'2026.11.232',recognitionHints:true}),{window,Map,Event,JSON});
+  const session=createSpeechRecognitionSession(window.SpeechRecognition,()=>{}, {controlledEnd:true,getNativeHints:()=>plan('Tengo noticias. My English is getting much better.').hints});
+  t.after(()=>{session.dispose();controller.dispose();runtime.dispose()});
+  const end=()=>{active=false;runtime.stopped();controller.recognitionEvent('audioend');controller.recognitionEvent('end')};
+  await runtime.warm();session.configure({enabled:true,lang:'en-US',lineKey:'mixed'});await flush();
+  controller.recognitionEvent('result',{text:'Tengo noticias',isFinal:false});
+  assert.equal(runtime.recoverLanguageError('language-not-supported'),true);
+  controller.recognitionEvent('error',{error:'no-speech'});await flush();assert.equal(starts.length,1);
+  session.stop();end();t.mock.timers.tick(14000);await flush();
+  assert.equal(starts.length,1,'a manual pause wins over the pending fallback');
+  assert.equal(session.getSnapshot().transcript,'Tengo noticias');
+  session.activate({lang:'en-US',lineKey:'mixed',preserveTranscript:true});await flush();
+  assert.equal(starts.length,2);assert.equal(starts[1].androidIntentOptions,undefined);
+  assert.equal(session.getSnapshot().nativeRecognition.fallbackReason,'switch_rejected');
+  assert.equal(runtime.recoverLanguageError('language-not-supported'),true);
+  controller.recognitionEvent('error',{error:'no-speech'});await flush();assert.equal(starts.length,2);
+  end();t.mock.timers.tick(0);await flush();
+  assert.equal(starts.length,3);assert.equal(starts[2].requiresOnDeviceRecognition,false);
+  assert.equal(runtime.recoverLanguageError('language-not-supported'),false,'no repeated fallback loop');
+  controller.recognitionEvent('result',{text:'My English is getting much better',isFinal:true});
+  assert.equal(session.getSnapshot().transcript,'Tengo noticias My English is getting much better');
+  session.stop();end();
+});
