@@ -104,3 +104,32 @@ test('Spanish words, names and other English sentences retain their original mea
   assert.equal(accepts(englishLine, 'Tengo noticias. My English is getting much better.'), true);
   assert.equal(accepts(dialectLine, dialectLine), true);
 });
+
+test('the three confirmed APK 232 confusions accept only in their matching script reply without changing the stored reference', () => {
+  for (const [expected, heard] of [['Ey, sonny', 'hey honey'], ['Sure (se rie)', 'sore'], ['Sure (se rie)', 'so so']]) {
+    const result = scoreLineMatch(expected, heard);
+    assert.equal(result.referenceText, expected);
+    assert.equal(result.referenceIndex, 0);
+    assert.equal(reason(expected, heard, result), 'global_score');
+    assert.equal(delay(expected, heard, heard, result), 60);
+    assert.equal(delay(expected, heard, '', result), 0);
+  }
+});
+
+test('reported sound confusions do not turn other names, fillers, partial replies or negated replies into a valid line', () => {
+  for (const [expected, heard] of [
+    ['Ey, sonny', 'honey'], ['Ey, sonny', 'hey'], ['Ey, sonny', 'hey Johnny'], ['Ey, sonny', 'hey Sammy'],
+    ['Ey, sonny', 'hey honey I am still talking'], ['Ey, sonny', 'no hey honey'],
+    ['Sure', 'so'], ['Sure', 'so so I am still talking'], ['Sure', 'no sore'], ['Sure', 'no so so'],
+    ['Sure', ''], ['Really', 'sore'], ['Really', 'so so'],
+  ]) {
+    assert.equal(accepts(expected, heard), false, `${expected}: ${heard}`);
+    assert.equal(accepts(expected, heard, ''), false, `${expected}: ${heard}`);
+  }
+  for (const text of ['hey honey', 'sore', 'so so', 'sore muscles', 'Hey Honey, come here']) {
+    assert.equal(accepts(text, text), true, text);
+  }
+  assert.equal(normalizeSpeechText('honey sore so so'), 'honey sore so');
+  assert.equal(accepts('Sore', 'Sure'), false);
+  assert.equal(accepts('Honey', 'Sonny'), false);
+});

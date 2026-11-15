@@ -430,12 +430,18 @@ const getEquivalentLineReferences = (expectedText) => {
 // "sur", "Willy" or "Macbeth" keep their meaning in every other line.
 const CONTEXTUAL_RECOGNITION_ALIASES = [
     {
+        referencePattern: /^ey sonny$/,
+        replacements: [[/^ey honey$/, 'ey sonny']],
+    },
+    {
         referencePattern: /^really$/,
         replacements: [[/\b(?:riley|willy)\b/g, 'really']],
     },
     {
         referencePattern: /^sure$/,
-        replacements: [[/\bsur\b/g, 'sure']],
+        replacements: [[/\bsur\b/g, 'sure'], [/^sore$/, 'sure']],
+        // Keep the repeated form distinct from a single unrelated filler "so".
+        rawReplacements: [[/^so so$/, 'sure']],
     },
     {
         referencePattern: /\bmy english is getting much better\b/,
@@ -462,9 +468,16 @@ const normalizeHeardText = (value, referenceText) => {
     if (getNegationCount(reference.split(' ')) !== getNegationCount(normalized.split(' '))) {
         return normalized;
     }
-    CONTEXTUAL_RECOGNITION_ALIASES.forEach(({ referencePattern, replacements }) => {
+    CONTEXTUAL_RECOGNITION_ALIASES.forEach(({ referencePattern, replacements, rawReplacements }) => {
         if (!referencePattern.test(reference))
             return;
+        if (rawReplacements) {
+            const raw = normalizeRawSpeechText(value);
+            rawReplacements.forEach(([pattern, replacement]) => {
+                if (pattern.test(raw))
+                    normalized = normalizeSpeechText(raw.replace(pattern, replacement));
+            });
+        }
         replacements.forEach(([pattern, replacement]) => {
             normalized = normalized.replace(pattern, replacement);
         });
