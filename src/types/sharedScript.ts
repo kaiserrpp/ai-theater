@@ -293,6 +293,7 @@ export interface RecognitionComparisonTiming {
 }
 
 export interface IntelligentLineFeedbackEntry {
+  nativeRecognition?: import('../nativePrototype/recognitionHints').NativeRecognitionInfo;
   recognitionEngine?: 'native' | 'vosk' | 'whisper' | 'comparison';
   rehearsalComparison?: {
     id: string; execution: 'parallel'; sameUtterance: true;

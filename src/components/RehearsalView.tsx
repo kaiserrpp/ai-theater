@@ -55,6 +55,7 @@ import {
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
 import { getNativeLevelInput, getNativePrototypeInfo } from '../utils/nativePrototype';
+import { buildNativeRecognitionPlan } from '../nativePrototype/recognitionHints';
 import { getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
 import { getSpeechOutputErrorMessage, getSpeechOutputHelp } from '../utils/speechOutputHelp';
 import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
@@ -786,15 +787,21 @@ export const RehearsalView: React.FC<Props> = ({
     () => (currentLineVariantKey ? lineVariants[currentLineVariantKey] ?? [] : []),
     [currentLineVariantKey, lineVariants]
   );
-  const intelligentRecognitionLanguage = useMemo(() => {
-    if (isSceneMarker(filteredGuion[currentIndex])) return 'es-ES';
+  const recognitionContext = useMemo(() => buildScriptRecognitionContext(filteredGuion), [filteredGuion]);
+  const nativeRecognitionContext = useMemo(() => buildScriptRecognitionContext(filteredGuion,
+    Array.from(new Set(guion.flatMap(line => [line.p, ...(line.r || [])])))), [filteredGuion, guion]);
+  const nativeHintsEnabled = recognitionEngine === 'native' && getNativePrototypeInfo()?.recognitionHints === true;
+  const recognitionLinePlan = useMemo(() => {
+    if (isSceneMarker(filteredGuion[currentIndex])) return { lang: 'es-ES', hints: undefined };
     const nextActorLine = filteredGuion.slice(currentIndex).find((line) =>
       !isSceneMarker(line) && !isSongCue(line) && lineMatchesRoles(line, myRoles)
     );
-    return inferSpeechRecognitionLanguage(isMyTurn ? speakableLineText : nextActorLine?.t ?? speakableLineText);
-  }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText]);
+    const text = isMyTurn ? speakableLineText : nextActorLine?.t ?? speakableLineText;
+    const legacy = inferSpeechRecognitionLanguage(text);
+    return nativeHintsEnabled ? buildNativeRecognitionPlan(text, nativeRecognitionContext, legacy) : { lang: legacy, hints: undefined };
+  }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText, nativeHintsEnabled, nativeRecognitionContext]);
+  const intelligentRecognitionLanguage = recognitionLinePlan.lang;
   const isIntelligentListenMode = listenModeSelection === 'intelligent';
-  const recognitionContext = useMemo(() => buildScriptRecognitionContext(filteredGuion), [filteredGuion]);
   const isCheckingIntelligentRecognition = isIntelligentListenMode && rehearsalPreflightPhase === 'intelligent-check';
   const recognitionPreparationKey = `prepare:${resolvedScriptId}`;
   const effectiveAutoListenEnabled = autoListenEnabled && !temporarilySuspendingAutoListen;
@@ -912,6 +919,7 @@ export const RehearsalView: React.FC<Props> = ({
     isAudioActive: isRecognitionAudioActive,
     hasReceivedTranscript: hasRecognitionReceivedText,
     getRecognitionProcessingTiming,
+    getNativeRecognitionInfo,
     error: speechRecognitionError,
     errorCode: speechRecognitionErrorCode,
     errorDetail: speechRecognitionErrorDetail,
@@ -931,6 +939,7 @@ export const RehearsalView: React.FC<Props> = ({
     prepareLocal: hasConfirmedRehearsalSetup && isIntelligentListenMode,
     engine: recognitionEngine,
     context: shouldUseIntelligentRecognition ? recognitionContext : undefined,
+    nativeHints: shouldUseIntelligentRecognition && !isCheckingIntelligentRecognition && !shouldListenForSceneCommand ? recognitionLinePlan.hints : undefined,
     whisperLanguage: shouldListenForSceneCommand ? 'spanish' : 'auto',
     whisperMicrophoneCheck: isCheckingIntelligentRecognition,
     whisperSpeechThreshold: getWhisperSegmentationThreshold(microphoneCalibrationMeasurement === 'rms' ? microphoneNoiseFloor : 0,
@@ -1096,10 +1105,12 @@ export const RehearsalView: React.FC<Props> = ({
         heardText,
         feedbackLineMatch
       );
+      const nativeRecognition = recognitionEngine === 'native' ? getNativeRecognitionInfo() : null;
       const entry: IntelligentLineFeedbackEntry = {
         recognitionEngine: usesWhisperRecognition(recognitionEngine) ? 'whisper' : isLocalSpeechRecognition ? 'vosk' : 'native',
-        scriptContextEnabled: usesWhisperRecognition(recognitionEngine) && Boolean(recognitionContext.prompt),
-        scriptContextTermCount: usesWhisperRecognition(recognitionEngine) ? recognitionContext.names.length + recognitionContext.vocabulary.length : 0,
+        scriptContextEnabled: usesWhisperRecognition(recognitionEngine) ? Boolean(recognitionContext.prompt) : Boolean(nativeRecognition?.contextTermCount),
+        scriptContextTermCount: usesWhisperRecognition(recognitionEngine) ? recognitionContext.names.length + recognitionContext.vocabulary.length : nativeRecognition?.contextTermCount || 0,
+        ...(nativeRecognition ? { nativeRecognition } : {}),
         recognitionTiming: usesWhisperRecognition(recognitionEngine) ? getRecognitionProcessingTiming() : null,
         lineIndex: currentLineIndexInScript,
         character: currentLine.p,
@@ -1140,6 +1151,7 @@ export const RehearsalView: React.FC<Props> = ({
       recognitionEngine,
       recognitionContext,
       getRecognitionProcessingTiming,
+      getNativeRecognitionInfo,
       isLocalSpeechRecognition,
       finishComparison,
     ]

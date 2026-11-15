@@ -1,4 +1,4 @@
-export type NativePrototypeInfo = { protocol: 1; platform: 'ios' | 'android'; appVersion: string; foreground: boolean; nativeLevelInput?: boolean };
+export type NativePrototypeInfo = { protocol: 1; platform: 'ios' | 'android'; appVersion: string; foreground: boolean; nativeLevelInput?: boolean; recognitionHints?: boolean };
 
 export type NativeLevelCapture = { ready: Promise<void>; stop: () => Promise<void> };
 export const getNativeLevelInput = () => {

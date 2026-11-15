@@ -1,3 +1,4 @@
+import type { NativeRecognitionInfo, RecognitionHints } from '../nativePrototype/recognitionHints';
 export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'suspended' | 'preparing' | 'processing' | 'finishing' | 'starting' | 'listening' | 'error';
 
 type RecognitionResult = {
@@ -10,6 +11,8 @@ export type SpeechRecognitionHandle = {
   interimResults: boolean;
   lang: string;
   maxAlternatives: number;
+  recognitionHints?: RecognitionHints;
+  onconfiguration?: ((info: NativeRecognitionInfo) => void) | null;
   onstart: (() => void) | null;
   onaudiostart: (() => void) | null;
   onaudioend: (() => void) | null;
@@ -33,6 +36,7 @@ export type SpeechRecognitionSnapshot = {
   error: string | null;
   errorCode: string | null;
   errorDetail: string | null;
+  nativeRecognition?: NativeRecognitionInfo | null;
 };
 
 type RecognitionOptions = {
@@ -44,6 +48,7 @@ type RecognitionOptions = {
   pageVisible?: boolean;
   prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
   usage?: { started: boolean };
+  getNativeHints?: () => RecognitionHints | undefined;
 };
 const documentRecognitionUsage = { started: false };
 
@@ -144,6 +149,7 @@ export const createSpeechRecognitionSession = (
     if (!previous) return;
     previous.onstart = previous.onaudiostart = previous.onaudioend = previous.onend = null;
     previous.onspeechend = previous.onerror = previous.onresult = null;
+    previous.onconfiguration = null;
     if (abort) { try { previous.abort(); } catch { /* Already stopped. */ } }
     finishWaiters();
     finishInputWaiters('fin de servicio');
@@ -165,7 +171,7 @@ export const createSpeechRecognitionSession = (
   const resetTranscript = () => {
     committedTranscript = '';
     ignoredResultCount = latestResults.length;
-    update({ transcript: '', finalTranscript: '', interimTranscript: '', hasReceivedTranscript: false });
+    update({ transcript: '', finalTranscript: '', interimTranscript: '', hasReceivedTranscript: false, nativeRecognition: null });
   };
   const armEvidence = () => {
     if (!options.naturalEnd || evidenceTimer !== null || !enabled || !pageVisible || blocked) return;
@@ -214,6 +220,12 @@ export const createSpeechRecognitionSession = (
       current.interimResults = true;
       current.lang = language;
       current.maxAlternatives = 1;
+      if (options.controlledEnd) {
+        current.recognitionHints = options.getNativeHints?.();
+        current.onconfiguration = info => {
+          if (recognition === current && enabled && pageVisible && !closingForChange) update({ nativeRecognition: info });
+        };
+      }
       let hadAudioInput = false;
       audioEnded = playbackCompletedAfterInput = false;
       inputIsFinishing = false;

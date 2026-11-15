@@ -68,6 +68,18 @@ const normalizeEntry = (entry) => {
     ? entry.recognitionTiming : null;
   const timingMs = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(180000, Math.round(value))) : null;
   const responseTiming = entry.responseTiming?.kind === 'browser_events' ? entry.responseTiming : null;
+  const native = entry.recognitionEngine === 'native' ? entry.nativeRecognition : null;
+  const nativeRecognition = native && typeof native.lang === 'string' && /^[a-z]{2,3}(-[a-z0-9]{2,8}){0,2}$/i.test(native.lang) &&
+    ['single_locale', 'switch_requested'].includes(native.languageMode) && typeof native.onDeviceRequested === 'boolean' &&
+    ['installed', 'not_installed', 'unknown'].includes(native.localeStatus) ? {
+      lang: native.lang, languageMode: native.languageMode, onDeviceRequested: native.onDeviceRequested,
+      localeStatus: native.localeStatus,
+      contextTermCount: typeof native.contextTermCount === 'number' && Number.isFinite(native.contextTermCount)
+        ? Math.max(0, Math.min(40, Math.round(native.contextTermCount))) : 0,
+      fallbackReason: ['ios_single_locale', 'models_unavailable', 'android_version', 'switch_rejected'].includes(native.fallbackReason) ? native.fallbackReason : null,
+      ...(typeof native.detectedLanguage === 'string' && /^[a-z]{2,3}(-[a-z0-9]{2,8}){0,2}$/i.test(native.detectedLanguage)
+        ? { detectedLanguage: native.detectedLanguage } : {}),
+    } : null;
 
   if (!expectedText && !heardText) {
     return null;
@@ -75,6 +87,7 @@ const normalizeEntry = (entry) => {
 
   return {
     recognitionEngine: ['native', 'vosk', 'whisper', 'comparison'].includes(entry.recognitionEngine) ? entry.recognitionEngine : null,
+    ...(nativeRecognition ? { nativeRecognition } : {}),
     ...(rehearsalComparison ? { rehearsalComparison } : {}),
     scriptContextEnabled: entry.scriptContextEnabled === true,
     scriptContextTermCount: typeof entry.scriptContextTermCount === 'number' && Number.isFinite(entry.scriptContextTermCount)

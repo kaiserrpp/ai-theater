@@ -4,7 +4,7 @@ import type { NativePlatform } from './protocol';
 // as executable source. This runs before the existing web application loads.
 const BOOTSTRAP = String.raw`(function(config) {
   if (window.__AI_THEATRE_NATIVE_V1__) return;
-  var info = { protocol: 1, platform: config.platform, appVersion: config.appVersion, foreground: true, nativeLevelInput: config.platform==='android'&&config.nativeLevelInput===true };
+  var info = { protocol: 1, platform: config.platform, appVersion: config.appVersion, foreground: true, nativeLevelInput: config.platform==='android'&&config.nativeLevelInput===true, recognitionHints:config.recognitionHints===true };
   // A WebView navigation creates another JS world while the native host can
   // still be closing the previous world's input/output. Never reuse its IDs.
   var pageId = Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
@@ -22,7 +22,9 @@ const BOOTSTRAP = String.raw`(function(config) {
     start() {
       if(this.id) throw new Error('Recognition already started');
       this.id='r-'+pageId+'-'+(++count);this.finals=[];this.ending=false;inputs.set(this.id,this);
-      send({type:'recognition.start',id:this.id,lang:this.lang,continuous:this.continuous});
+      var request={type:'recognition.start',id:this.id,lang:this.lang,continuous:this.continuous};
+      if(info.recognitionHints&&this.recognitionHints)request.hints=this.recognitionHints;
+      send(request);
     }
     abort() { if(this.id&&!this.ending){this.ending=true;send({type:'recognition.abort',id:this.id});} }
     stop() { if(this.id&&!this.ending){this.ending=true;send({type:'recognition.stop',id:this.id});} }
@@ -59,6 +61,7 @@ const BOOTSTRAP = String.raw`(function(config) {
     if(event.type.indexOf('recognition.')===0){
       var r=inputs.get(event.id);if(!r)return;
       var name=event.type.slice(12);
+      if(name==='configuration'){if(r.onconfiguration)r.onconfiguration(event.recognitionInfo);return;}
       if(name==='result'){
         var result={isFinal:event.isFinal===true,length:1,0:{transcript:event.text||'',confidence:0}};
         var results=r.finals.concat([result]);
@@ -82,5 +85,5 @@ const BOOTSTRAP = String.raw`(function(config) {
   send({type:'hello'});
 })`;
 
-export const nativeBridgeBootstrap = (config: { platform: NativePlatform; appVersion: string; nativeLevelInput?: boolean }) =>
+export const nativeBridgeBootstrap = (config: { platform: NativePlatform; appVersion: string; nativeLevelInput?: boolean; recognitionHints?: boolean }) =>
   `${BOOTSTRAP}(${JSON.stringify(config)});true;`;

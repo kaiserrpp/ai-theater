@@ -1,4 +1,5 @@
 import type { BridgeCommand, BridgeEvent } from './protocol';
+import type { NativeRecognitionInfo, RecognitionHints } from './recognitionHints';
 
 type Run = { id: string; kind: 'recognition' | 'microphone'; cancelled: boolean; started: boolean; closing: boolean; audioEnded: boolean; closed: Promise<void>; resolve: () => void };
 type SpeechOptions = { lang: string; rate: number; pitch: number; volume: number; voice?: string;
@@ -7,7 +8,7 @@ type Dependencies = {
   emit: (event: BridgeEvent) => void;
   requestPermission: () => Promise<boolean>;
   isRecognitionAvailable: () => boolean;
-  startRecognition: (options: { lang: string; continuous: boolean }) => void;
+  startRecognition: (options: { lang: string; continuous: boolean; hints?: RecognitionHints }) => NativeRecognitionInfo | void;
   abortRecognition: () => void;
   stopRecognition: () => void;
   speak: (text: string, options: SpeechOptions) => void;
@@ -99,7 +100,11 @@ export const createNativePrototypeController = (deps: Dependencies) => {
       }
       if (!deps.isRecognitionAvailable()) { error(run.id, 'El reconocedor del teléfono no está disponible.', 'service-not-allowed'); finishInput(run); return; }
       run.started = true;
-      try { deps.startRecognition({ lang: command.lang || 'es-ES', continuous: command.continuous === true }); }
+      try {
+        const recognitionInfo = deps.startRecognition({ lang: command.lang || 'es-ES', continuous: command.continuous === true,
+          ...(command.hints ? { hints: command.hints } : {}) });
+        if (recognitionInfo && input === run && !run.cancelled) emit({ type: 'recognition.configuration', id: run.id, recognitionInfo });
+      }
       catch (cause) { error(run.id, cause instanceof Error ? cause.message : 'No se pudo iniciar la escucha.'); finishInput(run); }
     } catch (cause) {
       if (pendingInput === command) pendingInput = null;
@@ -149,12 +154,12 @@ export const createNativePrototypeController = (deps: Dependencies) => {
       } else if (command.type === 'speech.start') void startSpeech(command);
       else if (command.type === 'speech.cancel') void cancelSpeech().catch(() => {});
     },
-    recognitionEvent: (type: string, data: { text?: string; isFinal?: boolean; error?: string; message?: string } = {}) => {
+    recognitionEvent: (type: string, data: { text?: string; isFinal?: boolean; error?: string; message?: string; recognitionInfo?: NativeRecognitionInfo } = {}) => {
       if (!input || input.kind !== 'recognition' || disposed) return;
       const run = input;
       if (type === 'audioend') run.audioEnded = true;
       if (type === 'end') { finishInput(run); return; }
-      if (type === 'result' && run.cancelled) return;
+      if ((type === 'result' || type === 'configuration') && run.cancelled) return;
       if (type === 'error' && run.cancelled && data.error === 'aborted') return;
       if (type === 'error' && data.error === 'speech-timeout') data = { ...data, error: 'no-speech' };
       emit({ type: `recognition.${type}`, id: run.id, ...data });

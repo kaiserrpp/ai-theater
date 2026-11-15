@@ -7,6 +7,7 @@ import * as Speech from 'expo-speech';
 import { AudioModule, RecordingPresets } from 'expo-audio';
 import { deleteAsync } from 'expo-file-system/legacy';
 import { createNativeLevelInput } from './src/nativePrototype/levelInput';
+import { createNativeRecognitionRuntime } from './src/nativePrototype/recognitionRuntime';
 import appManifest from './app.json';
 import packageInfo from './package.json';
 import { nativeBridgeBootstrap } from './src/nativePrototype/bridgeBootstrap';
@@ -20,7 +21,16 @@ function NativePrototype() {
   const web = useRef<WebView>(null);
   const [permission, setPermission] = useState<'checking' | 'needed' | 'ready'>('checking');
   const [error, setError] = useState('');
-  const bootstrap = useMemo(() => nativeBridgeBootstrap({ platform, appVersion: packageInfo.version, nativeLevelInput: platform === 'android' }), []);
+  const bootstrap = useMemo(() => nativeBridgeBootstrap({ platform, appVersion: packageInfo.version, nativeLevelInput: platform === 'android', recognitionHints: true }), []);
+  const recognitionRuntime = useMemo(() => createNativeRecognitionRuntime({
+    platform, androidVersion: Number(Platform.Version), onDevice: ExpoSpeechRecognitionModule.supportsOnDeviceRecognition(),
+    getSupportedLocales: () => ExpoSpeechRecognitionModule.getSupportedLocales({}),
+    start: options => ExpoSpeechRecognitionModule.start({ ...options,
+      continuous: platform === 'android' && Number(Platform.Version) < 33 ? false : options.continuous,
+      interimResults: true, maxAlternatives: 1, addsPunctuation: false, recordingOptions: { persist: false },
+      iosTaskHint: 'dictation', iosCategory: { category: 'playAndRecord', categoryOptions: ['defaultToSpeaker', 'allowBluetooth'], mode: 'measurement' },
+    }),
+  }), []);
   const levelInput = useMemo(() => createNativeLevelInput({
     createRecorder: () => {
       const recorder = new AudioModule.AudioRecorder({ ...RecordingPresets.HIGH_QUALITY,
@@ -35,17 +45,9 @@ function NativePrototype() {
     emit: event => web.current?.injectJavaScript(`window.__AI_THEATRE_NATIVE_RECEIVE__ && window.__AI_THEATRE_NATIVE_RECEIVE__(${JSON.stringify(event)});true;`),
     requestPermission: async () => (await ExpoSpeechRecognitionModule.getPermissionsAsync()).granted,
     isRecognitionAvailable: () => ExpoSpeechRecognitionModule.isRecognitionAvailable(),
-    startRecognition: options => ExpoSpeechRecognitionModule.start({ ...options,
-      // Older Android services end each utterance. The shared session keeps
-      // its words and reopens input; only Intelligent text matching advances.
-      continuous: platform === 'android' && Number(Platform.Version) < 33 ? false : options.continuous,
-      interimResults: true, maxAlternatives: 1,
-      requiresOnDeviceRecognition: ExpoSpeechRecognitionModule.supportsOnDeviceRecognition(),
-      addsPunctuation: false, recordingOptions: { persist: false },
-      iosTaskHint: 'dictation', iosCategory: { category: 'playAndRecord', categoryOptions: ['defaultToSpeaker', 'allowBluetooth'], mode: 'measurement' },
-    }),
-    abortRecognition: () => ExpoSpeechRecognitionModule.abort(),
-    stopRecognition: () => ExpoSpeechRecognitionModule.stop(),
+    startRecognition: recognitionRuntime.start,
+    abortRecognition: () => { recognitionRuntime.stopped(); ExpoSpeechRecognitionModule.abort(); },
+    stopRecognition: () => { recognitionRuntime.stopped(); ExpoSpeechRecognitionModule.stop(); },
     speak: (text, options) => Speech.speak(text, { language: options.lang, rate: options.rate, pitch: options.pitch,
       volume: options.volume, voice: options.voice, onStart: options.onStart, onDone: options.onDone,
       onError: cause => options.onError(cause instanceof Error ? cause.message : 'No se pudo reproducir la voz.'),
@@ -55,9 +57,10 @@ function NativePrototype() {
       name: voice.name, lang: voice.language, default: voice.language.toLowerCase().startsWith('es-es') })),
     startLevelInput: levelInput.start,
     stopLevelInput: levelInput.stop,
-  }), [levelInput]);
+  }), [levelInput, recognitionRuntime]);
   useEffect(() => {
     let live = true;
+    void recognitionRuntime.warm();
     void ExpoSpeechRecognitionModule.getPermissionsAsync().then(value => {
       if (live) setPermission(value.granted ? 'ready' : 'needed');
     }).catch(() => { if (live) setPermission('needed'); });
@@ -65,13 +68,17 @@ function NativePrototype() {
       ExpoSpeechRecognitionModule.addListener('start', () => controller.recognitionEvent('start')),
       ExpoSpeechRecognitionModule.addListener('audiostart', () => controller.recognitionEvent('audiostart')),
       ExpoSpeechRecognitionModule.addListener('audioend', () => controller.recognitionEvent('audioend')),
-      ExpoSpeechRecognitionModule.addListener('end', () => controller.recognitionEvent('end')),
+      ExpoSpeechRecognitionModule.addListener('end', () => { recognitionRuntime.stopped(); controller.recognitionEvent('end'); }),
       ExpoSpeechRecognitionModule.addListener('result', event => controller.recognitionEvent('result', {
         text: event.results[0]?.transcript || '', isFinal: event.isFinal,
       })),
       ExpoSpeechRecognitionModule.addListener('error', event => {
         if (event.error === 'interrupted') controller.setForeground(false);
-        controller.recognitionEvent('error', { error: event.error, message: event.message });
+        controller.recognitionEvent('error', { error: recognitionRuntime.recoverLanguageError(event.error) ? 'no-speech' : event.error, message: event.message });
+      }),
+      ExpoSpeechRecognitionModule.addListener('languagedetection', event => {
+        const recognitionInfo = recognitionRuntime.languageDetected(event.detectedLanguage);
+        if (recognitionInfo) controller.recognitionEvent('configuration', { recognitionInfo });
       }),
       AppState.addEventListener('change', state => {
         // Permission sheets and Control Center can be merely inactive. Only
@@ -80,8 +87,8 @@ function NativePrototype() {
         else if (state === 'active') controller.setForeground(true);
       }),
     ];
-    return () => { live = false; controller.dispose(); subscriptions.forEach(item => item.remove()); };
-  }, [controller]);
+    return () => { live = false; controller.dispose(); recognitionRuntime.dispose(); subscriptions.forEach(item => item.remove()); };
+  }, [controller, recognitionRuntime]);
   const requestPermission = async () => {
     setError(''); setPermission('checking');
     try {

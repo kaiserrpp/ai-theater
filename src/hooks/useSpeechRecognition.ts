@@ -11,6 +11,7 @@ import { getLocalSpeechRecognitionConstructor, preloadLocalSpeechRecognition, di
 import { getWhisperSpeechRecognitionConstructor, preloadWhisperSpeechRecognition, disposeWhisperSpeechRecognition } from '../utils/whisperSpeechRecognition';
 import { usesWhisperRecognition, type RecognitionEngine, type ScriptRecognitionContext } from '../utils/scriptRecognitionContext';
 import type { RecognitionProcessingTiming } from '../types/sharedScript';
+import type { RecognitionHints } from '../nativePrototype/recognitionHints';
 
 type UseSpeechRecognitionOptions = {
   enabled: boolean;
@@ -19,6 +20,7 @@ type UseSpeechRecognitionOptions = {
   prepareLocal?: boolean;
   engine?: RecognitionEngine;
   context?: ScriptRecognitionContext;
+  nativeHints?: RecognitionHints;
   whisperLanguage?: 'auto' | 'spanish' | 'english';
   whisperMicrophoneCheck?: boolean;
   whisperSpeechThreshold?: number;
@@ -33,8 +35,9 @@ const getSpeechRecognitionConstructor = () => {
   return scopedWindow.SpeechRecognition ?? scopedWindow.webkitSpeechRecognition ?? null;
 };
 
-export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = false, engine = 'native', context, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
+export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = false, engine = 'native', context, nativeHints, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
   const contextRef = useRef(context); contextRef.current = context;
+  const nativeHintsRef = useRef(nativeHints); nativeHintsRef.current = nativeHints;
   const whisperLanguageRef = useRef(whisperLanguage); whisperLanguageRef.current = whisperLanguage;
   const microphoneCheckRef = useRef(whisperMicrophoneCheck); microphoneCheckRef.current = whisperMicrophoneCheck;
   const speechThresholdRef = useRef(whisperSpeechThreshold); speechThresholdRef.current = whisperSpeechThreshold;
@@ -54,7 +57,9 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = fa
   const session = useMemo(() => createSpeechRecognitionSession(Constructor, setSnapshot, {
     naturalEnd, controlledEnd, prepareRestart: isLocal || controlledEnd ? undefined : prepareRecognitionRestart,
     pageVisible: isPageVisible(), startTimeoutMs: isLocal ? 120000 : 15000,
+    getNativeHints: () => nativeHintsRef.current,
   }), [Constructor, naturalEnd, controlledEnd, isLocal]);
+  const getNativeRecognitionInfo = useCallback(() => session.getSnapshot().nativeRecognition || null, [session]);
 
   useEffect(() => {
     if (engine !== 'vosk') disposeLocalSpeechRecognition();
@@ -78,6 +83,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = fa
     isSupported: Boolean(Constructor),
     isLocal,
     getRecognitionProcessingTiming,
+    getNativeRecognitionInfo,
     resetTranscript: session.resetTranscript,
     finishRecognitionInput: session.finishInput,
     activateRecognition: session.activate,
