@@ -54,3 +54,13 @@ test('a missing file or remote reference is rejected before any upload, and an u
     assert.equal(invalidated, true);
   } finally { global.fetch = oldFetch; }
 });
+
+test('a stale public catalogue with the same id is not reported as the newly imported version', async () => {
+  const oldFetch = global.fetch; let saved;
+  global.fetch = async (_url, options) => {
+    if (options?.method === 'POST') { saved = JSON.parse(options.body).catalog; return { ok: true, status: 200, json: async () => ({ catalog: saved }) }; }
+    return { ok: true, json: async () => ({ catalog: { ...saved, title: 'Earlier cached title' } }) };
+  };
+  try { await assert.rejects(importPreparedWarmup(new File([JSON.stringify(bundle())], 'prepared.json'), 'work', () => {}), /no se pudo comprobar/); }
+  finally { global.fetch = oldFetch; }
+});

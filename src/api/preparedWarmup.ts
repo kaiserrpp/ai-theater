@@ -41,6 +41,6 @@ export const importPreparedWarmup = async (file: File, shareId: string, onProgre
   // Confirm the public read path before reporting that other devices can use it.
   const read = await fetch(buildSharedApiUrl('/api/shared-script', { resource: 'warmup', shareId }), { cache: 'no-store' });
   const saved = await read.json();
-  if (!read.ok || saved.catalog?.id !== catalog.id || validateWarmupCatalog(saved.catalog)) throw new Error('Los audios se han subido, pero no se pudo comprobar el catálogo. Reintenta la importación.');
+  if (!read.ok || saved.catalog?.id !== catalog.id || validateWarmupCatalog(saved.catalog) || JSON.stringify(saved.catalog) !== JSON.stringify(catalog)) throw new Error('Los audios se han subido, pero no se pudo comprobar el catálogo. Reintenta la importación.');
   return saved.catalog;
 };

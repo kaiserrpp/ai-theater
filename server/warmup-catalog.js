@@ -29,7 +29,9 @@ module.exports = async (request, response) => {
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(shareId)) { response.status(400).json({ error: 'Elige una obra compartida para abrir su calentamiento.' }); return; }
   try {
     const blob = await head(`shared-scripts/${getStorageNamespace()}/${shareId}/warmups/catalog.json`);
-    const remote = await fetch(blob.url, { cache: 'no-store' });
+    const readUrl = new URL(blob.url);
+    readUrl.searchParams.set('_ts', String(Date.now()));
+    const remote = await fetch(readUrl.toString(), { cache: 'no-store' });
     if (!remote.ok) throw new Error('read failed');
     const catalog = await remote.json();
     const error = validateWarmupCatalog(catalog);

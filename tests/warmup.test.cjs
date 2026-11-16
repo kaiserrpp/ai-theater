@@ -114,7 +114,7 @@ test('warmup API reads only the chosen environment and share, never writes the s
     const result = { statusCode: 0, payload: null, setHeader() {}, status(n) { this.statusCode = n; return this; }, json(p) { this.payload = p; } };
     await handler({ method, query: { shareId } }, result); return result;
   };
-  global.fetch = async () => ({ ok: true, json: async () => catalog });
+  global.fetch = async url => { assert.ok(new URL(url).searchParams.has('_ts')); return { ok: true, json: async () => catalog }; };
   try {
     assert.equal((await run()).statusCode, 200); assert.equal(path, 'shared-scripts/preview/test-share/warmups/catalog.json');
     namespace = 'production'; await run(); assert.equal(path, 'shared-scripts/production/test-share/warmups/catalog.json');
