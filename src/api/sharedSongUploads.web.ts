@@ -30,7 +30,7 @@ interface ExtractSharedSongVideoAudioInput {
 interface UploadSharedSongAudioInput {
   shareId: string;
   targetId: string;
-  targetType?: 'song' | 'musical-number' | 'musical-audition';
+  targetType?: 'song' | 'musical-number' | 'musical-audition' | 'warmup';
   file: Blob;
   password?: string;
   onUploadProgress?: (percentage: number) => void;
@@ -108,7 +108,7 @@ const fetchClientToken = async ({
   password?: string;
   shareId: string;
   targetId: string;
-  targetType: 'song' | 'musical-number' | 'musical-audition';
+  targetType: 'song' | 'musical-number' | 'musical-audition' | 'warmup';
 }) => {
   const response = await fetch(buildProtectedApiUrl('/api/shared-script/song-upload'), {
     method: 'POST',
@@ -219,7 +219,7 @@ export const uploadSharedSongAudio = async ({
       ? namedFile.name
       : `audio-${Date.now()}.mp3`;
   const safeFileName = sanitizeFileName(originalFileName) || `audio-${Date.now()}.mp3`;
-  const targetFolder = targetType === 'musical-audition' ? 'musical-auditions' : targetType === 'musical-number' ? 'musical-numbers' : 'songs';
+  const targetFolder = targetType === 'warmup' ? 'warmups' : targetType === 'musical-audition' ? 'musical-auditions' : targetType === 'musical-number' ? 'musical-numbers' : 'songs';
   const storageNamespace = await fetchSharedStorageNamespace();
   const pathname = `shared-scripts/${storageNamespace}/${shareId}/${targetFolder}/${targetId}/${Date.now()}-${safeFileName}`;
   const contentType =

@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "id": "canto-2026-11",
+  "title": "Calentamiento de canto",
+  "status": "pilot",
+  "source": { "durationSeconds": 680.47, "sha256": "92e314e9ef1b3666d4f00ff2ca909b9b4e7328c095d5494dbc026d9cbef3f563" },
+  "exercises": [{
+    "id": "m-cinco-notas",
+    "title": "M · Cinco notas",
+    "objective": "Repetir el recorrido de cinco notas con M, manteniendo el sonido hacia delante.",
+    "instructions": "Vamos con el sonido eme, mmm. Repite la subida y la bajada de cinco notas. La profesora recuerda que el sonido esté bien adelante. Escucharás primero una entrada de piano y después el patrón. Al cambiar de tono tendrás otra entrada antes de empezar.",
+    "sourceStart": 73.62,
+    "sourceEnd": 137.5,
+    "advice": [{ "text": "Que el sonido esté bien adelante.", "sourceAt": 75.1 }],
+    "uncertainties": [
+      "Las alturas se han estimado del sonido; la profesora no las nombra. Referencia del primer patrón: 1:18–1:20. No hay una partitura confirmada.",
+      "El pulso de la referencia varía ligeramente. Este piloto lo regulariza a 122 negras por minuto y conserva entradas y cierres; no copia cada pausa al milisegundo.",
+      "El piano es una reconstrucción con otro timbre. La fidelidad vocal y musical del piloto está pendiente de tu contraste con el vídeo."
+    ],
+    "score": {
+      "description": "1–2–3–4–5–4–3–2–1, escala mayor hasta la quinta y regreso",
+      "progressionDescription": "Primera tonalidad dos veces; después sube y baja por semitonos dentro de tu rango.",
+      "entranceNotes": [0, 7],
+      "closingNotes": [0, 7],
+      "offsets": [0, 2, 4, 5, 7, 5, 4, 2, 0],
+      "noteBeats": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1],
+      "tempoBpm": 122,
+      "preparationBeats": 2,
+      "closingBeats": 1,
+      "sourceRoot": 50,
+      "startOffset": 0,
+      "progression": [
+        { "offset": 0, "repetitions": 2 }, { "offset": 1, "repetitions": 1 },
+        { "offset": 2, "repetitions": 1 }, { "offset": 3, "repetitions": 1 },
+        { "offset": 4, "repetitions": 1 }, { "offset": 5, "repetitions": 1 },
+        { "offset": 6, "repetitions": 1 }, { "offset": 7, "repetitions": 1 },
+        { "offset": 8, "repetitions": 1 }, { "offset": 7, "repetitions": 1 },
+        { "offset": 6, "repetitions": 1 }, { "offset": 5, "repetitions": 1 },
+        { "offset": 4, "repetitions": 1 }, { "offset": 3, "repetitions": 1 },
+        { "offset": 2, "repetitions": 1 }
+      ]
+    },
+    "cues": []
+  }],
+  "pending": [
+    { "title": "Vibración de labios · brr", "sourceStart": 0, "sourceEnd": 73.62, "note": "Sonido confirmado por el usuario. Piano y explicación aún por reconstruir." },
+    { "title": "Na", "sourceStart": 137.5, "sourceEnd": 229.62, "note": "Referencia: abrir la boca hacia abajo y a los lados. Pendiente de reconstrucción." },
+    { "title": "Wa · sonido hacia delante", "sourceStart": 229.62, "sourceEnd": 314.16, "note": "La grafía wa/gua es aproximada; falta contrastar el patrón musical." },
+    { "title": "Wa · recorrido descendente", "sourceStart": 314.16, "sourceEnd": 399.08, "note": "Incluye consejos sobre respiración baja. Falta contrastar notas y sílaba." },
+    { "title": "Wa · apertura", "sourceStart": 399.08, "sourceEnd": 512.32, "note": "Consejos sobre apertura y comienzo del sonido. Patrón pendiente." },
+    { "title": "Mi, me, ma…", "sourceStart": 512.32, "sourceEnd": 619.3, "note": "El orden exacto de las sílabas y vocales aún es dudoso; no se ha convertido en una instrucción preparada." },
+    { "title": "Wa / hueh final", "sourceStart": 619.3, "sourceEnd": 680.47, "note": "Cambio de sonido hacia 10:50 pendiente de contrastar, junto con las notas." }
+  ],
+  "credits": [
+    { "label": "Voz española estándar: Piper · sharvard (SHARVARD, CC BY 3.0)", "url": "https://huggingface.co/rhasspy/piper-voices/blob/main/es/es_ES/sharvard/medium/MODEL_CARD" },
+    { "label": "Piano: FluidR3, muestras MIDI.js (CC BY 3.0), preparación local", "url": "https://github.com/gleitz/midi-js-soundfonts" }
+  ]
+}

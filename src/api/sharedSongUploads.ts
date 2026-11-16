@@ -11,7 +11,7 @@ export const MAX_SHARED_SONG_UPLOAD_BYTES = 512 * 1024 * 1024;
 interface UploadSharedSongAudioInput {
   shareId: string;
   targetId: string;
-  targetType?: 'song' | 'musical-number' | 'musical-audition';
+  targetType?: 'song' | 'musical-number' | 'musical-audition' | 'warmup';
   file: Blob;
   password?: string;
   onUploadProgress?: (percentage: number) => void;

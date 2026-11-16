@@ -8,6 +8,7 @@ import { createSongPlayback, type SongPlaybackMode, type SongRepeatMode } from '
 import { selectSongPlaylist, type SongPlaylistKind } from '../utils/songPlaylistSelection';
 import { MusicalAuditionEditor } from './MusicalAuditionEditor';
 import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
+import { WarmupLibrary } from './WarmupLibrary';
 
 type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudioAsset; auditionId?: string; numberTitle?: string };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
@@ -19,6 +20,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   const { palette, ui } = usePracticeTheme();
   const isAdmin = useIsAdmin();
   const [scope, setScope] = useState<'auditions' | 'work'>('auditions');
+  const [warmupOpen, setWarmupOpen] = useState(false);
   const [mine, setMine] = useState(false);
   const [musicRoles, setMusicRoles] = useState<string[]>([]);
   const [loadedRolesKey, setLoadedRolesKey] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   }, [loadedRolesKey, musicRoles, rolesKey]);
   useEffect(() => {
     if (manifest && openEditorRequest > handledEditorRequest.current) {
-      handledEditorRequest.current = openEditorRequest; setScope('auditions');
+      handledEditorRequest.current = openEditorRequest; setScope('auditions'); setWarmupOpen(false);
       setEditor({ initial: null, key: Date.now() });
     }
   }, [manifest, openEditorRequest]);
@@ -142,7 +144,8 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   return <>
     <ScrollView ref={scroll} contentContainerStyle={ui.page}>
     <View style={{ gap: 8 }}><Text style={ui.title}>Escuchar y practicar</Text><Text style={ui.text}>Tus canciones, con voz o karaoke.</Text></View>
-    <View style={ui.wrap}><Chip label="Audiciones" selected={scope === 'auditions'} onPress={() => setScope('auditions')} /><Chip label="Obra" selected={scope === 'work'} onPress={() => setScope('work')} /></View>
+    <View style={ui.wrap}><Chip label="Audiciones" selected={!warmupOpen && scope === 'auditions'} onPress={() => { setWarmupOpen(false); setScope('auditions'); }} /><Chip label="Obra" selected={!warmupOpen && scope === 'work'} onPress={() => { setWarmupOpen(false); setScope('work'); }} /><Chip label="Calentamiento" selected={warmupOpen} onPress={() => { player.current?.stop(); setWarmupOpen(true); }} /></View>
+    {warmupOpen ? <WarmupLibrary key={manifest?.shareId || 'local'} shareId={manifest?.shareId || null} onBeforePlay={() => player.current?.stop()} /> : <>
     {scope === 'auditions' ? <>
       <Button label="+ Subir canción de audición" disabled={!manifest} onPress={() => openEditor()} />
       {notice ? <Text accessibilityLiveRegion="polite" style={[ui.text, { color: palette.green }]}>{notice}</Text> : null}
@@ -200,6 +203,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     <Button label="Gestionar audios de la obra" secondary disabled={!manifest} onPress={onManageWork} />
     </>}
     {selected && error ? <Button label="Reintentar audio" secondary onPress={() => play(selected)} /> : null}
+    </>}
     </ScrollView>
     <Sheet title="Mis personajes · Canciones" visible={rolesOpen} onClose={() => setRolesOpen(false)}>
       <Text style={ui.text}>Esta selección se recuerda para las canciones de esta obra en este dispositivo.</Text><View style={ui.wrap}>{availableRoles.map((role) => <Chip key={role} label={role} selected={musicRoles.includes(role)} onPress={() => setMusicRoles((previous) => previous.includes(role) ? previous.filter((value) => value !== role) : [...previous,role])} />)}</View>
