@@ -18,13 +18,16 @@ Module._load = function (id, parent, ...args) {
 const { importPreparedWarmup } = require('../src/api/preparedWarmup.ts');
 Module._load = originalLoad;
 if (loader) require.extensions['.ts'] = loader; else delete require.extensions['.ts'];
-const bundle = () => {
+const bundle = (withRest = false) => {
   const catalog = structuredClone(require('../warmups/canto-2026-11/source.json'));
+  delete catalog.rest;
   catalog.exercises = catalog.exercises.filter(e => e.id === 'm-cinco-notas');
   const exercise = catalog.exercises[0];
   exercise.explanation = { audioUrl: 'explanation.mp3', durationSeconds: 10 };
   exercise.piano = { 50: { audioUrl: 'piano-50.mp3', durationSeconds: 4 }, 51: { audioUrl: 'piano-50.mp3', durationSeconds: 4 } };
-  return { catalog, files: { 'explanation.mp3': btoa('voice'), 'piano-50.mp3': btoa('piano') } };
+  const files = { 'explanation.mp3': btoa('voice'), 'piano-50.mp3': btoa('piano') };
+  if (withRest) { catalog.rest = { text: 'Descansa y bebe agua si quieres.', audio: { audioUrl: 'rest.mp3', durationSeconds: 5 } }; files['rest.mp3'] = btoa('rest'); }
+  return { catalog, files };
 };
 
 test('import uploads each prepared file once through song storage and confirms the shared read path', async () => {
@@ -41,6 +44,13 @@ test('import uploads each prepared file once through song storage and confirms t
     assert.equal(result.exercises[0].piano['50'].audioUrl, result.exercises[0].piano['51'].audioUrl);
     assert.match(calls[1], /shareId=test-work/); assert.ok(messages.length >= 3);
   } finally { global.fetch = oldFetch; }
+});
+
+test('the shared rest announcement is uploaded and checked with the same prepared catalogue', async () => {
+  const oldFetch=global.fetch;uploads=[];let saved;
+  global.fetch=async(_url,options)=>{if(options?.method==='POST')saved=JSON.parse(options.body).catalog;return{ok:true,status:200,json:async()=>({catalog:saved})};};
+  try {const result=await importPreparedWarmup(new File([JSON.stringify(bundle(true))],'rest.json'),'test-work',()=>{});assert.equal(uploads.length,3);assert.ok(result.rest.audio.audioUrl.includes('/warmups/'));}
+  finally {global.fetch=oldFetch;}
 });
 
 test('a missing file or remote reference is rejected before any upload, and an unauthorized catalogue save never reports success', async () => {

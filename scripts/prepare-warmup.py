@@ -57,6 +57,8 @@ def add_note(target, midi, at, duration, gain):
     source = sample(midi)
     count = min(len(source), int((duration + .08) * rate))
     audio = source[:count].copy() * gain
+    attack = min(count, int(.004 * rate))
+    audio[:attack] *= np.linspace(0, 1, attack)
     release = min(count, int(.08 * rate))
     audio[-release:] *= np.linspace(1, 0, release)
     index = int(at * rate)
@@ -71,9 +73,10 @@ def encode(name, signal, sample_rate=rate):
     signal = signal * (.8 / peak)
     buffer = io.BytesIO()
     wavfile.write(buffer, sample_rate, (signal * 32767).astype(np.int16))
-    mp3 = ffmpeg(['-i', 'pipe:0', '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-f', 'mp3', 'pipe:1'], buffer.getvalue())
-    (output / name).write_bytes(mp3)
-    return {'audioUrl': name, 'durationSeconds': round(len(signal) / sample_rate, 3)}
+    # Seekable output lets LAME write encoder delay/padding for gapless decoding.
+    ffmpeg(['-y', '-i', 'pipe:0', '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-write_xing', '1', str(output / name)], buffer.getvalue())
+    return {'audioUrl': name, 'durationSeconds': round(len(signal) / sample_rate, 3),
+            'pcmFrames': round(len(signal) / sample_rate * rate), 'pcmSampleRate': rate}
 
 
 voice = PiperVoice.load(args.voice, use_cuda=False)
@@ -83,7 +86,7 @@ def explain(text, name):
         voice.synthesize_wav(text, wav, SynthesisConfig(speaker_id=1, length_scale=1.03))
     voice_rate, speech = wavfile.read(io.BytesIO(buffer.getvalue()))
     speech = speech.astype(float) / 32768
-    speech = np.concatenate([speech, np.zeros(round(1.5 * voice_rate))])
+    speech = np.concatenate([speech, np.zeros(round(.6 * voice_rate))])
     return encode(name, speech, voice_rate)
 
 
@@ -117,14 +120,20 @@ for exercise in catalog['exercises']:
         at = preparation
         for offset, beats in zip(score['offsets'], score['noteBeats'], strict=True):
             duration = beats * beat
-            add_note(signal, root + offset, at, duration * .85, .62)
+            add_note(signal, root + offset, at, duration, .62)
             at += duration
         for offset in score['closingNotes']:
             add_note(signal, root + offset, at, score['closingBeats'] * beat - .1, .38)
+        fade = min(len(signal), round(.025 * rate))
+        signal[-fade:] *= np.linspace(1, 0, fade)
         exercise['piano'][str(root)] = encode(f'{exercise["id"]}-piano-{root}.mp3', signal)
         print(exercise['id'], root, round(total, 3), flush=True)
+if catalog.get('rest'):
+    catalog['rest']['audio'] = explain(catalog['rest']['text'], 'warmup-drinking-rest.mp3')
 (output / 'catalog.local.json').write_text(json.dumps(catalog, ensure_ascii=False, indent=2), encoding='utf8')
 files = {take['audioUrl'] for exercise in catalog['exercises'] for take in [exercise['explanation'], *exercise['piano'].values(), *(cue['audio'] for cue in exercise['cues'])]}
+if catalog.get('rest'):
+    files.add(catalog['rest']['audio']['audioUrl'])
 bundle = {'catalog': catalog, 'files': {name: base64.b64encode((output / name).read_bytes()).decode('ascii') for name in sorted(files)}}
 (output / 'prepared.warmup.json').write_text(json.dumps(bundle, ensure_ascii=False), encoding='utf8')
 print('Prepared', output, flush=True)

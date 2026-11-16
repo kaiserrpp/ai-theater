@@ -1139,5 +1139,12 @@
       "label": "Piano: FluidR3, muestras MIDI.js (CC BY 3.0), preparación local",
       "url": "https://github.com/gleitz/midi-js-soundfonts"
     }
-  ]
+  ],
+  "rest": {
+    "text": "Hacemos una pausa para descansar. Si te apetece, bebe un poco de agua. Cuando estés listo, di siguiente o adelante, o pulsa Siguiente ejercicio. Tómate el tiempo que necesites.",
+    "audio": {
+      "audioUrl": "pending",
+      "durationSeconds": 1
+    }
+  }
 }

@@ -1,6 +1,8 @@
 export interface PreparedWarmupAudio {
   audioUrl: string;
   durationSeconds: number;
+  pcmFrames?: number;
+  pcmSampleRate?: number;
 }
 
 export interface WarmupExercise {
@@ -40,6 +42,7 @@ export interface WarmupCatalog {
   exercises: WarmupExercise[];
   pending: { title: string; sourceStart: number; sourceEnd: number; note: string }[];
   credits: { label: string; url: string }[];
+  rest?: { text: string; audio: PreparedWarmupAudio };
 }
 
 export interface WarmupPreferences {
@@ -53,7 +56,7 @@ export interface WarmupTrack {
   key: string;
   title: string;
   exerciseId: string;
-  phase: 'explanation' | 'piano' | 'tip';
+  phase: 'explanation' | 'piano' | 'tip' | 'rest';
   audio: PreparedWarmupAudio;
   root?: number;
 }

@@ -14,6 +14,7 @@ module.exports = async (request, response) => {
       if (error) { response.status(400).json({ error }); return; }
       const prefix = `shared-scripts/${getStorageNamespace()}/${shareId}/warmups/`;
       const audios = catalog.exercises.flatMap(exercise => [exercise.explanation, ...Object.values(exercise.piano), ...exercise.cues.map(cue => cue.audio)]);
+      if (catalog.rest) audios.push(catalog.rest.audio);
       const inStorage = audios.every(audio => {
         const url = new URL(audio.audioUrl);
         return url.hostname.endsWith('.public.blob.vercel-storage.com') && decodeURIComponent(url.pathname).startsWith(`/${prefix}`);

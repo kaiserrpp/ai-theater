@@ -10,6 +10,7 @@ export const importPreparedWarmup = async (file: File, shareId: string, onProgre
   const catalog = bundle.catalog;
   if (!catalog || !Array.isArray(catalog.exercises) || !bundle.files || typeof bundle.files !== 'object') throw new Error('Selecciona el archivo prepared.warmup.json generado con los audios.');
   const takes: PreparedWarmupAudio[] = catalog.exercises.flatMap(exercise => [exercise.explanation, ...Object.values(exercise.piano || {}), ...(exercise.cues || []).map(cue => cue.audio)]);
+  if (catalog.rest) takes.push(catalog.rest.audio);
   const originals = new Map<PreparedWarmupAudio, string>();
   for (const take of takes) {
     if (!take || typeof take.audioUrl !== 'string' || !/^[a-zA-Z0-9-]+\.mp3$/.test(take.audioUrl) || typeof bundle.files[take.audioUrl] !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(bundle.files[take.audioUrl])) throw new Error('Falta un audio local válido dentro del paquete preparado.');

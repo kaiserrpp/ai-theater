@@ -13,6 +13,7 @@ if (oldLoader) require.extensions['.ts'] = oldLoader; else delete require.extens
 const { validateWarmupCatalog } = require('../shared/warmupCatalog');
 const fixture = () => {
   const source = structuredClone(require('../warmups/canto-2026-11/source.json'));
+  delete source.rest; // Earlier catalogues remain supported.
   source.pending = source.exercises.filter(e => e.id !== 'm-cinco-notas').map(e => ({ title: e.title, sourceStart: e.sourceStart, sourceEnd: e.sourceEnd, note: 'Fixture incompleta para verificar el estado de piloto.' }));
   source.exercises = source.exercises.filter(e => e.id === 'm-cinco-notas'); source.status = 'pilot';
   source.exercises[0].explanation = { audioUrl: 'https://example.com/explanation.mp3', durationSeconds: 20 };
@@ -35,6 +36,7 @@ test('all six starting voices produce only complete patterns within the chosen p
 
 test('the complete reconstruction keeps video order and independently adapts every exercise for every voice', () => {
   const source = structuredClone(require('../warmups/canto-2026-11/source.json'));
+  source.rest.audio = { audioUrl: 'https://example.com/rest.mp3', durationSeconds: 10 };
   assert.equal(source.status, 'complete'); assert.equal(source.pending.length, 0); assert.equal(source.exercises.length, 8);
   assert.deepEqual(source.exercises.map(e => e.sourceStart), [...source.exercises].map(e => e.sourceStart).sort((a,b) => a-b));
   for (const exercise of source.exercises) {
@@ -171,5 +173,9 @@ test('only an authorized admin can register a prepared catalogue and every audio
     assert.equal(writes.length, 1); assert.equal(writes[0].path, 'shared-scripts/preview/test-share/warmups/catalog.json');
     assert.equal(JSON.parse(writes[0].body).id, catalog.id);
     assert.equal((await run({ shareId: 'another-work', catalog })).code, 400); assert.equal(writes.length, 1);
+    catalog.rest = { text: 'Descansa.', audio: { audioUrl: 'https://test.public.blob.vercel-storage.com/shared-scripts/production/test-share/warmups/rest.mp3', durationSeconds: 5 } };
+    assert.equal((await run({ shareId: 'test-share', catalog })).code, 400); assert.equal(writes.length, 1);
+    catalog.rest.audio.audioUrl = 'https://test.public.blob.vercel-storage.com/shared-scripts/preview/test-share/warmups/rest.mp3';
+    assert.equal((await run({ shareId: 'test-share', catalog })).code, 200); assert.equal(writes.length, 2);
   } finally { Module._load = originalLoad; delete require.cache[modulePath]; }
 });

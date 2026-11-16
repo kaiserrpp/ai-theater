@@ -5,7 +5,9 @@ const identifier = value => typeof value === 'string' && /^[a-z0-9-]{1,80}$/.tes
 const url = value => {
   try { const parsed = new URL(value); return parsed.protocol === 'https:' && !parsed.username && !parsed.password; } catch { return false; }
 };
-const audio = value => object(value) && url(value.audioUrl) && finite(value.durationSeconds) && value.durationSeconds > 0 && value.durationSeconds < 1800;
+const audio = value => object(value) && url(value.audioUrl) && finite(value.durationSeconds) && value.durationSeconds > 0 && value.durationSeconds < 1800 &&
+  (value.pcmFrames === undefined && value.pcmSampleRate === undefined ||
+    Number.isInteger(value.pcmFrames) && Number.isInteger(value.pcmSampleRate) && value.pcmFrames > 0 && value.pcmSampleRate >= 8000 && value.pcmSampleRate <= 96000 && Math.abs(value.pcmFrames / value.pcmSampleRate - value.durationSeconds) < .002);
 
 // A partially rendered score must never appear as a playable exercise.
 const validateWarmupCatalog = catalog => {
@@ -31,6 +33,7 @@ const validateWarmupCatalog = catalog => {
   if (!Array.isArray(catalog.pending) || catalog.pending.length > 50 || !catalog.pending.every(item => object(item) && text(item.title) && text(item.note) && at(item.sourceStart) && at(item.sourceEnd) && item.sourceEnd > item.sourceStart)) return 'Ejercicios pendientes no válidos.';
   if (catalog.status === 'complete' && catalog.pending.length) return 'El calentamiento aún contiene ejercicios pendientes.';
   if (!Array.isArray(catalog.credits) || !catalog.credits.every(item => object(item) && text(item.label) && url(item.url))) return 'Créditos no válidos.';
+  if (catalog.rest !== undefined && (!object(catalog.rest) || !text(catalog.rest.text) || !audio(catalog.rest.audio))) return 'Aviso de descanso no válido.';
   return null;
 };
 module.exports = { validateWarmupCatalog };
