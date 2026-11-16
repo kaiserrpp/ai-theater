@@ -1,4 +1,6 @@
-const { listSharedScriptSummaries } = require('./_shared');
+const { hasSharedStorage } = require('../../server/shared-storage');
+const { listSharedScriptSummaries, getStorageNamespace } = require('./_shared');
+const { getProtectedLibrary } = require('../../server/library-rescue');
 
 module.exports = async (request, response) => {
   if (request.method !== 'GET') {
@@ -7,7 +9,7 @@ module.exports = async (request, response) => {
     return;
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!hasSharedStorage() && !getProtectedLibrary(getStorageNamespace())) {
     response.status(500).json({ error: 'Falta configurar BLOB_READ_WRITE_TOKEN en Vercel.' });
     return;
   }

@@ -1,4 +1,5 @@
-const { head, list, put } = require('@vercel/blob');
+const sharedStorage = require('../../server/shared-storage');
+const { head, list, put } = sharedStorage.selectStorage(require('@vercel/blob'));
 const { assertStorageWritable, getProtectedLibrary } = require('../../server/library-rescue');
 const { normalizeRecognitionComparison } = require('../../shared/recognitionComparison');
 const { normalizeRehearsalComparison } = require('../../shared/rehearsalComparison');
@@ -162,6 +163,7 @@ const ensureCanReadFeedback = (request, response) => {
 const buildFeedbackPrefix = () => `intelligent-feedback/${getStorageNamespace()}`;
 
 const readFeedbackBlob = async (pathname) => {
+  if (sharedStorage.usesSupabase()) return sharedStorage.readJson(pathname);
   const blob = await head(pathname);
   const feedbackResponse = await fetch(`${blob.url}${blob.url.includes('?') ? '&' : '?'}_ts=${Date.now()}`, {
     cache: 'no-store',
@@ -238,7 +240,7 @@ module.exports = async (request, response) => {
     return;
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!sharedStorage.hasSharedStorage()) {
     response.status(500).json({ error: 'Falta configurar BLOB_READ_WRITE_TOKEN en Vercel.' });
     return;
   }

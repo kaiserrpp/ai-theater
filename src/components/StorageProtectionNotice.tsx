@@ -13,7 +13,8 @@ export const StorageProtectionNotice = () => {
       .then(async response => {
         if (!response.ok) return;
         const status = await response.json();
-        if (!controller.signal.aborted) setMessage(status.readOnly === true && typeof status.message === 'string' ? status.message : '');
+        if (!controller.signal.aborted) setMessage(status.readOnly === true && typeof status.message === 'string' ? status.message
+          : status.maximumUploadBytes ? `Tamaño máximo por archivo nuevo: ${Math.round(status.maximumUploadBytes / 1024 / 1024)} MB.` : '');
       }).catch(() => {});
     return () => controller.abort();
   }, [isAdmin]);

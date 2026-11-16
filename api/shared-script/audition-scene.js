@@ -1,3 +1,4 @@
+const { hasSharedStorage } = require('../../server/shared-storage');
 const { hasSongAdminPasswordConfigured, isAuthorizedSongAdminRequest, parseJsonBody, readManifest, writeManifest } = require('./_shared');
 const handleMusicalAudition = require('../../server/musical-audition');
 const { validateAuditionScript, normalizeAuditionScript } = require('../../shared/auditionScenes');
@@ -8,7 +9,7 @@ module.exports = async (request, response) => {
     response.setHeader('Allow', 'POST, PATCH, DELETE');
     return response.status(405).json({ error: 'Método no permitido.' });
   }
-  if (!process.env.BLOB_READ_WRITE_TOKEN || !hasSongAdminPasswordConfigured()) {
+  if (!hasSharedStorage() || !hasSongAdminPasswordConfigured()) {
     return response.status(500).json({ error: 'Falta configurar el almacenamiento o la clave de gestión.' });
   }
   let payload;

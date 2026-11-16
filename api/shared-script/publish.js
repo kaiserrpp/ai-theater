@@ -1,3 +1,4 @@
+const { hasSharedStorage } = require('../../server/shared-storage');
 const {
   MANIFEST_VERSION,
   buildShareUrl,
@@ -20,7 +21,7 @@ module.exports = async (request, response) => {
     return;
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!hasSharedStorage()) {
     response.status(500).json({ error: 'Falta configurar BLOB_READ_WRITE_TOKEN en Vercel.' });
     return;
   }

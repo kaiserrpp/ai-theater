@@ -8,7 +8,7 @@ const hasAdminPassword = () => typeof process.env.SONG_ADMIN_PASSWORD === 'strin
 const isValidAdminPassword = (password) => hasAdminPassword() && typeof password === 'string' && password.length <= 1024
   && timingSafeEqual(hash(password), hash(process.env.SONG_ADMIN_PASSWORD));
 const signingKey = () => {
-  const secret = process.env.ADMIN_SESSION_SECRET || process.env.BLOB_READ_WRITE_TOKEN;
+  const secret = process.env.ADMIN_SESSION_SECRET || process.env.BLOB_READ_WRITE_TOKEN || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!hasAdminPassword() || !secret) return null;
   // The random server secret prevents offline guessing of the management password from a cookie.
   return createHmac('sha256', secret).update(`ai-theatre-admin-session-v1\0${process.env.SONG_ADMIN_PASSWORD}`).digest();

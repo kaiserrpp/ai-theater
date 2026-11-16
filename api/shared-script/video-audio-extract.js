@@ -1,4 +1,5 @@
-const { del, put } = require('@vercel/blob');
+const sharedStorage = require('../../server/shared-storage');
+const { del, put } = sharedStorage.selectStorage(require('@vercel/blob'));
 const { assertStorageWritable } = require('../../server/library-rescue');
 const ffmpegPath = require('ffmpeg-static');
 const { createWriteStream } = require('fs');
@@ -28,7 +29,7 @@ const sanitizeFileName = (value) =>
     .replace(/^-|-$/g, '');
 
 const ensureConfigured = (response) => {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!sharedStorage.hasSharedStorage()) {
     response.status(500).json({ error: 'Falta configurar BLOB_READ_WRITE_TOKEN en Vercel.' });
     return false;
   }
@@ -182,6 +183,13 @@ module.exports = async (request, response) => {
     if (!shareId || !targetId || !sourceUrl) {
       response.status(400).json({ error: 'Faltan datos para convertir el video a audio.' });
       return;
+    }
+    if (sharedStorage.usesSupabase()) {
+      const folder = targetType === 'musical-audition' ? 'musical-auditions' : targetType === 'musical-number' ? 'musical-numbers' : 'songs';
+      const prefix = `shared-scripts/${getStorageNamespace()}/${shareId}/${folder}/${targetId}/`;
+      if (!sharedStorage.isMediaUrl(sourceUrl, prefix) || sourceUrl !== sharedStorage.publicMediaUrl(sourcePathname)) {
+        response.status(400).json({ error: 'El vídeo debe pertenecer a esta obra y entorno.' }); return;
+      }
     }
 
     const uniqueBase = `teatroia-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

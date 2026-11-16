@@ -1,3 +1,4 @@
+const { hasSharedStorage } = require('./shared-storage');
 const { hasSongAdminPasswordConfigured, isAuthorizedSongAdminRequest, parseJsonBody, readManifest, writeManifest } = require('../api/shared-script/_shared');
 const { normalizeRoles, validateMusicalAudition, validAudioUrl } = require('../shared/musicalAuditions');
 
@@ -6,7 +7,7 @@ module.exports = async (request, response) => {
     response.setHeader('Allow', 'POST, PATCH, DELETE');
     return response.status(405).json({ error: 'Método no permitido.' });
   }
-  if (!process.env.BLOB_READ_WRITE_TOKEN || !hasSongAdminPasswordConfigured()) return response.status(500).json({ error: 'Falta configurar el almacenamiento o la clave de gestión.' });
+  if (!hasSharedStorage() || !hasSongAdminPasswordConfigured()) return response.status(500).json({ error: 'Falta configurar el almacenamiento o la clave de gestión.' });
   let input;
   try { input = parseJsonBody(request); } catch { return response.status(400).json({ error: 'Los datos recibidos no son válidos.' }); }
   if (!input || typeof input !== 'object' || Array.isArray(input)) return response.status(400).json({ error: 'Los datos recibidos no son válidos.' });

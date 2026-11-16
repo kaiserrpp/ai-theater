@@ -1,7 +1,8 @@
-const { head, put } = require('@vercel/blob');
+const sharedStorage = require('./shared-storage');
+const { head, put } = sharedStorage.selectStorage(require('@vercel/blob'));
 const { getStorageNamespace, isAuthorizedSongAdminRequest, getSongAdminPasswordFromRequest, parseJsonBody } = require('../api/shared-script/_shared');
 const { validateWarmupCatalog } = require('../shared/warmupCatalog');
-const { getProtectedLibrary, assertStorageWritable } = require('./library-rescue');
+const { getProtectedLibrary, getPublishedLibrary, assertStorageWritable } = require('./library-rescue');
 
 module.exports = async (request, response) => {
   if (request.method === 'POST') {
@@ -18,6 +19,8 @@ module.exports = async (request, response) => {
       if (catalog.rest) audios.push(catalog.rest.audio);
       const inStorage = audios.every(audio => {
         const url = new URL(audio.audioUrl);
+        if (sharedStorage.usesSupabase()) return sharedStorage.isMediaUrl(audio.audioUrl, prefix) ||
+          JSON.stringify(getPublishedLibrary(getStorageNamespace())?.works[shareId]?.warmup || {}).includes(JSON.stringify(audio.audioUrl));
         return url.hostname.endsWith('.public.blob.vercel-storage.com') && decodeURIComponent(url.pathname).startsWith(`/${prefix}`);
       });
       if (!inStorage) { response.status(400).json({ error: 'Los audios deben pertenecer al almacenamiento de esta obra y entorno.' }); return; }
@@ -34,6 +37,18 @@ module.exports = async (request, response) => {
   if (rescue) {
     response.setHeader('Cache-Control', 'no-store');
     response.status(200).json({ catalog: rescue.works[shareId]?.warmup || null }); return;
+  }
+  if (sharedStorage.usesSupabase()) {
+    try {
+      const catalog = await sharedStorage.readJson(`shared-scripts/${getStorageNamespace()}/${shareId}/warmups/catalog.json`);
+      if (validateWarmupCatalog(catalog)) throw new Error('Catálogo incompleto.');
+      response.setHeader('Cache-Control', 'no-store'); response.status(200).json({ catalog });
+    } catch {
+      const catalog = getPublishedLibrary(getStorageNamespace())?.works[shareId]?.warmup;
+      if (catalog) response.status(200).json({ catalog });
+      else response.status(503).json({ error: 'No se pudo cargar el calentamiento. Vuelve a intentarlo.' });
+    }
+    return;
   }
   try {
     const blob = await head(`shared-scripts/${getStorageNamespace()}/${shareId}/warmups/catalog.json`);

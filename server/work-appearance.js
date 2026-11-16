@@ -1,8 +1,9 @@
-const { put } = require('@vercel/blob');
+const sharedStorage = require('./shared-storage');
+const { put } = sharedStorage.selectStorage(require('@vercel/blob'));
 const { getStorageNamespace, hasSongAdminPasswordConfigured, isAuthorizedSongAdminRequest,
   parseJsonBody, readManifest, writeManifest } = require('../api/shared-script/_shared');
 const { normalizeBackgroundMetadata, normalizeSharedAppearance } = require('../shared/workAppearance');
-const { assertStorageWritable } = require('./library-rescue');
+const { assertStorageWritable, getProtectedLibrary } = require('./library-rescue');
 
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const decodeImage = (value) => {
@@ -24,7 +25,7 @@ module.exports = async (request, response) => {
     response.setHeader('Allow', 'GET, POST, DELETE');
     response.status(405).json({ error: 'Método no permitido.' }); return;
   }
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!sharedStorage.hasSharedStorage() && !(request.method === 'GET' && getProtectedLibrary(getStorageNamespace()))) {
     response.status(500).json({ error: 'Falta configurar el almacenamiento.' }); return;
   }
   try {
@@ -41,7 +42,7 @@ module.exports = async (request, response) => {
     if (!/^[a-z0-9_-]{1,80}$/i.test(shareId)) {
       response.status(400).json({ error: 'Falta identificar la obra compartida.' }); return;
     }
-    const manifest = await readManifest(shareId);
+    const manifest = await readManifest(shareId, { allowPublishedFallback: request.method === 'GET' });
     const previous = normalizeSharedAppearance(manifest.appearance);
     if (request.method === 'GET') { response.status(200).json(previous); return; }
     assertStorageWritable(getStorageNamespace());

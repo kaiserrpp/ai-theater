@@ -1,8 +1,12 @@
-const { readManifest } = require('./_shared');
+const { readManifest, getStorageNamespace } = require('./_shared');
+const { getProtectedLibrary } = require('../../server/library-rescue');
+const { hasSharedStorage } = require('../../server/shared-storage');
 const appearance = require('../../server/work-appearance');
 const warmup = require('../../server/warmup-catalog');
+const storageSetup = require('../../server/storage-setup');
 
 module.exports = async (request, response) => {
+  if (request.query?.resource === 'storage-setup') return storageSetup(request, response);
   if (request.query?.resource === 'warmup') return warmup(request, response);
   if (request.query?.resource === 'appearance') return appearance(request, response);
   if (request.method !== 'GET') {
@@ -11,7 +15,7 @@ module.exports = async (request, response) => {
     return;
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!hasSharedStorage() && !getProtectedLibrary(getStorageNamespace())) {
     response.status(500).json({ error: 'Falta configurar BLOB_READ_WRITE_TOKEN en Vercel.' });
     return;
   }
@@ -27,7 +31,7 @@ module.exports = async (request, response) => {
   }
 
   try {
-    const manifest = await readManifest(shareId);
+    const manifest = await readManifest(shareId, { allowPublishedFallback: true });
     response.status(200).json(manifest);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo cargar la obra compartida.';

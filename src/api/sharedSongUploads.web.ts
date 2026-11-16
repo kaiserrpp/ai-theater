@@ -37,7 +37,8 @@ interface UploadSharedSongAudioInput {
 }
 
 interface UploadTokenResponse {
-  clientToken: string;
+  clientToken?: string;
+  upload?: { provider: 'supabase'; signedUrl: string; publicUrl: string; pathname: string; maximumSizeInBytes: number };
 }
 
 interface BlobUploadResponse {
@@ -48,9 +49,12 @@ interface BlobUploadResponse {
 
 interface SharedStorageContextResponse {
   namespace: string;
+  maximumUploadBytes?: number;
+  readOnly?: boolean;
+  message?: string;
 }
 
-let sharedStorageNamespacePromise: Promise<string> | null = null;
+let sharedStorageNamespacePromise: Promise<SharedStorageContextResponse> | null = null;
 
 const sanitizeFileName = (value: string) =>
   value
@@ -86,7 +90,7 @@ const fetchSharedStorageNamespace = async () => {
           throw new Error('La respuesta de almacenamiento no incluye un namespace valido.');
         }
 
-        return payload.namespace.trim();
+        return { ...payload, namespace: payload.namespace.trim() };
       })
       .catch((error) => {
         sharedStorageNamespacePromise = null;
@@ -103,12 +107,16 @@ const fetchClientToken = async ({
   shareId,
   targetId,
   targetType,
+  size,
+  contentType,
 }: {
   pathname: string;
   password?: string;
   shareId: string;
   targetId: string;
   targetType: 'song' | 'musical-number' | 'musical-audition' | 'warmup';
+  size: number;
+  contentType: string;
 }) => {
   const response = await fetch(buildProtectedApiUrl('/api/shared-script/song-upload'), {
     method: 'POST',
@@ -124,6 +132,8 @@ const fetchClientToken = async ({
         pathname,
         clientPayload: JSON.stringify({ shareId, targetId, targetType }),
         multipart: false,
+        size,
+        contentType,
       },
     }),
   });
@@ -143,26 +153,30 @@ const uploadBlobWithClientToken = ({
   clientToken,
   contentType,
   onUploadProgress,
+  upload,
 }: {
   pathname: string;
   file: Blob;
   clientToken: string;
   contentType?: string;
   onUploadProgress?: (percentage: number) => void;
+  upload?: UploadTokenResponse['upload'];
 }) =>
   new Promise<BlobUploadResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
 
-    xhr.open('PUT', `${BLOB_API_URL}/?pathname=${encodeURIComponent(pathname)}`);
+    xhr.open('PUT', upload ? upload.signedUrl : `${BLOB_API_URL}/?pathname=${encodeURIComponent(pathname)}`);
     xhr.timeout = UPLOAD_TIMEOUT_MS;
     xhr.responseType = 'json';
-    xhr.setRequestHeader('authorization', `Bearer ${clientToken}`);
-    xhr.setRequestHeader('x-api-version', BLOB_API_VERSION);
-    xhr.setRequestHeader('x-vercel-blob-access', 'public');
-    xhr.setRequestHeader('x-content-length', String(file.size));
-
-    if (contentType) {
-      xhr.setRequestHeader('x-content-type', contentType);
+    if (upload) {
+      xhr.setRequestHeader('Content-Type', contentType || 'application/octet-stream');
+      xhr.setRequestHeader('cache-control', 'max-age=31536000');
+    } else {
+      xhr.setRequestHeader('authorization', `Bearer ${clientToken}`);
+      xhr.setRequestHeader('x-api-version', BLOB_API_VERSION);
+      xhr.setRequestHeader('x-vercel-blob-access', 'public');
+      xhr.setRequestHeader('x-content-length', String(file.size));
+      if (contentType) xhr.setRequestHeader('x-content-type', contentType);
     }
 
     if (onUploadProgress) {
@@ -192,7 +206,8 @@ const uploadBlobWithClientToken = ({
         return;
       }
 
-      const payload = xhr.response as BlobUploadResponse | null;
+      const payload: BlobUploadResponse | null = upload
+        ? { url: upload.publicUrl, pathname: upload.pathname, contentType } : xhr.response as BlobUploadResponse | null;
       if (!payload?.url || !payload.pathname) {
         reject(new Error('La respuesta de Blob no incluye el audio subido.'));
         return;
@@ -220,34 +235,46 @@ export const uploadSharedSongAudio = async ({
       : `audio-${Date.now()}.mp3`;
   const safeFileName = sanitizeFileName(originalFileName) || `audio-${Date.now()}.mp3`;
   const targetFolder = targetType === 'warmup' ? 'warmups' : targetType === 'musical-audition' ? 'musical-auditions' : targetType === 'musical-number' ? 'musical-numbers' : 'songs';
-  const storageNamespace = await fetchSharedStorageNamespace();
+  const storage = await fetchSharedStorageNamespace();
+  if (storage.readOnly) throw new Error(storage.message || 'Las subidas están temporalmente protegidas. Conserva el archivo.');
+  const storageNamespace = storage.namespace;
   const pathname = `shared-scripts/${storageNamespace}/${shareId}/${targetFolder}/${targetId}/${Date.now()}-${safeFileName}`;
+  const extensionTypes: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+    aac: 'audio/aac', ogg: 'audio/ogg', flac: 'audio/flac', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
   const contentType =
     typeof namedFile.type === 'string' && namedFile.type.trim().length > 0
       ? namedFile.type
-      : undefined;
+      : extensionTypes[safeFileName.split('.').pop()?.toLowerCase() || ''];
   const fileSize = typeof namedFile.size === 'number' ? namedFile.size : null;
 
-  if (fileSize !== null && fileSize > MAX_SHARED_SONG_UPLOAD_BYTES) {
+  const maximumUploadBytes = storage.maximumUploadBytes || MAX_SHARED_SONG_UPLOAD_BYTES;
+  if (fileSize !== null && fileSize > maximumUploadBytes) {
     throw new Error(
       `El archivo pesa ${formatUploadSize(fileSize)} y el limite actual es ${formatUploadSize(
-        MAX_SHARED_SONG_UPLOAD_BYTES
+        maximumUploadBytes
       )}. Prueba con un video mas corto o exporta solo el audio.`
     );
   }
 
-  const { clientToken } = await fetchClientToken({
+  const grant = await fetchClientToken({
     pathname,
     password,
     shareId,
     targetId,
     targetType,
+    size: file.size,
+    contentType: contentType || (originalFileName.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream'),
   });
+
+  if (grant.upload && (grant.upload.provider !== 'supabase' || grant.upload.pathname !== pathname ||
+    !/^https:\/\/[a-z0-9-]+\.supabase\.co\//.test(grant.upload.signedUrl) ||
+    new URL(grant.upload.signedUrl).origin !== new URL(grant.upload.publicUrl).origin)) throw new Error('Destino de subida no válido.');
 
   const blob = await uploadBlobWithClientToken({
     pathname,
     file,
-    clientToken,
+    clientToken: grant.clientToken || '',
+    upload: grant.upload,
     contentType,
     onUploadProgress,
   });

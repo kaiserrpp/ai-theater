@@ -1,3 +1,4 @@
+const { hasSharedStorage } = require('../../server/shared-storage');
 const {
   hasSongAdminPasswordConfigured,
   isAuthorizedSongAdminRequest,
@@ -167,7 +168,7 @@ const resolveKind = (value, fallbackKind = 'karaoke') =>
   AUDIO_KINDS.has(value) ? value : fallbackKind;
 
 const ensureConfigured = (response) => {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!hasSharedStorage()) {
     response.status(500).json({ error: 'Falta configurar BLOB_READ_WRITE_TOKEN en Vercel.' });
     return false;
   }

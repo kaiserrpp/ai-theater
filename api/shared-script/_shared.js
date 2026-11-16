@@ -1,9 +1,10 @@
-const { head, list, put } = require('@vercel/blob');
+const sharedStorage = require('../../server/shared-storage');
+const { head, list, put } = sharedStorage.selectStorage(require('@vercel/blob'));
 const { normalizeAuditionScenes } = require('../../shared/auditionScenes');
 const { normalizeMusicalAuditions } = require('../../shared/musicalAuditions');
 const adminSession = require('../../server/admin-session');
 const { normalizeSharedAppearance } = require('../../shared/workAppearance');
-const { getProtectedLibrary, assertStorageWritable } = require('../../server/library-rescue');
+const { getProtectedLibrary, getPublishedLibrary, assertStorageWritable } = require('../../server/library-rescue');
 
 const MANIFEST_VERSION = 7;
 const EMPTY_SONGS = [];
@@ -403,12 +404,20 @@ const readManifestFromUrl = async (url) => {
   return normalizeManifest(manifest);
 };
 
-const readManifest = async (shareId) => {
+const readManifest = async (shareId, { allowPublishedFallback = false } = {}) => {
   const rescue = getProtectedLibrary(getStorageNamespace());
   if (rescue) {
     const manifest = rescue.works[shareId]?.manifest;
     if (!manifest) throw new Error('Obra not found.');
     return normalizeManifest(manifest);
+  }
+  if (sharedStorage.usesSupabase()) {
+    try { return normalizeManifest(await sharedStorage.readJson(buildManifestPath(shareId))); }
+    catch (error) {
+      const published = allowPublishedFallback && getPublishedLibrary(getStorageNamespace())?.works[shareId]?.manifest;
+      if (published) return normalizeManifest(published);
+      throw error;
+    }
   }
   const blob = await head(buildManifestPath(shareId));
   return readManifestFromUrl(blob.url);
@@ -453,17 +462,21 @@ const buildManifestSummary = (manifest) => ({
 const listSharedScriptSummaries = async () => {
   const rescue = getProtectedLibrary(getStorageNamespace());
   if (rescue) return Object.values(rescue.works).map(work => buildManifestSummary(normalizeManifest(work.manifest)));
-  const result = await list({
-    prefix: `${buildSharedScriptsPrefix()}/`,
-    limit: 200,
-  });
+  let result;
+  try { result = await list({ prefix: `${buildSharedScriptsPrefix()}/`, limit: 200 }); }
+  catch (error) {
+    const published = sharedStorage.usesSupabase() && getPublishedLibrary(getStorageNamespace());
+    if (published) return Object.values(published.works).map(work => buildManifestSummary(normalizeManifest(work.manifest)));
+    throw error;
+  }
 
   const manifestBlobs = result.blobs.filter((blob) => blob.pathname.endsWith('/manifest.json'));
 
   const manifests = await Promise.all(
     manifestBlobs.map(async (blob) => {
       try {
-        return await readManifestFromUrl(blob.url);
+        return sharedStorage.usesSupabase()
+          ? normalizeManifest(await sharedStorage.readJson(blob.pathname)) : await readManifestFromUrl(blob.url);
       } catch {
         return null;
       }

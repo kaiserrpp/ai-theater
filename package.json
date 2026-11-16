@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.11.240",
+  "version": "2026.11.241",
   "scripts": {
     "comparison:build": "node scripts/build-asr-comparison.cjs",
     "pretest": "node scripts/build-asr-comparison.cjs --check",
@@ -31,6 +31,7 @@
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
+    "@supabase/storage-js": "^2.119.0",
     "@vercel/blob": "^2.3.3",
     "expo": "~54.0.33",
     "expo-audio": "~1.1.1",
@@ -67,8 +68,8 @@
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
-    "typescript": "~5.9.2",
-    "ignore": "5.3.2"
+    "ignore": "5.3.2",
+    "typescript": "~5.9.2"
   },
   "private": true
 }
