@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.11.235",
+  "version": "2026.11.236",
   "scripts": {
     "comparison:build": "node scripts/build-asr-comparison.cjs",
     "pretest": "node scripts/build-asr-comparison.cjs --check",

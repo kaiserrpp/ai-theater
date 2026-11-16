@@ -37,6 +37,8 @@ export type SpeechRecognitionSnapshot = {
   errorCode: string | null;
   errorDetail: string | null;
   nativeRecognition?: NativeRecognitionInfo | null;
+  // Commands belong to an utterance, not to the accumulated actor transcript.
+  lastUtterance?: { text: string; isFinal: boolean; lineKey: string | null } | null;
 };
 
 type RecognitionOptions = {
@@ -171,7 +173,7 @@ export const createSpeechRecognitionSession = (
   const resetTranscript = () => {
     committedTranscript = '';
     ignoredResultCount = latestResults.length;
-    update({ transcript: '', finalTranscript: '', interimTranscript: '', hasReceivedTranscript: false, nativeRecognition: null });
+    update({ transcript: '', finalTranscript: '', interimTranscript: '', hasReceivedTranscript: false, nativeRecognition: null, lastUtterance: null });
   };
   const armEvidence = () => {
     if (!options.naturalEnd || evidenceTimer !== null || !enabled || !pageVisible || blocked) return;
@@ -232,7 +234,7 @@ export const createSpeechRecognitionSession = (
       inputEndReason = null;
       closingForChange = false;
       controlledStopRequested = false;
-      update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null });
+      update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null, lastUtterance: null });
       current.onstart = () => {
         if (recognition === current && enabled && pageVisible && !blocked && !closingForChange) update({ status: 'listening' });
       };
@@ -270,6 +272,7 @@ export const createSpeechRecognitionSession = (
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
         latestResults = event.results;
+        const last = event.results[event.results.length - 1];
         const finals: string[] = [];
         const interims: string[] = [];
         const all: string[] = [];
@@ -287,6 +290,7 @@ export const createSpeechRecognitionSession = (
           finalTranscript: [committedTranscript, ...finals].filter(Boolean).join(' '),
           interimTranscript: interims.join(' '),
           hasReceivedTranscript: all.length > 0,
+          lastUtterance: last?.[0]?.transcript?.trim() ? { text: last[0]!.transcript.trim(), isFinal: last.isFinal, lineKey } : null,
         });
       };
       current.onend = () => {
@@ -300,7 +304,8 @@ export const createSpeechRecognitionSession = (
           detach(false); closingForChange = false;
           if (blocked) return;
           update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false,
-            finalTranscript: committedTranscript, interimTranscript: '' });
+            finalTranscript: committedTranscript, interimTranscript: '',
+            lastUtterance: snapshot.lastUtterance ? { ...snapshot.lastUtterance, isFinal: true } : null });
           if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(); }, 0);
           return;
         }
@@ -313,7 +318,8 @@ export const createSpeechRecognitionSession = (
           // final. Those words can no longer change. Settle them now so the
           // actor's completed line is evaluated before the restart cue runs.
           update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false,
-            finalTranscript: committedTranscript, interimTranscript: '' });
+            finalTranscript: committedTranscript, interimTranscript: '',
+            lastUtterance: snapshot.lastUtterance ? { ...snapshot.lastUtterance, isFinal: true } : null });
           if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(); }, 250);
           return;
         }

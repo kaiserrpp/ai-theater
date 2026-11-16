@@ -13,6 +13,8 @@ if (oldLoader) require.extensions['.ts'] = oldLoader; else delete require.extens
 const { validateWarmupCatalog } = require('../shared/warmupCatalog');
 const fixture = () => {
   const source = structuredClone(require('../warmups/canto-2026-11/source.json'));
+  source.pending = source.exercises.filter(e => e.id !== 'm-cinco-notas').map(e => ({ title: e.title, sourceStart: e.sourceStart, sourceEnd: e.sourceEnd, note: 'Fixture incompleta para verificar el estado de piloto.' }));
+  source.exercises = source.exercises.filter(e => e.id === 'm-cinco-notas'); source.status = 'pilot';
   source.exercises[0].explanation = { audioUrl: 'https://example.com/explanation.mp3', durationSeconds: 20 };
   source.exercises[0].piano = Object.fromEntries(Array.from({ length: 42 }, (_, i) => [36 + i, { audioUrl: `https://example.com/piano-${36 + i}.mp3`, durationSeconds: 3.934 }]));
   return source;
@@ -29,6 +31,23 @@ test('all six starting voices produce only complete patterns within the chosen p
     assert.equal(plan.tracks[0].phase, 'explanation');
     assert.equal(plan.roots[0], plan.roots[1]); // source's initial repetition survives
   }
+});
+
+test('the complete reconstruction keeps video order and independently adapts every exercise for every voice', () => {
+  const source = structuredClone(require('../warmups/canto-2026-11/source.json'));
+  assert.equal(source.status, 'complete'); assert.equal(source.pending.length, 0); assert.equal(source.exercises.length, 8);
+  assert.deepEqual(source.exercises.map(e => e.sourceStart), [...source.exercises].map(e => e.sourceStart).sort((a,b) => a-b));
+  for (const exercise of source.exercises) {
+    exercise.explanation = { audioUrl: 'https://example.com/voice.mp3', durationSeconds: 20 };
+    exercise.piano = Object.fromEntries(Array.from({length:42}, (_,i) => [36+i,{audioUrl:`https://example.com/piano-${36+i}.mp3`,durationSeconds:4}]));
+    exercise.cues.forEach(cue => { cue.audio = exercise.explanation; });
+    for (const voice of WARMUP_VOICES) {
+      const prefs = voicePreferences(voice.id), plan = planWarmupExercise(exercise, prefs);
+      assert.ok(plan.low >= prefs.low && plan.high <= prefs.high, `${voice.id} ${exercise.id}`);
+      assert.equal(plan.tracks.filter(t => t.phase === 'tip').length, exercise.cues.length, 'tips survive personal range trimming');
+    }
+  }
+  assert.equal(validateWarmupCatalog(source), null);
 });
 
 test('a narrower exercise limit shortens the climb and turns once, preserving every note of each pattern', () => {

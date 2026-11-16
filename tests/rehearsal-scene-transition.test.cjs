@@ -86,6 +86,26 @@ test('Whisper conversation is discarded only after commitment, then a fresh prov
   session.dispose();
 });
 
+test('an unrelated utterance cannot poison later commands, even when the service reuses its result slot', () => {
+  let handle;
+  class Recognition { constructor() { handle = this; } start() {} abort() {} }
+  const session = createSpeechRecognitionSession(Recognition, () => {});
+  session.activate({ lang: 'es-ES', lineKey: 'scene:3' }); handle.onaudiostart();
+  const emit = (texts) => handle.onresult({ results: texts.map(([text,isFinal]) => ({ isFinal, 0: { transcript: text } })) });
+  const action = () => commandAction(session.getSnapshot());
+  emit([['un momento',true]]); assert.equal(action(),'discard'); session.resetTranscript();
+  // Some services replace the last result rather than appending a new slot.
+  emit([['adelante',false]]); assert.equal(action(),'wait');
+  emit([['adelante',true]]); assert.equal(action(),'start');
+  session.resetTranscript();
+  emit([['no adelante',true]]); assert.equal(action(),'discard');
+  emit([['no adelante',true],['ahora voy a beber',true],['adelante',false]]); assert.equal(action(),'wait');
+  emit([['no adelante',true],['ahora voy a beber',true],['adelante',true]]); assert.equal(action(),'start');
+  // Actor transcript accumulation remains intact; command matching has its own boundary.
+  assert.match(session.getSnapshot().finalTranscript,/ahora voy a beber adelante/);
+  session.dispose();
+});
+
 test('announcements release the silence detector first and finishing the voice leaves the scene waiting', async () => {
   const events = [];
   let completeRelease;

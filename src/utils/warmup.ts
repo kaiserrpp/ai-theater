@@ -62,7 +62,9 @@ export const planWarmupExercise = (exercise: WarmupExercise, prefs: WarmupPrefer
   const roots: number[] = [], tracks: WarmupTrack[] = [];
   if (explanation) tracks.push({ key: `${exercise.id}:explanation`, exerciseId: exercise.id, title: `${exercise.title} · Explicación`, phase: 'explanation', audio: exercise.explanation });
   groups.forEach(group => {
-    exercise.cues.filter(cue => cue.beforeStep === group.sourceStep).forEach((cue, index) => tracks.push({
+    // A personal range can omit the original cue's step. Keep its advice at
+    // the next surviving step, or just before the last complete pattern.
+    exercise.cues.filter(cue => (groups.find(entry => entry.sourceStep >= cue.beforeStep) || groups.at(-1)) === group).forEach((cue, index) => tracks.push({
       key: `${exercise.id}:tip:${group.sourceStep}:${index}`, exerciseId: exercise.id, title: cue.text, phase: 'tip', audio: cue.audio,
     }));
     const prepared = exercise.piano[String(group.root)];

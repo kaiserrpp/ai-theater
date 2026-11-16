@@ -12,6 +12,7 @@ export const createSongPlayback = <T extends PlaybackTrack>(options: {
   onDuration: (seconds: number) => void;
   onQueue: (value: { index: number; total: number }) => void;
   onError: (message: string) => void;
+  onComplete?: () => void;
 }) => {
   let audio: HTMLAudioElement | null = null;
   let queue: T[] = [];
@@ -39,7 +40,7 @@ export const createSongPlayback = <T extends PlaybackTrack>(options: {
       const next = repeat === 'track' || (mode === 'single' && repeat === 'queue') ? current
         : mode === 'single' ? null : queue[index + 1] || (repeat === 'queue' ? queue[0] : null);
       if (next) start(next, true);
-      else options.onPlaying(false);
+      else { options.onPlaying(false); options.onComplete?.(); }
     };
     if (changed) {
       element.pause(); element.src = track.audio.audioUrl;

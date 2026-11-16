@@ -916,6 +916,7 @@ export const RehearsalView: React.FC<Props> = ({
     transcript: speechRecognitionTranscript,
     finalTranscript: speechRecognitionFinalTranscript,
     interimTranscript: speechRecognitionInterimTranscript,
+    lastUtterance: speechRecognitionLastUtterance,
     isAudioActive: isRecognitionAudioActive,
     hasReceivedTranscript: hasRecognitionReceivedText,
     getRecognitionProcessingTiming,
@@ -1012,6 +1013,7 @@ export const RehearsalView: React.FC<Props> = ({
       finalTranscript: speechRecognitionFinalTranscript,
       interimTranscript: speechRecognitionInterimTranscript,
       acceptInterim: usesWhisperRecognition(recognitionEngine),
+      lastUtterance: speechRecognitionLastUtterance,
     });
     if (action === 'start') {
       startCurrentScene();
@@ -1020,7 +1022,7 @@ export const RehearsalView: React.FC<Props> = ({
       resetSpeechRecognitionTranscript();
     }
   }, [recognitionEngine, resetSpeechRecognitionTranscript, shouldListenForSceneCommand, speechRecognitionFinalTranscript,
-    speechRecognitionInterimTranscript, startCurrentScene]);
+    speechRecognitionInterimTranscript, speechRecognitionLastUtterance, startCurrentScene]);
 
   const intelligentLineMatch = useMemo(
     () =>

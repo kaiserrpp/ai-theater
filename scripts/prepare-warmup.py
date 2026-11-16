@@ -73,14 +73,20 @@ def encode(name, signal, sample_rate=rate):
 
 
 voice = PiperVoice.load(args.voice, use_cuda=False)
-for exercise in catalog['exercises']:
+def explain(text, name):
     buffer = io.BytesIO()
     with wave.open(buffer, 'wb') as wav:
-        voice.synthesize_wav(exercise['instructions'], wav, SynthesisConfig(speaker_id=1, length_scale=1.03))
+        voice.synthesize_wav(text, wav, SynthesisConfig(speaker_id=1, length_scale=1.03))
     voice_rate, speech = wavfile.read(io.BytesIO(buffer.getvalue()))
     speech = speech.astype(float) / 32768
     speech = np.concatenate([speech, np.zeros(round(1.5 * voice_rate))])
-    exercise['explanation'] = encode(exercise['id'] + '-explanation.mp3', speech, voice_rate)
+    return encode(name, speech, voice_rate)
+
+
+for exercise in catalog['exercises']:
+    exercise['explanation'] = explain(exercise['instructions'], exercise['id'] + '-explanation.mp3')
+    for index, cue in enumerate(exercise['cues']):
+        cue['audio'] = explain(cue['text'], f'{exercise["id"]}-tip-{index}.mp3')
     exercise['piano'] = {}
     score = exercise['score']
     beat = 60 / score['tempoBpm']

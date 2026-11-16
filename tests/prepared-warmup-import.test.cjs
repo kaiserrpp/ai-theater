@@ -20,6 +20,7 @@ Module._load = originalLoad;
 if (loader) require.extensions['.ts'] = loader; else delete require.extensions['.ts'];
 const bundle = () => {
   const catalog = structuredClone(require('../warmups/canto-2026-11/source.json'));
+  catalog.exercises = catalog.exercises.filter(e => e.id === 'm-cinco-notas');
   const exercise = catalog.exercises[0];
   exercise.explanation = { audioUrl: 'explanation.mp3', durationSeconds: 10 };
   exercise.piano = { 50: { audioUrl: 'piano-50.mp3', durationSeconds: 4 }, 51: { audioUrl: 'piano-50.mp3', durationSeconds: 4 } };
