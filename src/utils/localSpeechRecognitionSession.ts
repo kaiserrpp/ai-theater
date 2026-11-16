@@ -14,6 +14,7 @@ type Dependencies = {
   loadModel: () => Promise<LocalSpeechModel>;
   getUserMedia: () => Promise<MediaStream>;
   createAudioContext: () => AudioContext;
+  releaseAudioContext?: (context: AudioContext) => void;
   getContext?: () => ScriptRecognitionContext | undefined;
 };
 
@@ -49,7 +50,10 @@ export const createLocalSpeechRecognitionConstructor = (dependencies: Dependenci
       this.stream?.getTracks().forEach((track) => track.stop());
       this.stream = null;
       const context = this.context; this.context = null;
-      if (context) void context.close().catch(() => undefined);
+      if (context) {
+        if (dependencies.releaseAudioContext) dependencies.releaseAudioContext(context);
+        else void context.close().catch(() => undefined);
+      }
     }
 
     private release() {

@@ -60,7 +60,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
   const completeRef = useRef(() => {});
   const startStepRef = useRef<(exercise: WarmupExercise, explanation: boolean, token: number) => Promise<void>>(async () => {});
   const advanceRef = useRef(() => {});
-  const voice = useWarmupAdvance(rest && workout ? `warmup:${workout.key}:${workout.index}` : null, voiceAdvance && Boolean(workout), () => advanceRef.current());
+  const voice = useWarmupAdvance(rest && workout ? `warmup:${workout.key}:${workout.index}` : null, voiceAdvance && Boolean(workout && workout.exercises.length > 1), () => advanceRef.current());
   const transition = useRef(0);
   const player = useRef<ReturnType<typeof createSongPlayback<WarmupTrack>> | null>(null);
   const media = useRef<HTMLAudioElement | null>(null);
@@ -106,7 +106,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
 
   const change = (next: WarmupPreferences) => {
     preparationAbort.current?.abort();
-    transition.current++; voice.stopRecognition(); player.current?.stop(); preparation.current?.clear(); setTracks([]); workoutRef.current = null; setWorkout(null); setRest(false); setRetryStep(null); setLaunching(false); setSkipping(false); setError(''); setPreferences(next);
+    transition.current++; voice.releaseWarmupMicrophone(); player.current?.stop(); preparation.current?.clear(); setTracks([]); workoutRef.current = null; setWorkout(null); setRest(false); setRetryStep(null); setLaunching(false); setSkipping(false); setError(''); setPreferences(next);
   };
   const adjust = (exercise: WarmupExercise, field: 'start' | 'low' | 'high', value: number) => change({
     ...preferences, exercises: { ...preferences.exercises, [exercise.id]: { ...preferences.exercises[exercise.id], [field]: value } },
@@ -135,6 +135,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
     if (!session) return;
     if (session.index < session.exercises.length - 1) setRest(true);
     else {
+      voice.releaseWarmupMicrophone();
       workoutRef.current = null; setWorkout(null); setRest(false); setError('');
       if (catalog && session.exercises.length === catalog.exercises.length && session.exercises.every((exercise, index) => exercise.id === catalog.exercises[index].id)) {
         vocalPractice.recordActivity(true);
@@ -165,6 +166,8 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
       ordered.forEach(exercise => planWarmupExercise(exercise, preferences, explanation));
       if (ordered.length > 1) setRepeat(false);
       const session = { exercises: ordered, index: 0, key: Date.now() };
+      voice.releaseWarmupMicrophone();
+      if (voiceAdvance && ordered.length > 1) voice.prepareWarmupMicrophone();
       if (!media.current && Platform.OS === 'web' && autoStart === undefined) { onBeforePlay(); primeSongPracticeAudio(getAudio()); }
       player.current?.stop(); setTracks([]);
       void releaseAndPlay(session, explanation);
@@ -175,7 +178,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
     if (!rest || !session || session.index >= session.exercises.length - 1) return;
     void releaseAndPlay({ ...session, index: session.index + 1 });
   };
-  const stop = () => { transition.current++; preparationAbort.current?.abort(); voice.stopRecognition(); player.current?.stop(); workoutRef.current = null; setWorkout(null); setRest(false); setRetryStep(null); setLaunching(false); setSkipping(false); };
+  const stop = () => { transition.current++; preparationAbort.current?.abort(); voice.releaseWarmupMicrophone(); player.current?.stop(); workoutRef.current = null; setWorkout(null); setRest(false); setRetryStep(null); setLaunching(false); setSkipping(false); };
   const skip = async () => {
     stop(); const token = transition.current; setLaunching(true); setSkipping(true);
     const ended = await voice.waitForRecognitionEnd();
@@ -214,7 +217,11 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
         <Text style={ui.text}>{catalog.exercises.length} de {catalog.exercises.length + catalog.pending.length} ejercicios preparados.{catalog.status === 'pilot' ? ' Empieza por el piloto y contrástalo con el vídeo. El resto sigue en reconstrucción.' : ''}</Text>
         <Button label="Hacer calentamiento completo" disabled={catalog.status !== 'complete' || loadedKey !== storageKey} onPress={() => start(catalog.exercises)} />
         <Text style={ui.text}>Te guiaré en cada ejercicio. Después del piano tendrás una pausa para beber. Cuando estés listo, di «siguiente» o «adelante», o pulsa Siguiente ejercicio. Tómate el tiempo que necesites.</Text>
-        <Chip label="Continuar por voz durante los descansos" selected={voiceAdvance} onPress={() => setVoiceAdvance(value => !value)} />
+        <Chip label="Continuar por voz durante los descansos" selected={voiceAdvance} onPress={() => {
+          if (voiceAdvance) voice.releaseWarmupMicrophone();
+          else if (workout && workout.exercises.length > 1) voice.prepareWarmupMicrophone();
+          setVoiceAdvance(value => !value);
+        }} />
         {!voice.isSupported && voiceAdvance ? <Text style={ui.text}>Este navegador no ofrece escucha de voz. Puedes continuar con el botón.</Text> : null}
       </View>
       <View style={ui.card}><Text style={ui.subtitle}>Tu tesitura y tu rango</Text>
