@@ -31,7 +31,7 @@ export const importPreparedWarmup = async (file: File, shareId: string, onProgre
   }
   originals.forEach((name, take) => { take.audioUrl = urls.get(name)!; });
   onProgress('Guardando los ejercicios preparados…');
-  const response = await fetch(buildSharedApiUrl('/api/shared-script/warmup-catalog'), {
+  const response = await fetch(buildSharedApiUrl('/api/shared-script', { resource: 'warmup' }), {
     method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-AI-Theatre-Admin': '1' }, body: JSON.stringify({ shareId, catalog }),
   });
   if (response.status === 401) invalidateAdminSession();
@@ -39,7 +39,7 @@ export const importPreparedWarmup = async (file: File, shareId: string, onProgre
   if (!response.ok) throw new Error(payload.error || 'No se pudo guardar el calentamiento.');
   if (validateWarmupCatalog(payload.catalog)) throw new Error('La respuesta del calentamiento está incompleta.');
   // Confirm the public read path before reporting that other devices can use it.
-  const read = await fetch(buildSharedApiUrl('/api/shared-script/warmup-catalog', { shareId }), { cache: 'no-store' });
+  const read = await fetch(buildSharedApiUrl('/api/shared-script', { resource: 'warmup', shareId }), { cache: 'no-store' });
   const saved = await read.json();
   if (!read.ok || saved.catalog?.id !== catalog.id || validateWarmupCatalog(saved.catalog)) throw new Error('Los audios se han subido, pero no se pudo comprobar el catálogo. Reintenta la importación.');
   return saved.catalog;

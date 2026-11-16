@@ -1,6 +1,6 @@
 const { head, put } = require('@vercel/blob');
-const { getStorageNamespace, isAuthorizedSongAdminRequest, getSongAdminPasswordFromRequest, parseJsonBody } = require('./_shared');
-const { validateWarmupCatalog } = require('../../shared/warmupCatalog');
+const { getStorageNamespace, isAuthorizedSongAdminRequest, getSongAdminPasswordFromRequest, parseJsonBody } = require('../api/shared-script/_shared');
+const { validateWarmupCatalog } = require('../shared/warmupCatalog');
 
 module.exports = async (request, response) => {
   if (request.method === 'POST') {

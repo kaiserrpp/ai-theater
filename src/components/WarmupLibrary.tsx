@@ -66,7 +66,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | nul
   useEffect(() => {
     const controller = new AbortController(); let cancelled = false;
     setLoading(Boolean(shareId)); setCatalog(null); setLoadError('');
-    if (shareId) void fetch(buildSharedApiUrl('/api/shared-script/warmup-catalog', { shareId }), { signal: controller.signal })
+    if (shareId) void fetch(buildSharedApiUrl('/api/shared-script', { resource: 'warmup', shareId }), { signal: controller.signal })
       .then(async response => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el calentamiento.');

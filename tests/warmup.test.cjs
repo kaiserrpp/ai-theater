@@ -100,12 +100,12 @@ test('prepared warmup uses one existing player: explanation, repeated first pian
 });
 
 test('warmup API reads only the chosen environment and share, never writes the script manifest, and permits only valid catalogues', async () => {
-  const modulePath = require.resolve('../api/shared-script/warmup-catalog');
+  const modulePath = require.resolve('../server/warmup-catalog');
   const originalLoad = Module._load, originalFetch = global.fetch;
   let namespace = 'preview', path, notFound = false, catalog = fixture();
   Module._load = function (id, parent, ...rest) {
     if (parent?.filename === modulePath && id === '@vercel/blob') return { head: async name => { path = name; if (notFound) throw Object.assign(new Error('missing'), { name: 'BlobNotFoundError' }); return { url: 'https://example.com/catalog.json' }; } };
-    if (parent?.filename === modulePath && id === './_shared') return { getStorageNamespace: () => namespace, isAuthorizedSongAdminRequest: () => false, getSongAdminPasswordFromRequest: () => '' };
+    if (parent?.filename === modulePath && id === '../api/shared-script/_shared') return { getStorageNamespace: () => namespace, isAuthorizedSongAdminRequest: () => false, getSongAdminPasswordFromRequest: () => '' };
     return originalLoad.call(this, id, parent, ...rest);
   };
   delete require.cache[modulePath];
@@ -126,12 +126,12 @@ test('warmup API reads only the chosen environment and share, never writes the s
 });
 
 test('only an authorized admin can register a prepared catalogue and every audio stays within the selected environment and work', async () => {
-  const modulePath = require.resolve('../api/shared-script/warmup-catalog');
+  const modulePath = require.resolve('../server/warmup-catalog');
   const originalLoad = Module._load;
   let authorized = false, writes = [];
   Module._load = function (id, parent, ...rest) {
     if (parent?.filename === modulePath && id === '@vercel/blob') return { put: async (path, body) => writes.push({ path, body }) };
-    if (parent?.filename === modulePath && id === './_shared') return { getStorageNamespace: () => 'preview', isAuthorizedSongAdminRequest: () => authorized, getSongAdminPasswordFromRequest: () => '', parseJsonBody: request => request.body };
+    if (parent?.filename === modulePath && id === '../api/shared-script/_shared') return { getStorageNamespace: () => 'preview', isAuthorizedSongAdminRequest: () => authorized, getSongAdminPasswordFromRequest: () => '', parseJsonBody: request => request.body };
     return originalLoad.call(this, id, parent, ...rest);
   };
   delete require.cache[modulePath];

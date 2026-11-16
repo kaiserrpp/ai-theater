@@ -1,7 +1,9 @@
 const { readManifest } = require('./_shared');
 const appearance = require('../../server/work-appearance');
+const warmup = require('../../server/warmup-catalog');
 
 module.exports = async (request, response) => {
+  if (request.query?.resource === 'warmup') return warmup(request, response);
   if (request.query?.resource === 'appearance') return appearance(request, response);
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
