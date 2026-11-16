@@ -3,6 +3,7 @@ import { Platform, SafeAreaView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
 import { useAppearance } from '../store/appearance';
+import { StorageProtectionNotice } from './StorageProtectionNotice';
 
 export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
   const { background, palette } = useAppearance();
@@ -12,7 +13,7 @@ export const ScreenWrapper = ({ children }: { children: React.ReactNode }) => {
       <View style={[StyleSheet.absoluteFillObject, { backgroundColor: palette.overlay }]} />
     </View> : null}
     <StatusBar style={palette.isDark ? 'light' : 'dark'} />
-    <SafeAreaView style={styles.safeArea}><View style={styles.container}>{children}</View></SafeAreaView>
+    <SafeAreaView style={styles.safeArea}><View style={styles.container}><StorageProtectionNotice />{children}</View></SafeAreaView>
   </View>;
 };
 const styles = StyleSheet.create({

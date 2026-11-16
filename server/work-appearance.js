@@ -2,6 +2,7 @@ const { put } = require('@vercel/blob');
 const { getStorageNamespace, hasSongAdminPasswordConfigured, isAuthorizedSongAdminRequest,
   parseJsonBody, readManifest, writeManifest } = require('../api/shared-script/_shared');
 const { normalizeBackgroundMetadata, normalizeSharedAppearance } = require('../shared/workAppearance');
+const { assertStorageWritable } = require('./library-rescue');
 
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const decodeImage = (value) => {
@@ -43,6 +44,7 @@ module.exports = async (request, response) => {
     const manifest = await readManifest(shareId);
     const previous = normalizeSharedAppearance(manifest.appearance);
     if (request.method === 'GET') { response.status(200).json(previous); return; }
+    assertStorageWritable(getStorageNamespace());
     if (!Number.isSafeInteger(payload.revision) || payload.revision !== previous.revision) {
       response.status(409).json({ error: 'El fondo ha cambiado en otro dispositivo. Se ha recuperado su versión actual; vuelve a intentarlo.' }); return;
     }

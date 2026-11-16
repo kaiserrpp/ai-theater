@@ -1,6 +1,7 @@
 const { head, put } = require('@vercel/blob');
 const { getStorageNamespace, isAuthorizedSongAdminRequest, getSongAdminPasswordFromRequest, parseJsonBody } = require('../api/shared-script/_shared');
 const { validateWarmupCatalog } = require('../shared/warmupCatalog');
+const { getProtectedLibrary, assertStorageWritable } = require('./library-rescue');
 
 module.exports = async (request, response) => {
   if (request.method === 'POST') {
@@ -20,6 +21,7 @@ module.exports = async (request, response) => {
         return url.hostname.endsWith('.public.blob.vercel-storage.com') && decodeURIComponent(url.pathname).startsWith(`/${prefix}`);
       });
       if (!inStorage) { response.status(400).json({ error: 'Los audios deben pertenecer al almacenamiento de esta obra y entorno.' }); return; }
+      assertStorageWritable(getStorageNamespace());
       await put(`${prefix}catalog.json`, JSON.stringify(catalog), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json' });
       response.status(200).json({ catalog });
     } catch { response.status(503).json({ error: 'No se pudo guardar el calentamiento. Conserva el paquete preparado y vuelve a intentarlo.' }); }
@@ -28,6 +30,11 @@ module.exports = async (request, response) => {
   if (request.method !== 'GET') { response.setHeader('Allow', 'GET, POST'); response.status(405).json({ error: 'Método no permitido.' }); return; }
   const shareId = typeof request.query?.shareId === 'string' ? request.query.shareId : '';
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(shareId)) { response.status(400).json({ error: 'Elige una obra compartida para abrir su calentamiento.' }); return; }
+  const rescue = getProtectedLibrary(getStorageNamespace());
+  if (rescue) {
+    response.setHeader('Cache-Control', 'no-store');
+    response.status(200).json({ catalog: rescue.works[shareId]?.warmup || null }); return;
+  }
   try {
     const blob = await head(`shared-scripts/${getStorageNamespace()}/${shareId}/warmups/catalog.json`);
     const readUrl = new URL(blob.url);

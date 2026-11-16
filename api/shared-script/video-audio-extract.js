@@ -1,4 +1,5 @@
 const { del, put } = require('@vercel/blob');
+const { assertStorageWritable } = require('../../server/library-rescue');
 const ffmpegPath = require('ffmpeg-static');
 const { createWriteStream } = require('fs');
 const fs = require('fs/promises');
@@ -165,6 +166,7 @@ module.exports = async (request, response) => {
       response.status(401).json({ error: 'Password incorrecta.' });
       return;
     }
+    assertStorageWritable(getStorageNamespace());
 
     const shareId = typeof payload.shareId === 'string' ? payload.shareId.trim() : '';
     const targetId = typeof payload.targetId === 'string' ? payload.targetId.trim() : '';

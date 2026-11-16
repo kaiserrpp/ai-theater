@@ -1,4 +1,5 @@
 const { head, list, put } = require('@vercel/blob');
+const { assertStorageWritable, getProtectedLibrary } = require('../../server/library-rescue');
 const { normalizeRecognitionComparison } = require('../../shared/recognitionComparison');
 const { normalizeRehearsalComparison } = require('../../shared/rehearsalComparison');
 const {
@@ -199,6 +200,10 @@ const handleGetFeedback = async (request, response) => {
     typeof request.query?.scriptId === 'string' && request.query.scriptId.trim()
       ? sanitizePathPart(request.query.scriptId, 'script')
       : null;
+  if (getProtectedLibrary(getStorageNamespace())) {
+    response.status(503).json({ error: 'La consulta de informes anteriores está temporalmente protegida para reservar la cuota del almacenamiento.' });
+    return;
+  }
   const result = await list({
     prefix: scriptId ? `${prefix}/${scriptId}/` : `${prefix}/`,
     limit: 100,
@@ -275,6 +280,7 @@ module.exports = async (request, response) => {
       createdAt: new Date().toISOString(),
     };
     const pathname = `intelligent-feedback/${body.environment}/${scriptId}/${sessionId}.json`;
+    assertStorageWritable(getStorageNamespace());
     const blob = await put(pathname, JSON.stringify(body, null, 2), {
       access: 'public',
       addRandomSuffix: false,

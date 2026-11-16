@@ -3,6 +3,7 @@ const { normalizeAuditionScenes } = require('../../shared/auditionScenes');
 const { normalizeMusicalAuditions } = require('../../shared/musicalAuditions');
 const adminSession = require('../../server/admin-session');
 const { normalizeSharedAppearance } = require('../../shared/workAppearance');
+const { getProtectedLibrary, assertStorageWritable } = require('../../server/library-rescue');
 
 const MANIFEST_VERSION = 7;
 const EMPTY_SONGS = [];
@@ -403,11 +404,18 @@ const readManifestFromUrl = async (url) => {
 };
 
 const readManifest = async (shareId) => {
+  const rescue = getProtectedLibrary(getStorageNamespace());
+  if (rescue) {
+    const manifest = rescue.works[shareId]?.manifest;
+    if (!manifest) throw new Error('Obra not found.');
+    return normalizeManifest(manifest);
+  }
   const blob = await head(buildManifestPath(shareId));
   return readManifestFromUrl(blob.url);
 };
 
 const writeManifest = async (manifest) => {
+  assertStorageWritable(getStorageNamespace());
   const normalizedManifest = normalizeManifest(manifest);
 
   await put(buildManifestPath(normalizedManifest.shareId), JSON.stringify(normalizedManifest, null, 2), {
@@ -443,6 +451,8 @@ const buildManifestSummary = (manifest) => ({
 });
 
 const listSharedScriptSummaries = async () => {
+  const rescue = getProtectedLibrary(getStorageNamespace());
+  if (rescue) return Object.values(rescue.works).map(work => buildManifestSummary(normalizeManifest(work.manifest)));
   const result = await list({
     prefix: `${buildSharedScriptsPrefix()}/`,
     limit: 200,

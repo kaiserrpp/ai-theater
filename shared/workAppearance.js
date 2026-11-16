@@ -12,7 +12,8 @@ const isSharedBackgroundUri = (value) => {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && !url.username && !url.password &&
-      /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/i.test(url.hostname);
+      (/^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/i.test(url.hostname) ||
+        url.origin === 'https://ai-theater.vercel.app' && /^\/library\/production\/[a-f0-9]{64}\.(png|jpe?g|webp)$/.test(url.pathname) && !url.search && !url.hash);
   } catch { return false; }
 };
 

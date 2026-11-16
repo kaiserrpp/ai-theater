@@ -1,9 +1,11 @@
 const { handleUpload } = require('@vercel/blob/client');
+const { assertStorageWritable } = require('../../server/library-rescue');
 const {
   getSongAdminPasswordFromRequest,
   hasSongAdminPasswordConfigured,
   isAuthorizedSongAdminRequest,
   parseJsonBody,
+  getStorageNamespace,
 } = require('./_shared');
 
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
@@ -37,6 +39,7 @@ module.exports = async (request, response) => {
         if (!isAuthorizedSongAdminRequest(request, password)) {
           throw new Error('Password incorrecta.');
         }
+        assertStorageWritable(getStorageNamespace());
 
         let metadata = {};
 
