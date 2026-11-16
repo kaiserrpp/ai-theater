@@ -12,13 +12,13 @@
       "id": "brr-cinco-notas",
       "title": "Brr · Vibración de labios",
       "objective": "Iniciar la vocalización con vibración de labios siguiendo cinco notas.",
-      "instructions": "Comenzamos con una vibración de labios, brr. Sigue la subida y la bajada de cinco notas con el piano. Escucha la entrada de dos pulsos antes de empezar. El sonido de este primer ejercicio lo has confirmado como vibración de labios.",
+      "instructions": "Vamos a preparar la voz. Haz una vibración de labios, brr, mientras sigues la subida y la bajada de cinco notas. Mantén los labios sueltos y escucha los dos pulsos de entrada antes de empezar. Acompaña cada cambio de tono sin forzar.",
       "sourceStart": 0,
       "sourceEnd": 73.62,
       "advice": [
         {
           "sourceAt": 41.86,
-          "text": "La profesora señala la bajada: «y bajo»."
+          "text": "Ahora baja con el piano."
         }
       ],
       "uncertainties": [
@@ -144,7 +144,7 @@
       "id": "m-cinco-notas",
       "title": "M · Cinco notas",
       "objective": "Repetir el recorrido de cinco notas con M, manteniendo el sonido hacia delante.",
-      "instructions": "Vamos con el sonido eme, mmm. Repite la subida y la bajada de cinco notas. La profesora recuerda que el sonido esté bien adelante. Escucharás primero una entrada de piano y después el patrón. Al cambiar de tono tendrás otra entrada antes de empezar.",
+      "instructions": "Ahora, el sonido eme, mmm. Sube y baja por cinco notas con el piano. Mantén el sonido bien adelante. Escucha primero la entrada y después sigue el patrón. Tendrás otra entrada antes de cada cambio de tono.",
       "sourceStart": 73.62,
       "sourceEnd": 137.5,
       "advice": [
@@ -154,9 +154,8 @@
         }
       ],
       "uncertainties": [
-        "Las alturas se han estimado del sonido; la profesora no las nombra. Referencia del primer patrón: 1:18–1:20. No hay una partitura confirmada.",
-        "El pulso de la referencia varía ligeramente. Este piloto lo regulariza a 122 negras por minuto y conserva entradas y cierres; no copia cada pausa al milisegundo.",
-        "El usuario ha valorado favorablemente el piloto. Esto no equivale a confirmar una partitura nota por nota."
+        "Alturas estimadas del audio, sin una partitura confirmada. Referencia del primer patrón: 1:18–1:20.",
+        "El pulso de la referencia varía ligeramente. Este piloto lo regulariza a 122 negras por minuto y conserva entradas y cierres; no copia cada pausa al milisegundo."
       ],
       "score": {
         "description": "1–2–3–4–5–4–3–2–1, escala mayor hasta la quinta y regreso",
@@ -265,7 +264,7 @@
       "id": "na-tres-notas",
       "title": "Na · Tres notas",
       "objective": "Practicar la apertura de la boca con na en un recorrido de tres notas.",
-      "instructions": "Ahora, na. Repite na siguiendo tres notas que suben y bajan. Acuérdate de abrir la boca. La profesora recuerda abrir hacia abajo y también hacia los lados. Escucha la entrada antes de cada nuevo tono.",
+      "instructions": "Seguimos con na. Repite na siguiendo tres notas que suben y bajan. Abre la boca hacia abajo y también hacia los lados, sin tensarla. Escucha la entrada antes de cada nuevo tono.",
       "sourceStart": 137.5,
       "sourceEnd": 229.62,
       "advice": [
@@ -432,7 +431,7 @@
       "id": "wa-salto-quinta",
       "title": "Wa · Salto de quinta",
       "objective": "Mantener el sonido hacia delante y relajado en un salto de quinta.",
-      "instructions": "Seguimos con wa. Mantén el sonido adelante, sin esforzarlo, y relaja. El piano toca una nota, salta a la quinta y vuelve a la primera. Cada cambio de tono tiene su entrada.",
+      "instructions": "Vamos con wa. Mantén el sonido adelante y deja la boca relajada, sin esforzar. Escucha una nota, salta a la quinta y vuelve a la primera. Sigue el piano y espera la entrada antes de cada cambio de tono.",
       "sourceStart": 229.62,
       "sourceEnd": 314.16,
       "advice": [
@@ -553,7 +552,7 @@
       "id": "wa-cinco-descendente",
       "title": "Wa · Cinco notas descendentes",
       "objective": "Coordinar el sonido nasal y la respiración en un recorrido descendente.",
-      "instructions": "Ahora, otro ejercicio con wa. La profesora indica que salga de la nariz. Escucha la entrada y baja por cinco notas con el piano. Recuerda la respiración baja, sin respirar con tanta fuerza. Si todavía te sientes tirante, la profesora propone volver a los ejercicios anteriores.",
+      "instructions": "Continúa con wa, dejando que el sonido salga de la nariz. Escucha la entrada y baja por cinco notas con el piano. Respira de forma baja y tranquila, sin tomar el aire con tanta fuerza. Si todavía te notas tirante, puedes repetir los ejercicios anteriores.",
       "sourceStart": 314.16,
       "sourceEnd": 399.08,
       "advice": [
@@ -703,7 +702,7 @@
       "id": "wa-arpegio-apertura",
       "title": "Wa · Arpegio y apertura",
       "objective": "Trabajar la apertura y el comienzo del sonido con un arpegio mayor.",
-      "instructions": "Continuamos con wa y un arpegio que sube y baja. Abre la boca y el hueco, y relaja. Más adelante la profesora pide que el sonido comience desde la parte de atrás y en toda la boca, en lugar de empezar delante. Este consejo corresponde a este ejercicio.",
+      "instructions": "Ahora, wa con un arpegio que sube y baja. Abre la boca y el hueco, y relaja. En este ejercicio, empieza el sonido desde la parte de atrás, sintiendo el espacio de toda la boca. Escucha la entrada y acompaña el recorrido del piano.",
       "sourceStart": 399.08,
       "sourceEnd": 512.32,
       "advice": [
@@ -883,22 +882,22 @@
       "id": "mi-me-ma-vocales",
       "title": "Mi, me, ma · Vocales",
       "objective": "Articular las sílabas y el enlace de vocales sin tensar la boca.",
-      "instructions": "Ahora, mi, me, ma, me, ma, e, i, o, u. Repite esa secuencia, confirmada por ti, y relaja la boca, especialmente al hacer mi. Sigue el piano: sube por cinco notas, repite la nota de arriba y vuelve a bajar. Escucha la entrada antes de cada cambio de tono.",
+      "instructions": "Vamos con mi, me, ma, me, ma, e, i, o, u. Repite la secuencia y relaja la boca, especialmente al hacer mi. Sigue el piano: sube por cinco notas, repite la nota de arriba y vuelve a bajar. Escucha la entrada antes de cada cambio de tono.",
       "sourceStart": 512.32,
       "sourceEnd": 619.3,
       "advice": [
         {
           "sourceAt": 512.32,
-          "text": "Mi, me, ma, me, ma, e, i, o, u. Secuencia confirmada por el usuario."
+          "text": "Repite mi, me, ma, me, ma, e, i, o, u."
         },
         {
           "sourceAt": 568.96,
-          "text": "Relajar la boca al hacer mi; la profesora contrasta dos formas del sonido."
+          "text": "Relaja la boca al hacer mi."
         }
       ],
       "uncertainties": [
         "Alturas, repeticiones y progresión estimadas del audio mezclado, sin partitura. Se regularizan el pulso y las entradas; no se reproducen las pausas del vídeo al milisegundo. Los límites personales pueden acortar la progresión.",
-        "El usuario confirma la secuencia de sílabas. Su reparto entre las notas y la cantidad de ataques repetidos arriba se han estimado (8:32–8:44 y 9:29–9:41); no hay una partitura confirmada."
+        "El reparto de las sílabas entre las notas y la cantidad de ataques repetidos arriba se han estimado (8:32–8:44 y 9:29–9:41); no hay una partitura confirmada."
       ],
       "score": {
         "description": "Cinco notas ascendentes, reiteración de la quinta y regreso por la escala",
@@ -1030,7 +1029,7 @@
       "id": "wa-hueh-final",
       "title": "Wa / hueh · Final",
       "objective": "Completar el calentamiento con un arpegio descendente y el cambio final de sonido.",
-      "instructions": "Terminamos con wa. Escucha la nota de entrada y sigue el descenso del arpegio con el piano. Hacia el final la profesora propone probar otro sonido, parecido a hueh. Avisaremos del cambio antes de los últimos recorridos. La grafía de ese segundo sonido es aproximada: compárala con su demostración de diez minutos cincuenta segundos.",
+      "instructions": "Terminamos con wa. Escucha la entrada y sigue el descenso del arpegio con el piano. En los últimos recorridos cambiaremos a hueh. Mantén la boca relajada y sigue cada nota con comodidad.",
       "sourceStart": 619.3,
       "sourceEnd": 680.47,
       "advice": [
@@ -1040,7 +1039,7 @@
         },
         {
           "sourceAt": 650.1,
-          "text": "Esta es la nota; probar con un sonido aproximado hueh/ueh y una más."
+          "text": "Prueba hueh en los últimos recorridos."
         }
       ],
       "uncertainties": [
@@ -1121,7 +1120,7 @@
         {
           "beforeStep": 6,
           "sourceAt": 650.1,
-          "text": "Ahora prueba el sonido hueh, como en la demostración final de la profesora.",
+          "text": "Ahora cambia a hueh. Escucha la entrada y sigue el piano.",
           "audio": {
             "audioUrl": "pending",
             "durationSeconds": 1

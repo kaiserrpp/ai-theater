@@ -9,6 +9,7 @@ import io
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import wave
 
@@ -23,10 +24,13 @@ parser.add_argument('--voice', required=True)
 parser.add_argument('--ffmpeg', required=True)
 parser.add_argument('--output', required=True)
 parser.add_argument('--root', type=int, help='Render one piano entry for the first fidelity check')
+parser.add_argument('--reuse-piano-catalog', help='Reuse unchanged prepared piano files while regenerating explanations and advice')
 args = parser.parse_args()
 output = Path(args.output)
 output.mkdir(parents=True, exist_ok=True)
 catalog = json.loads(Path(args.source).read_text(encoding='utf8'))
+reuse_path = Path(args.reuse_piano_catalog) if args.reuse_piano_catalog else None
+reuse = json.loads(reuse_path.read_text(encoding='utf8')) if reuse_path else None
 samples_text = Path(args.samples).read_text(encoding='utf8')
 body = samples_text.split('MIDI.Soundfont.acoustic_grand_piano = ', 1)[1].strip().rstrip(';')
 samples = json.loads(re.sub(r',\s*}', '}', body))
@@ -87,6 +91,19 @@ for exercise in catalog['exercises']:
     exercise['explanation'] = explain(exercise['instructions'], exercise['id'] + '-explanation.mp3')
     for index, cue in enumerate(exercise['cues']):
         cue['audio'] = explain(cue['text'], f'{exercise["id"]}-tip-{index}.mp3')
+    if reuse:
+        previous = next(item for item in reuse['exercises'] if item['id'] == exercise['id'])
+        if previous['score'] != exercise['score']:
+            raise ValueError('Cannot reuse piano for a changed score: ' + exercise['id'])
+        exercise['piano'] = previous['piano']
+        for take in exercise['piano'].values():
+            name = take['audioUrl']
+            if Path(name).name != name or not name.endswith('.mp3'):
+                raise ValueError('Expected local prepared piano filename')
+            if (reuse_path.parent / name).resolve() != (output / name).resolve():
+                shutil.copyfile(reuse_path.parent / name, output / name)
+        print('Reused piano', exercise['id'], flush=True)
+        continue
     exercise['piano'] = {}
     score = exercise['score']
     beat = 60 / score['tempoBpm']

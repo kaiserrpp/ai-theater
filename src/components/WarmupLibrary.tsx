@@ -10,6 +10,7 @@ import { createSongPlayback } from '../utils/songPlayback';
 import { exerciseSettings, noteName, planWarmupExercise, restoreWarmupPreferences, sourceClock, voicePreferences, WARMUP_VOICES } from '../utils/warmup';
 import { Button, Chip, Icon, usePracticeTheme } from './PracticeUI';
 import { useWarmupAdvance } from '../hooks/useWarmupAdvance';
+import { vocalPractice } from '../store/vocalPractice';
 
 const NoteControl = ({ label, value, onChange, min = 36, max = 84, disabled = false }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; disabled?: boolean }) => {
   const { ui, palette } = usePracticeTheme();
@@ -22,7 +23,10 @@ const NoteControl = ({ label, value, onChange, min = 36, max = 84, disabled = fa
   </View>;
 };
 
-export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | null; onBeforePlay: () => void }) => {
+export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, onComplete, onSkip }: {
+  shareId: string | null; onBeforePlay: () => void; createAudio?: () => HTMLAudioElement;
+  autoStart?: number; onComplete?: () => void; onSkip?: () => void;
+}) => {
   const { ui, palette } = usePracticeTheme();
   const isAdmin = useIsAdmin();
   const [importing, setImporting] = useState(false);
@@ -59,6 +63,8 @@ export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | nul
   const saveChain = useRef(Promise.resolve());
   const storageKey = shareId ? `@teatro_ia_warmup_v1:${shareId}` : null;
   const current = tracks.find(track => track.key === selectedKey);
+  const autoStarted = useRef<number | undefined>(undefined);
+  const startFull = useRef(() => {});
 
   useEffect(() => () => { player.current?.destroy(); player.current = null; }, []);
   useEffect(() => {
@@ -102,7 +108,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | nul
       if (!next.length) return;
       if (Platform.OS !== 'web') throw new Error('Abre el calentamiento en la interfaz web de AI-Theatre.');
       onBeforePlay(); setError(''); setTracks(next);
-      if (!player.current) player.current = createSongPlayback<WarmupTrack>({ createAudio: () => new Audio(), onTrack: setSelectedKey, onPlaying: setPlaying,
+      if (!player.current) player.current = createSongPlayback<WarmupTrack>({ createAudio: createAudio || (() => new Audio()), onTrack: setSelectedKey, onPlaying: setPlaying,
         onPosition: setPosition, onDuration: setDuration, onQueue: setQueue, onError: setError, onComplete: () => completeRef.current() });
       player.current.stop();
       player.current.setRepeat(repeat && workoutRef.current?.exercises.length === 1 ? 'queue' : 'off');
@@ -114,7 +120,14 @@ export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | nul
     const session = workoutRef.current;
     if (!session) return;
     if (session.index < session.exercises.length - 1) setRest(true);
-    else { setWorkout(null); setRest(false); setError(''); }
+    else {
+      workoutRef.current = null; setWorkout(null); setRest(false); setError('');
+      if (catalog && session.exercises.length === catalog.exercises.length && session.exercises.every((exercise, index) => exercise.id === catalog.exercises[index].id)) {
+        vocalPractice.recordActivity(true);
+        // Release handlers before the next owner starts on the shared element.
+        if (autoStart !== undefined) { player.current?.destroy(); player.current = null; onComplete?.(); }
+      }
+    }
   };
   const releaseAndPlay = async (session: NonNullable<typeof workout>, explanation = true) => {
     const token = ++transition.current;
@@ -142,10 +155,25 @@ export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | nul
     void releaseAndPlay({ ...session, index: session.index + 1 });
   };
   const stop = () => { transition.current++; voice.stopRecognition(); player.current?.stop(); workoutRef.current = null; setWorkout(null); setRest(false); setRetryStep(null); setLaunching(false); };
+  const skip = async () => {
+    stop(); const token = transition.current; setLaunching(true);
+    const ended = await voice.waitForRecognitionEnd();
+    if (token !== transition.current) return;
+    setLaunching(false);
+    if (!ended) { setError('La escucha todavía se está cerrando. Vuelve a pulsar Ir directamente a cantar.'); return; }
+    player.current?.destroy(); player.current = null;
+    onSkip?.();
+  };
+  startFull.current = () => { if (catalog) start(catalog.exercises); };
+  useEffect(() => {
+    if (autoStart === undefined || autoStarted.current === autoStart || loading || catalog?.status !== 'complete' || loadedKey !== storageKey) return;
+    autoStarted.current = autoStart; startFull.current();
+  }, [autoStart, catalog, loadedKey, loading, storageKey]);
   useEffect(() => () => { transition.current++; }, []);
 
   return <View testID="warmup-library" style={{ gap: 20 }}>
-    <View style={{ gap: 8 }}><Text style={ui.subtitle}>Calentamiento</Text><Text style={ui.text}>Explicación en español y piano preparado para tu rango.</Text></View>
+    <View style={{ gap: 8 }}><Text style={ui.subtitle}>Calentamiento</Text><Text style={ui.text}>Vamos a preparar tu voz, paso a paso y dentro de tu rango cómodo.</Text></View>
+    {onSkip ? <View testID="automatic-warmup" style={ui.card}><Text style={ui.subtitle}>Preparamos la voz antes de cantar</Text><Text style={ui.text}>Empezamos con el calentamiento. Después continuaremos con la canción que has elegido.</Text><Button label="Ir directamente a cantar" secondary disabled={launching} onPress={() => void skip()} /></View> : null}
     {loading ? <Text accessibilityLiveRegion="polite" style={ui.text}>Cargando calentamiento…</Text> : null}
     {loadError ? <View style={ui.card}><Text accessibilityRole="alert" style={ui.error}>{loadError}</Text><Button label="Reintentar calentamiento" secondary onPress={() => setRetry(value => value + 1)} /></View> : null}
     {!loading && !loadError && !catalog ? <View style={ui.card}><Text style={ui.subtitle}>Todavía no hay ejercicios preparados</Text><Text style={ui.text}>{shareId ? 'Los ejercicios aparecerán aquí cuando estén reconstruidos a partir de la referencia.' : 'Abre una obra compartida para acceder a sus audios desde tus dispositivos.'}</Text></View> : null}
@@ -164,7 +192,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | nul
         <Text style={ui.label}>{catalog.status === 'pilot' ? 'PILOTO PARA CONTRASTAR' : 'CALENTAMIENTO PREPARADO'}</Text>
         <Text style={ui.text}>{catalog.exercises.length} de {catalog.exercises.length + catalog.pending.length} ejercicios preparados.{catalog.status === 'pilot' ? ' Empieza por el piloto y contrástalo con el vídeo. El resto sigue en reconstrucción.' : ''}</Text>
         <Button label="Hacer calentamiento completo" disabled={catalog.status !== 'complete' || loadedKey !== storageKey} onPress={() => start(catalog.exercises)} />
-        <Text style={ui.text}>En orden del vídeo: explicación, piano y pausa para beber. Cuando estés listo, di «siguiente» o «adelante», o pulsa Siguiente ejercicio. La pausa dura lo que necesites.</Text>
+        <Text style={ui.text}>Te guiaré en cada ejercicio. Después del piano tendrás una pausa para beber. Cuando estés listo, di «siguiente» o «adelante», o pulsa Siguiente ejercicio. Tómate el tiempo que necesites.</Text>
         <Chip label="Continuar por voz durante los descansos" selected={voiceAdvance} onPress={() => setVoiceAdvance(value => !value)} />
         {!voice.isSupported && voiceAdvance ? <Text style={ui.text}>Este navegador no ofrece escucha de voz. Puedes continuar con el botón.</Text> : null}
       </View>
@@ -215,16 +243,18 @@ export const WarmupLibrary = ({ shareId, onBeforePlay }: { shareId: string | nul
             <NoteControl label="Agudo del ejercicio" value={settings.high} min={preferences.low} max={preferences.high} onChange={value => adjust(exercise, 'high', value)} />
             <Text style={ui.text}>Los límites de este ejercicio quedan dentro de tu rango general. Se acorta la subida antes de salir de ellos, conservando el patrón completo.</Text>
           </View> : null}
-          <Text style={ui.label}>REFERENCIA · {sourceClock(exercise.sourceStart)}–{sourceClock(exercise.sourceEnd)}</Text>
           <Text style={ui.text}>{exercise.instructions}</Text>
+          {exercise.advice.map((tip, index) => <Text key={index} style={ui.text}>{tip.text}</Text>)}
+        </View>;
+      })}
+      <Chip label={details ? 'Ocultar referencias y detalles musicales' : 'Referencias y detalles musicales'} selected={details} onPress={() => setDetails(value => !value)} />
+      {details ? <View style={ui.card}><Text style={ui.subtitle}>Referencia y reconstrucción</Text>
+        <Text style={ui.text}>Vídeo de {sourceClock(catalog.source.durationSeconds)}. La transcripción automática se ha usado como apoyo y contiene errores. Las dudas siguen abiertas. El vídeo original no se ha publicado en la app.</Text>
+        {catalog.exercises.map(exercise => <View key={exercise.id} style={{ gap: 6 }}><Text style={ui.label}>{exercise.title} · {sourceClock(exercise.sourceStart)}–{sourceClock(exercise.sourceEnd)}</Text>
           {exercise.advice.map((tip, index) => <Text key={index} style={ui.text}>{sourceClock(tip.sourceAt)} · {tip.text}</Text>)}
           <Text style={ui.text}>{exercise.score.description} · {exercise.score.tempoBpm} negras/min. Entrada de {exercise.score.preparationBeats} pulsos y cierre de {exercise.score.closingBeats} pulso. {exercise.score.progressionDescription}</Text>
           {exercise.uncertainties.map((uncertainty, index) => <Text key={index} style={ui.text}>Por contrastar: {uncertainty}</Text>)}
-        </View>;
-      })}
-      <Chip label={details ? 'Ocultar revisión del vídeo' : 'Ver revisión y ejercicios pendientes'} selected={details} onPress={() => setDetails(value => !value)} />
-      {details ? <View style={ui.card}><Text style={ui.subtitle}>Referencia y reconstrucción</Text>
-        <Text style={ui.text}>Vídeo de {sourceClock(catalog.source.durationSeconds)}. La transcripción automática se ha usado como apoyo y contiene errores. Las dudas siguen abiertas. El vídeo original no se ha publicado en la app.</Text>
+        </View>)}
         {catalog.pending.map((item, index) => <View key={index} style={{ gap: 4 }}><Text style={[ui.text, { color: palette.ink, fontWeight: '600' }]}>{sourceClock(item.sourceStart)}–{sourceClock(item.sourceEnd)} · {item.title}</Text><Text style={ui.text}>{item.note}</Text></View>)}
         {catalog.credits.map(credit => <TouchableOpacity key={credit.url} accessibilityRole="link" onPress={() => void Linking.openURL(credit.url)}><Text style={[ui.text, { color: palette.plum, textDecorationLine: 'underline' }]}>{credit.label}</Text></TouchableOpacity>)}
       </View> : null}

@@ -9,18 +9,35 @@ import { selectSongPlaylist, type SongPlaylistKind } from '../utils/songPlaylist
 import { MusicalAuditionEditor } from './MusicalAuditionEditor';
 import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
 import { WarmupLibrary } from './WarmupLibrary';
+import { useVocalPractice, vocalPractice } from '../store/vocalPractice';
+import { primeSongPracticeAudio } from '../utils/songPracticeAudio';
 
 type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudioAsset; auditionId?: string; numberTitle?: string };
+type SingingRequest = { id: number; trackKey: string; queueKeys: string[]; mode: SongPlaybackMode; position: number; repeat?: SongRepeatMode };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
-export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork, defaultRoles, openEditorRequest = 0 }: {
+export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork, onOpen, defaultRoles, openEditorRequest = 0 }: {
   manifest: SharedScriptManifest | null; active: boolean; defaultRoles: string[]; openEditorRequest?: number;
   onUpdated: (manifest: SharedScriptManifest) => void; onManageWork: () => void;
+  onOpen?: () => void;
 }) => {
   const { palette, ui } = usePracticeTheme();
   const isAdmin = useIsAdmin();
   const [scope, setScope] = useState<'auditions' | 'work'>('auditions');
   const [warmupOpen, setWarmupOpen] = useState(false);
+  const activity = useVocalPractice();
+  const [pendingSinging, setPendingSinging] = useState<SingingRequest | null>(null);
+  const pendingSingingRef = useRef(pendingSinging); pendingSingingRef.current = pendingSinging;
+  const requestVersion = useRef(0);
+  const sharedAudio = useRef<HTMLAudioElement | null>(null);
+  const singing = useRef(false);
+  const seekWhenReady = useRef<{ seconds: number; src: string } | null>(null);
+  const restorePosition = useRef(() => {});
+  const activeQueue = useRef<Track[]>([]);
+  const getAudio = () => {
+    if (!sharedAudio.current) { sharedAudio.current = new Audio(); sharedAudio.current.oncanplay = () => restorePosition.current(); }
+    return sharedAudio.current;
+  };
   const [mine, setMine] = useState(false);
   const [musicRoles, setMusicRoles] = useState<string[]>([]);
   const [loadedRolesKey, setLoadedRolesKey] = useState<string | null>(null);
@@ -99,53 +116,118 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     scope: playlistScope, kind: playlistKind, visibleAuditionIds: visibleCuts.map((cut) => cut.id),
   });
   const visibleTracks = playlist(kind, 'work');
+  const tracksRef = useRef(tracks); tracksRef.current = tracks;
 
-  useEffect(() => () => { player.current?.destroy(); player.current = null; }, []);
+  useEffect(() => () => {
+    requestVersion.current++; pendingSingingRef.current = null; player.current?.destroy(); player.current = null;
+    if (sharedAudio.current) { sharedAudio.current.pause(); sharedAudio.current.oncanplay = null; }
+  }, []);
+  useEffect(() => {
+    if (!active && pendingSingingRef.current) { requestVersion.current++; pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false); }
+  }, [active]);
   useEffect(() => { player.current?.setRepeat(repeatMode); player.current?.setRate(rate); }, [repeatMode, rate]);
   useEffect(() => {
+    requestVersion.current++; pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false);
     player.current?.stop(); setSelectedKey(null); setPlaying(false); setPosition(0); setDuration(0); setError('');
   }, [manifest?.shareId]);
   useEffect(() => {
     player.current?.updateTracks(tracks);
   }, [tracks]);
 
-  const startPlayback = (track: Track, queue: Track[], mode: SongPlaybackMode) => {
+  const startPlayback = (track: Track, queue: Track[], mode: SongPlaybackMode, repeatOverride?: SongRepeatMode) => {
     setError('');
     if (Platform.OS !== 'web') { void Linking.openURL(track.audio.audioUrl); return; }
     if (!player.current) {
-      player.current = createSongPlayback<Track>({ createAudio: () => new Audio(), onTrack: setSelectedKey, onPlaying: setPlaying,
-        onPosition: setPosition, onDuration: setDuration, onQueue: setQueueInfo, onError: setError });
+      player.current = createSongPlayback<Track>({ createAudio: getAudio, onTrack: setSelectedKey, onPlaying: value => {
+        if (value || singing.current) vocalPractice.recordActivity(true);
+        singing.current = value; setPlaying(value);
+      }, onPosition: seconds => { setPosition(seconds); if (singing.current && seconds > 0) vocalPractice.recordActivity(); }, onDuration: seconds => {
+        setDuration(seconds);
+        const audio = sharedAudio.current;
+        if (audio && seconds > 0) restorePosition.current();
+      }, onQueue: setQueueInfo, onError: setError });
       player.current.setRate(rate);
     }
-    const nextRepeat = repeatMode === 'off' ? 'off' : mode === 'single' ? 'track' : 'queue';
+    const nextRepeat = repeatOverride ?? (repeatMode === 'off' ? 'off' : mode === 'single' ? 'track' : 'queue');
+    activeQueue.current = queue;
     setPlaybackMode(mode); setRepeatMode(nextRepeat); player.current.setRepeat(nextRepeat);
     player.current.play(track, queue, mode);
   };
+  const startRequestedSong = (request: SingingRequest) => {
+    const available = new Map(tracksRef.current.map(track => [track.key, track]));
+    const track = available.get(request.trackKey);
+    if (!track) { setError('La canción elegida ya no está disponible. Elige otra canción.'); return; }
+    seekWhenReady.current = request.position > 0 ? { seconds: request.position, src: track.audio.audioUrl } : null;
+    startPlayback(track, request.queueKeys.flatMap(key => available.has(key) ? [available.get(key)!] : []), request.mode, request.repeat);
+  };
+  restorePosition.current = () => {
+    const target = seekWhenReady.current, audio = sharedAudio.current;
+    if (!target || !audio || audio.readyState < 3 || audio.currentSrc !== target.src) return;
+    seekWhenReady.current = null; player.current?.seek(target.seconds);
+  };
+  const finishWarmup = () => {
+    const request = pendingSingingRef.current;
+    if (!request) return;
+    pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false);
+    startRequestedSong(request);
+  };
+  const requestSong = (track: Track, queue: Track[], mode: SongPlaybackMode, at = 0, repeat?: SongRepeatMode) => {
+    if (singing.current && sharedAudio.current && !sharedAudio.current.paused) vocalPractice.recordActivity(true);
+    const request: SingingRequest = { id: ++requestVersion.current, trackKey: track.key, queueKeys: queue.map(entry => entry.key), mode, position: at, repeat };
+    const decide = () => {
+      if (request.id !== requestVersion.current) return;
+      if (!vocalPractice.due() || !manifest?.shareId) { startRequestedSong(request); return; }
+      player.current?.destroy(); player.current = null; singing.current = false; setPlaying(false);
+      pendingSingingRef.current = request; setPendingSinging(request); setWarmupOpen(true); onOpen?.();
+      scroll.current?.scrollTo({ y: 0, animated: true });
+    };
+    if (Platform.OS === 'web' && (!activity.loaded || vocalPractice.due()) && manifest?.shareId) {
+      // Unlock the same element in the tap, before async loading or mounting.
+      player.current?.destroy(); player.current = null; singing.current = false; setPlaying(false);
+      primeSongPracticeAudio(getAudio());
+    }
+    if (activity.loaded) decide(); else void vocalPractice.load().then(decide);
+  };
   const play = (track: Track) => {
     const queue = track.auditionId ? playlist(track.audio.kind, 'auditions') : visibleTracks;
-    startPlayback(track, queue, 'single');
+    requestSong(track, queue, 'single');
   };
   const playGroup = (value: SongPlaylistKind) => {
     const queue = playlist(value);
     if (!queue.length) return;
-    setKind(value); startPlayback(queue[0], queue, 'queue');
+    setKind(value); requestSong(queue[0], queue, 'queue');
     scroll.current?.scrollTo({ y: 0, animated: true });
   };
-  const toggle = () => { if (playing) player.current?.pause(); else player.current?.resume(); };
+  const toggle = () => {
+    if (playing) player.current?.pause();
+    else if (selected) {
+      if (activity.loaded && !vocalPractice.due() && player.current) player.current.resume();
+      else requestSong(selected, activeQueue.current, playbackMode, player.current && sharedAudio.current ? sharedAudio.current.currentTime : position, repeatMode);
+    }
+  };
+  const navigate = (direction: 'previous' | 'next') => {
+    if (!selected || activeQueue.current.length < 2) return;
+    const queue = activeQueue.current, index = queue.findIndex(track => track.key === selected.key);
+    requestSong(queue[(index + (direction === 'next' ? 1 : -1) + queue.length) % queue.length], queue, playbackMode, 0, repeatMode);
+  };
+  const showSongs = (nextScope: typeof scope) => {
+    requestVersion.current++; pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false); setScope(nextScope);
+  };
 
   if (!active) return selected ? <View style={[ui.header, { backgroundColor: palette.soft, gap: 6, paddingHorizontal: 16 }]}>
     <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text><Text numberOfLines={1} style={ui.text}>{selected.audio.label}</Text></View>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => player.current?.navigate('previous')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" /></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" /></TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={ui.icon}><Icon name={playing ? 'pause' : 'play'} /></TouchableOpacity>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => player.current?.navigate('next')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" /></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" /></TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={[ui.icon, { width: 36 }]}><Icon name="close" /></TouchableOpacity>
   </View> : null;
 
   return <>
     <ScrollView ref={scroll} contentContainerStyle={ui.page}>
     <View style={{ gap: 8 }}><Text style={ui.title}>Escuchar y practicar</Text><Text style={ui.text}>Tus canciones, con voz o karaoke.</Text></View>
-    <View style={ui.wrap}><Chip label="Audiciones" selected={!warmupOpen && scope === 'auditions'} onPress={() => { setWarmupOpen(false); setScope('auditions'); }} /><Chip label="Obra" selected={!warmupOpen && scope === 'work'} onPress={() => { setWarmupOpen(false); setScope('work'); }} /><Chip label="Calentamiento" selected={warmupOpen} onPress={() => { player.current?.stop(); setWarmupOpen(true); }} /></View>
-    {warmupOpen ? <WarmupLibrary key={manifest?.shareId || 'local'} shareId={manifest?.shareId || null} onBeforePlay={() => player.current?.stop()} /> : <>
+    <View style={ui.wrap}><Chip label="Audiciones" selected={!warmupOpen && scope === 'auditions'} onPress={() => showSongs('auditions')} /><Chip label="Obra" selected={!warmupOpen && scope === 'work'} onPress={() => showSongs('work')} /><Chip label="Calentamiento" selected={warmupOpen} onPress={() => { player.current?.stop(); setWarmupOpen(true); }} /></View>
+    <View style={{ gap: 6 }}><Chip label="Calentar antes de cantar" selected={activity.enabled} disabled={!activity.loaded} onPress={() => vocalPractice.setEnabled(!activity.enabled)} /><Text style={ui.text}>Si han pasado más de dos horas, empezaremos con el calentamiento. Puedes omitirlo y cantar directamente. Se recuerda la última reproducción o calentamiento en este dispositivo.</Text>{activity.error ? <Text style={ui.error}>{activity.error}</Text> : null}</View>
+    {warmupOpen ? <WarmupLibrary key={manifest?.shareId || 'local'} shareId={manifest?.shareId || null} createAudio={getAudio} autoStart={pendingSinging?.id} onComplete={finishWarmup} onSkip={pendingSinging ? finishWarmup : undefined} onBeforePlay={() => player.current?.stop()} /> : <>
     {scope === 'auditions' ? <>
       <Button label="+ Subir canción de audición" disabled={!manifest} onPress={() => openEditor()} />
       {notice ? <Text accessibilityLiveRegion="polite" style={[ui.text, { color: palette.green }]}>{notice}</Text> : null}
@@ -165,11 +247,11 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
         return <View key={audioKind} style={{flex:1}}><Button label={label} secondary={selected.audio.kind !== audioKind} disabled={!track} onPress={() => { if (track) play(track); }} /></View>;
       })}</View> : null}
       <View style={[ui.row, { justifyContent: 'space-between', gap: 0 }]}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => player.current?.navigate('previous')} style={[ui.icon, { width: 44 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" size={30} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 44 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" size={30} /></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retroceder diez segundos" style={[ui.icon, { width: 44 }]} onPress={() => player.current?.seek(position - 10)}><Icon name="rewind-10" size={26} /></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={[ui.icon, { width: 60, height: 60, backgroundColor: palette.button }]}><Icon name={playing ? 'pause' : 'play'} color={palette.onButton} size={32} /></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Avanzar diez segundos" style={[ui.icon, { width: 44 }]} onPress={() => player.current?.seek(position + 10)}><Icon name="fast-forward-10" size={26} /></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => player.current?.navigate('next')} style={[ui.icon, { width: 44 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" size={30} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, { width: 44 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" size={30} /></TouchableOpacity>
       </View>
       {Platform.OS === 'web' ? <input aria-label="Posición de la canción" type="range" min={0} max={duration || 1} step={0.1} value={position} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={(event) => player.current?.seek(Number(event.target.value))} /> : null}
       <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={ui.text}>{clock(position)}</Text><Text style={ui.text}>{clock(duration)}</Text></View>

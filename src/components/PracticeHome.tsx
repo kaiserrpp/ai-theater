@@ -127,7 +127,7 @@ export const PracticeHome = (props: Props) => {
     </View> : null}
 
     {!inRehearsal ? <SongPracticeLibrary manifest={props.manifest} active={tab === 'songs'} defaultRoles={props.myRoles}
-      onUpdated={props.onManifestUpdated} onManageWork={props.onSongMaterials} openEditorRequest={auditionUploadRequest} /> : null}
+      onUpdated={props.onManifestUpdated} onManageWork={props.onSongMaterials} onOpen={() => setTab('songs')} openEditorRequest={auditionUploadRequest} /> : null}
     {!inRehearsal ? <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: palette.rule, backgroundColor: palette.surface, paddingTop: 6, paddingBottom: 10 }}>
       {([['home', 'Inicio', 'home-outline'], ['scenes', 'Ensayar', 'drama-masks'], ['songs', 'Canciones', 'music-note-outline']] as const).map(([value, label, icon]) => <TouchableOpacity key={value} accessibilityRole="tab" aria-selected={tab === value} accessibilityState={{ selected: tab === value }} onPress={() => chooseTab(value)} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 4 }}><Icon name={icon} color={tab === value ? palette.plum : palette.sub} /><Text style={{ fontSize: 12, fontWeight: tab === value ? '700' : '500', color: tab === value ? palette.plum : palette.sub }}>{label}</Text></TouchableOpacity>)}
     </View> : null}
