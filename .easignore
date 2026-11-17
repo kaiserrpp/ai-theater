@@ -17,3 +17,6 @@ assets/images/*
 src/*
 !src/nativePrototype
 !src/nativePrototype/**
+!plugins
+plugins/*
+!plugins/withBetaAndroidPermissions.cjs

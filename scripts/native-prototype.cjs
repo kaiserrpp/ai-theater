@@ -21,6 +21,7 @@ if (command === 'check') {
   const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
   const ignore = require('ignore')().add(fs.readFileSync(path.join(root, '.easignore'), 'utf8'));
   const required = ['App.native.tsx', 'app.json', 'package.json', 'package-lock.json', 'eas.json', 'tsconfig.json',
+    'plugins/withBetaAndroidPermissions.cjs',
     'src/nativePrototype/controller.ts', 'src/nativePrototype/bridgeBootstrap.ts', 'src/nativePrototype/protocol.ts', 'src/nativePrototype/levelInput.ts',
     'src/nativePrototype/recognitionHints.ts', 'src/nativePrototype/recognitionRuntime.ts',
     'assets/images/caras-teatro.png', 'assets/images/ai-theatre-play.png', 'assets/images/splash-icon.png'];
