@@ -1,7 +1,7 @@
 {
   "name": "teatroia",
   "main": "expo/AppEntry.js",
-  "version": "2026.11.244",
+  "version": "2026.11.245",
   "scripts": {
     "comparison:build": "node scripts/build-asr-comparison.cjs",
     "pretest": "node scripts/build-asr-comparison.cjs --check",
@@ -22,7 +22,8 @@
     "prototype:account": "node scripts/native-prototype.cjs whoami",
     "prototype:info": "node scripts/native-prototype.cjs info",
     "prototype:usage": "node scripts/native-prototype.cjs usage",
-    "prototype:ios-validation": "node scripts/native-prototype.cjs ios-validation"
+    "prototype:ios-validation": "node scripts/native-prototype.cjs ios-validation",
+    "beta:android": "node scripts/native-prototype.cjs android-beta"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

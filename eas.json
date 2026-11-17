@@ -1,6 +1,12 @@
 {
   "cli": { "version": ">= 27.9.0", "appVersionSource": "local" },
   "build": {
+    "beta": {
+      "developmentClient": false,
+      "distribution": "store",
+      "environment": "production",
+      "android": { "buildType": "app-bundle", "resourceClass": "medium" }
+    },
     "prototype": {
       "developmentClient": false,
       "distribution": "internal",
@@ -12,5 +18,8 @@
       "extends": "prototype",
       "ios": { "simulator": true }
     }
+  },
+  "submit": {
+    "beta": { "android": { "track": "alpha", "releaseStatus": "draft" } }
   }
 }

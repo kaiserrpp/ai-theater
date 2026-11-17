@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SavedScript } from '../hooks/useLibrary';
 import { resolveAuditionPreferences } from '../../shared/auditionScenes';
 import { getAuditionRehearsalPlan, type AuditionRehearsalMode } from '../utils/auditionRehearsal';
@@ -175,6 +175,7 @@ export const PracticeHome = (props: Props) => {
       <Button label="Materiales y gestión" secondary onPress={() => setSheet('materials')} />
       <Button label="Compartir obra" secondary disabled={!props.manifest} onPress={() => setSheet('share')} />
       <Button label="Cambiar obra" secondary onPress={() => setSheet('works')} /><VersionBadge />
+      <Button label="Privacidad" secondary onPress={() => void Linking.openURL('https://ai-theater.vercel.app/privacidad.html')} />
     </Sheet>
     <Sheet title="Fondo y apariencia" visible={sheet === 'appearance'} closeDisabled={appearanceBusy} onClose={() => setSheet(null)}>
       <AppearanceSettings onBusyChange={setAppearanceBusy} />

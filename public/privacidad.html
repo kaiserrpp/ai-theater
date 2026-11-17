@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Privacidad · AI-Theatre</title>
+  <style>
+    :root{font-family:system-ui,sans-serif;line-height:1.65;color-scheme:light dark}
+    body{max-width:760px;margin:auto;padding:28px 22px 64px}h1,h2{line-height:1.25}h1{font-size:2rem}h2{margin-top:2em;font-size:1.25rem}a{color:light-dark(#713d59,#edb9d6)}a:focus-visible{outline:3px solid currentColor;outline-offset:4px}li{margin-bottom:.6em}.date{opacity:.75}
+  </style>
+</head>
+<body>
+  <main>
+    <a href="/">Volver a AI-Theatre</a>
+    <h1>Política de privacidad de AI-Theatre</h1>
+    <p class="date">Actualizada el 17 de noviembre de 2026 · Aplicación web y beta Android</p>
+    <p>AI-Theatre ayuda a preparar escenas, canciones y calentamientos de voz. Esta política explica el tratamiento de datos en la beta del grupo AI Theatre y en su aplicación web.</p>
+
+    <h2>Responsable y contacto</h2>
+    <p>El proyecto AI-Theatre es gestionado por su desarrollador y administrador del grupo AI Theatre. Puedes contactar con el responsable por el canal habitual del grupo o a través del <a href="https://github.com/kaiserrpp/ai-theater/issues/new">canal de contacto del proyecto</a>. Las incidencias de GitHub son públicas: publica sólo una solicitud de contacto, sin documentos de identidad, grabaciones, transcripciones ni otros datos personales.</p>
+
+    <h2>Micrófono y reconocimiento de voz</h2>
+    <p>El micrófono se utiliza para reconocer las réplicas, medir el nivel de voz durante las pruebas de audio y escuchar los comandos que hayas activado. Se solicita el permiso del navegador o del teléfono. Puedes desactivarlo desde sus ajustes y utilizar las funciones que no necesitan reconocimiento.</p>
+    <p>Vosk y Whisper ejecutan el reconocimiento localmente cuando se seleccionan y están disponibles; la descarga inicial de sus modelos requiere conexión. El reconocimiento nativo de Android o el del navegador depende del proveedor del sistema y puede procesar voz en sus servidores. No se garantiza que todos los idiomas o dispositivos funcionen sin conexión. La síntesis de voz también utiliza el servicio elegido en el dispositivo.</p>
+    <p>AI-Theatre no adjunta grabaciones de tu voz a los informes de ensayo. La medición nativa de nivel puede crear un archivo temporal, que la app intenta borrar al cerrar la captura. El audio del reconocimiento se procesa durante la sesión; el tratamiento que haga el proveedor del teléfono se rige por su propia política.</p>
+
+    <h2>Informes de ensayo</h2>
+    <p>Al terminar un ensayo se guarda un informe para analizar fallos y mejorar el reconocimiento. Puede incluir el texto esperado y reconocido, personajes y escenas seleccionados, puntuaciones de coincidencia, avances manuales o automáticos, tiempos de respuesta, errores del micrófono, motor e idioma, versión de la app, información técnica del navegador o teléfono, fecha e identificadores de obra y sesión. Un ensayo manual puede contener únicamente su resumen, sin transcripciones.</p>
+    <p>El informe se conserva primero en este dispositivo. La app intenta enviarlo al servicio de AI-Theatre cuando está disponible; si falla o el almacenamiento está protegido, permanece pendiente para reintentar. También puedes enviar informes parciales o de diagnóstico desde los controles correspondientes. Estos informes no se utilizan para publicidad ni se venden.</p>
+
+    <h2>Ajustes y materiales</h2>
+    <p>En el dispositivo se guardan tus personajes, progreso, motor de reconocimiento, pruebas de audio, tesitura, rangos de calentamiento, opciones de reproducción y última actividad vocal aproximada. Esta actividad se estima por la reproducción de canciones y el calentamiento; no es una grabación ni una detección permanente de canto.</p>
+    <p>Al subir o compartir un material, se envían sus archivos y datos al almacenamiento de la obra. Los guiones, imágenes y audios compartidos se consultan mediante enlaces que pueden reenviarse; una beta cerrada en Google Play no convierte esos enlaces en privados. Los administradores gestionan los materiales. El vídeo original usado para reconstruir el calentamiento no se incluye en la app.</p>
+
+    <h2>Servicios externos y seguridad</h2>
+    <p>La web y su API se alojan en Vercel. Los materiales utilizan archivos estáticos, Vercel Blob y, cuando está habilitado, Supabase Storage. Los datos nuevos en JSON de Supabase se guardan en un contenedor privado; algunos informes históricos de Blob tienen enlaces públicos difíciles de adivinar, lo que no equivale a control de acceso. No incluyas información sensible ajena al ensayo.</p>
+    <p>Si utilizas expresamente el análisis de un PDF mediante Gemini, se envía ese documento al servicio de Google para extraer el guion; no forma parte de la reproducción normal de canciones o calentamientos. Los proveedores de alojamiento, voz, modelos y análisis pueden tratar información de conexión y los datos necesarios para prestar sus servicios según sus propias condiciones. Las conexiones de la aplicación utilizan HTTPS.</p>
+
+    <h2>Conservación y retirada</h2>
+    <p>Los ajustes y los informes pendientes se conservan en el dispositivo hasta que se actualizan, se envían o se eliminan los datos de la app. Los informes enviados y los materiales compartidos se conservan para gestionar el grupo y mejorar la beta; actualmente no existe un plazo de borrado automático.</p>
+    <p>Puedes solicitar acceso, corrección o retirada de tus datos al responsable mediante los canales de contacto indicados. Indica la obra y la fecha aproximada de la sesión, y el identificador del informe si lo conoces, por un canal privado. Borrar datos de la aplicación o desinstalarla elimina las copias locales según el sistema, pero no retira automáticamente lo ya enviado al servidor ni las copias descargadas por otras personas.</p>
+
+    <h2>Cambios de esta política</h2>
+    <p>La fecha de esta página identificará sus actualizaciones. Los cambios relevantes en la recogida de datos deberán explicarse antes de introducirlos.</p>
+  </main>
+</body>
+</html>

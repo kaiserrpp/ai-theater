@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
@@ -16,6 +16,7 @@ import { isPrototypeUrl, parseBridgeCommand, type NativePlatform } from './src/n
 
 const platform: NativePlatform = Platform.OS === 'ios' ? 'ios' : 'android';
 const appUrl = appManifest.expo.extra.nativePrototype.webUrl;
+const privacyUrl = 'https://ai-theater.vercel.app/privacidad.html';
 
 function NativePrototype() {
   const web = useRef<WebView>(null);
@@ -98,15 +99,17 @@ function NativePrototype() {
     } catch { setPermission('needed'); setError('No se han podido comprobar los permisos. Puedes reintentarlo.'); }
   };
   return <SafeAreaView style={styles.screen}>
-    <View style={styles.heading}><Text style={styles.headingText}>AI-Theatre · Prototipo {platform === 'ios' ? 'iPhone' : 'Android'} · {packageInfo.version}</Text></View>
+    <View style={styles.heading}><Text style={styles.headingText}>AI-Theatre · Beta {platform === 'ios' ? 'iPhone' : 'Android'} · {packageInfo.version}</Text>
+      <Pressable accessibilityRole="link" accessibilityLabel="Política de privacidad" onPress={() => void Linking.openURL(privacyUrl)} style={styles.privacyLink}><Text style={styles.privacyText}>Privacidad</Text></Pressable></View>
     {permission === 'checking' ? <View style={styles.center}><ActivityIndicator /><Text>Comprobando permisos…</Text></View> :
-      permission !== 'ready' ? <View style={styles.center}>
-        <Text style={styles.title}>Prueba del ensayo nativo</Text>
+      permission !== 'ready' ? <ScrollView contentContainerStyle={styles.permissionContent}>
+        <Text style={styles.title}>Prepara tu ensayo</Text>
         <Text style={styles.description}>Activa el micrófono para ensayar con el reconocimiento del teléfono. Después podrás abrir tu obra y usar el modo Inteligente y sus pausas.</Text>
+        <Text style={styles.notice}>El servicio de voz del teléfono puede procesar el audio en línea. Al terminar un ensayo se guarda un informe con las transcripciones y datos técnicos para mejorar la app; se envía cuando el almacenamiento está disponible. AI-Theatre no incluye grabaciones de voz en esos informes.</Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable accessibilityRole="button" style={styles.button} onPress={() => void requestPermission()}><Text style={styles.buttonText}>Activar micrófono y reconocimiento</Text></Pressable>
         {error ? <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings()}><Text style={styles.description}>Abrir ajustes de permisos</Text></Pressable> : null}
-      </View> : error ? <View style={styles.center}><Text style={styles.error}>{error}</Text>
+      </ScrollView> : error ? <View style={styles.center}><Text style={styles.error}>{error}</Text>
         <Pressable accessibilityRole="button" style={styles.button} onPress={() => { controller.setForeground(true); setError(''); }}><Text style={styles.buttonText}>Reintentar conexión</Text></Pressable>
       </View> : <WebView ref={web} source={{ uri: appUrl }} style={styles.web}
         originWhitelist={[new URL(appUrl).origin]} javaScriptEnabled domStorageEnabled sharedCookiesEnabled
@@ -132,8 +135,11 @@ function NativePrototype() {
 export default function App() { return <SafeAreaProvider><NativePrototype /></SafeAreaProvider>; }
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#faf9f7' }, web: { flex: 1, backgroundColor: '#faf9f7' },
-  heading: { padding: 8, borderBottomWidth: 1, borderColor: '#e4dce1' }, headingText: { textAlign: 'center', fontSize: 11, color: '#713d59' },
+  heading: { paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderColor: '#e4dce1' }, headingText: { flex: 1, textAlign: 'center', fontSize: 11, color: '#713d59' },
+  privacyLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 }, privacyText: { fontSize: 12, color: '#713d59', textDecorationLine: 'underline' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 26, gap: 20 },
+  permissionContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 26, gap: 20 },
+  notice: { fontSize: 14, lineHeight: 20, textAlign: 'center', color: '#444' },
   title: { fontSize: 23, fontWeight: '700', textAlign: 'center' }, description: { fontSize: 16, lineHeight: 24, textAlign: 'center' },
   error: { fontSize: 16, color: '#9e2424', textAlign: 'center' },
   button: { padding: 18, borderRadius: 16, backgroundColor: '#713d59' }, buttonText: { color: '#fff', fontWeight: '700', textAlign: 'center' },

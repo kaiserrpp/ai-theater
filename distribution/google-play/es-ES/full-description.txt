@@ -1,0 +1,19 @@
+Tu espacio para preparar escenas, canciones y audiciones con los materiales de tu grupo de teatro.
+
+ENSAYA TUS ESCENAS
+Elige tus personajes y deja que la app interprete las demás réplicas. Practica en modo manual o utiliza el reconocimiento de voz del teléfono para avanzar con tus palabras, conservando las pausas entre escenas.
+
+PRACTICA TUS CANCIONES
+Escucha las versiones con voz o karaoke, reproduce una canción o un grupo y ajusta la velocidad y la repetición.
+
+PREPARA TU VOZ
+Haz el calentamiento guiado completo o repite un ejercicio. Escucha la explicación y el piano, descansa para beber y continúa con el botón o con los comandos de voz. Elige un punto de partida de tesitura y ajusta las notas a tu rango cómodo.
+
+TUS AJUSTES, A MANO
+Conserva en este dispositivo tus personajes, preferencias de reproducción, rango y pruebas de audio. Puedes cambiarlos cuando lo necesites.
+
+BETA DEL GRUPO AI THEATRE
+Esta versión está destinada a los participantes de la prueba del grupo AI Theatre. Necesita conexión para acceder a los materiales compartidos. El reconocimiento y la voz dependen de los servicios y modelos disponibles en tu teléfono; algunas funciones pueden necesitar conexión.
+
+El micrófono se utiliza para el reconocimiento, los comandos y las pruebas de audio. Al finalizar el ensayo se prepara un informe de transcripciones y diagnóstico para mejorar la beta, sin incluir grabaciones de voz. Consulta los detalles y los canales de contacto en la política de privacidad:
+https://ai-theater.vercel.app/privacidad.html

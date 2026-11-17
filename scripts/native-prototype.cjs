@@ -7,6 +7,7 @@ const tasks = {
   login: ['login'], whoami: ['whoami'], link: ['init'], info: ['project:info'], devices: ['device:create'],
   usage: ['account:usage', 'kaiserpps-team', '--json', '--non-interactive'],
   android: ['build', '--platform', 'android', '--profile', 'prototype'],
+  'android-beta': ['build', '--platform', 'android', '--profile', 'beta', '--non-interactive'],
   ios: ['build', '--platform', 'ios', '--profile', 'prototype'],
   'ios-validation': ['build', '--platform', 'ios', '--profile', 'ios-validation', '--non-interactive'],
 };
@@ -42,6 +43,10 @@ if (command === 'check') {
     if (!app.android.permissions?.includes(permission)) throw Error(`Falta ${permission}: la WebView necesita ambos permisos para abrir la entrada de audio.`);
   }
   if (eas.build.prototype.distribution !== 'internal' || eas.build.prototype.android.buildType !== 'apk') throw Error('La prueba debe usar distribución interna y APK.');
+  if (eas.build.beta?.distribution !== 'store' || eas.build.beta.environment !== 'production' ||
+    eas.build.beta.android?.buildType !== 'app-bundle' || eas.build.beta.android.resourceClass !== 'medium') {
+    throw Error('La beta de Google Play debe generar AAB con entorno production y recurso medium.');
+  }
   if (!app.extra.nativePrototype.webUrl.startsWith('https://ai-theater.vercel.app/')) throw Error('La URL del prototipo debe apuntar a la app publicada.');
   console.log(`Prototipo ${pkg.version}: configuración de iPhone y Android correcta.`);
   console.log('Android: el reconocimiento, la voz y la calibración de Inteligente/nativo usan las API nativas; la interfaz y los guiones siguen en la web.');
@@ -49,6 +54,7 @@ if (command === 'check') {
   console.log(app.extra.eas?.projectId ? `Proyecto Expo vinculado: ${app.extra.eas.projectId}` : 'Pendiente: iniciar sesión en Expo y vincular el proyecto (npm run prototype:login / prototype:link).');
   console.log('iPhone: requiere una membresía Apple Developer activa y registrar el dispositivo antes de firmar el instalador.');
   console.log('Android: APK para prueba interna; Google Play no es necesario.');
+  console.log('Beta Google Play: npm run beta:android genera un AAB; la subida y el canal cerrado requieren Play Console.');
 } else {
   if (!tasks[command]) throw Error(`Comando desconocido: ${command}`);
   if (!process.env.npm_execpath) throw Error('Ejecuta este comando mediante npm run prototype:<comando>.');

@@ -1,0 +1,3 @@
+Primera beta cerrada para el grupo AI Theatre.
+Ensayo de escenas, canciones con voz y karaoke, calentamiento guiado y ajustes de audio recordados.
+Interfaz compacta con acceso directo a escenas y canciones.
