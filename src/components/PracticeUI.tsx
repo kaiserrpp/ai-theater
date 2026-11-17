@@ -53,6 +53,22 @@ export const Chip = ({ label, selected, onPress, disabled = false, accessibility
   </TouchableOpacity>
   );
 };
+export const Disclosure = ({ title, summary, children, initiallyOpen = false }: {
+  title: string; summary?: string; children: React.ReactNode; initiallyOpen?: boolean;
+}) => {
+  const { palette, ui } = usePracticeTheme();
+  const [open, setOpen] = useState(initiallyOpen);
+  return <View style={{ gap: open ? 12 : 0 }}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }}
+      onPress={() => setOpen(value => !value)} style={[ui.row, { minHeight: 44 }]}>
+      <View style={{ flex: 1, gap: 2 }}><Text style={[ui.text, { color: palette.ink, fontWeight: '600' }]}>{title}</Text>
+        {summary ? <Text numberOfLines={2} style={[ui.text, { fontSize: 13 }]}>{summary}</Text> : null}</View>
+      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={22} />
+    </TouchableOpacity>
+    {open ? children : null}
+  </View>;
+};
+
 export const Sheet = ({ title, visible, onClose, children, footer, closeDisabled = false }: { title: string; visible: boolean; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; closeDisabled?: boolean }) => {
   const { palette, ui } = usePracticeTheme();
   const [keyboardInset, setKeyboardInset] = useState(0);

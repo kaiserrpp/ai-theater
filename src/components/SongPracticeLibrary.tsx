@@ -7,7 +7,7 @@ import { useIsAdmin } from '../store/adminSession';
 import { createSongPlayback, type SongPlaybackMode, type SongRepeatMode } from '../utils/songPlayback';
 import { selectSongPlaylist, type SongPlaylistKind } from '../utils/songPlaylistSelection';
 import { MusicalAuditionEditor } from './MusicalAuditionEditor';
-import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
+import { Button, Chip, Disclosure, Icon, Sheet, usePracticeTheme } from './PracticeUI';
 import { WarmupLibrary } from './WarmupLibrary';
 import { useVocalPractice, vocalPractice } from '../store/vocalPractice';
 import { primeSongPracticeAudio } from '../utils/songPracticeAudio';
@@ -53,6 +53,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   const [musicRoles, setMusicRoles] = useState<string[]>([]);
   const [loadedRolesKey, setLoadedRolesKey] = useState<string | null>(null);
   const [rolesOpen, setRolesOpen] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [editor, setEditor] = useState<{ initial: SharedMusicalAudition | null; key: number } | null>(null);
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
@@ -234,24 +235,23 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   </View> : null;
 
   return <>
-    <ScrollView ref={scroll} contentContainerStyle={ui.page}>
-    <View style={{ gap: 8 }}><Text style={ui.title}>Escuchar y practicar</Text><Text style={ui.text}>Tus canciones, con voz o karaoke.</Text></View>
+    <ScrollView ref={scroll} contentContainerStyle={[ui.page, { gap: 14, paddingTop: 14 }]}>
+    <View style={ui.row}><Text style={[ui.title, { flex: 1 }]}>Canciones</Text>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Opciones de canciones" onPress={() => setOptionsOpen(true)} style={ui.icon}><Icon name="tune-variant" /></TouchableOpacity></View>
     <View style={ui.wrap}><Chip label="Audiciones" selected={!warmupOpen && scope === 'auditions'} onPress={() => showSongs('auditions')} /><Chip label="Obra" selected={!warmupOpen && scope === 'work'} onPress={() => showSongs('work')} /><Chip label="Calentamiento" selected={warmupOpen} onPress={() => { player.current?.stop(); setWarmupOpen(true); }} /></View>
-    <View style={{ gap: 6 }}><Chip label="Calentar antes de cantar" selected={activity.enabled} disabled={!activity.loaded} onPress={() => vocalPractice.setEnabled(!activity.enabled)} /><Text style={ui.text}>Si han pasado más de dos horas, empezaremos con el calentamiento. Puedes omitirlo y cantar directamente. Se recuerda la última reproducción o calentamiento en este dispositivo.</Text>{activity.error ? <Text style={ui.error}>{activity.error}</Text> : null}</View>
     {warmupOpen ? <WarmupLibrary key={manifest?.shareId || 'local'} shareId={manifest?.shareId || null} createAudio={getAudio} autoStart={pendingSinging?.id} onComplete={finishWarmup} onSkip={pendingSinging ? finishWarmup : undefined} onBeforePlay={() => player.current?.stop()} /> : <>
     {scope === 'auditions' ? <>
-      <Button label="+ Subir canción de audición" disabled={!manifest} onPress={() => openEditor()} />
       {notice ? <Text accessibilityLiveRegion="polite" style={[ui.text, { color: palette.green }]}>{notice}</Text> : null}
       <View style={ui.wrap}><Chip label="Todas" selected={!mine} onPress={() => setMine(false)} /><Chip label="Mis personajes" selected={mine} onPress={() => { setMine(true); if (!musicRoles.length) setRolesOpen(true); }} /><TouchableOpacity accessibilityRole="button" accessibilityLabel="Elegir personajes" onPress={() => setRolesOpen(true)} style={ui.icon}><Icon name="account-cog-outline" /></TouchableOpacity></View>
       {mine && musicRoles.length ? <Text style={ui.text}>{musicRoles.join(' · ')}</Text> : null}
       {(manifest?.musicalAuditions?.length || 0) > 4 ? <TextInput accessibilityLabel="Buscar audición musical" placeholder="Buscar canción, fragmento o personaje" placeholderTextColor={palette.sub} value={query} onChangeText={setQuery} style={{ padding: 12, fontSize: 16, borderRadius: 12, borderWidth: 1, borderColor: palette.rule, color: palette.ink }} /> : null}
     </> : null}
-    <View testID="song-playlist-actions" style={{ gap: 10 }}><Text style={ui.label}>REPRODUCIR GRUPO</Text><View style={ui.wrap}>
+    <View testID="song-playlist-actions"><Disclosure title="Reproducir grupo" summary={kind === 'karaoke' ? 'Karaoke' : kind === 'vocal_guide' ? 'Con voz' : undefined}><View style={ui.wrap}>
       {([['all', 'Todas', 'Reproducir todas las canciones'], ['vocal_guide', 'Vocal guide', 'Reproducir vocal guides'], ['karaoke', 'Karaoke', 'Reproducir karaokes']] as const).map(([value, label, accessibilityLabel]) => <Chip key={value} label={`▶ ${label}`} accessibilityLabel={accessibilityLabel} selected={Boolean(selected) && kind === value && playbackMode === 'queue' && (selected?.auditionId ? 'auditions' : 'work') === scope} disabled={!playlist(value).length} onPress={() => playGroup(value)} />)}
-    </View><Text style={ui.text}>O toca una canción para escucharla sola.</Text></View>
+    </View></Disclosure></View>
 
     {selected ? <View style={[ui.card, { backgroundColor: palette.soft, borderColor: palette.soft }]}>
-      <View style={ui.row}><Text style={[ui.label, { flex: 1 }]}>REPRODUCTOR</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.subtitle}>{selected.title}</Text><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{selected.audio.label}</Text>
+      <View style={ui.row}><Text style={[ui.subtitle, { flex: 1 }]}>{selected.title}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{selected.audio.label}</Text>
       <Text testID="song-queue-status" accessibilityLiveRegion="polite" style={ui.text}>{queueInfo.index + 1} de {queueInfo.total} · {playbackMode === 'single' ? 'Solo esta canción' : repeatMode === 'queue' ? 'Cola en bucle' : repeatMode === 'track' ? 'Una canción en bucle' : 'La cola termina al llegar al final'}</Text>
       {selected.auditionId ? <View style={ui.row}>{([['vocal_guide','Con voz'],['karaoke','Karaoke']] as const).map(([audioKind,label]) => {
         const track = tracks.find((candidate) => candidate.auditionId === selected.auditionId && candidate.audio.kind === audioKind);
@@ -266,12 +266,15 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
       </View>
       {Platform.OS === 'web' ? <input aria-label="Posición de la canción" type="range" min={0} max={duration || 1} step={0.1} value={position} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={(event) => player.current?.seek(Number(event.target.value))} /> : null}
       <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={ui.text}>{clock(position)}</Text><Text style={ui.text}>{clock(duration)}</Text></View>
+      <Disclosure title="Velocidad y repetición" summary={`${rate.toFixed(2).replace('.', ',')}×${repeatMode !== 'off' ? ' · Repetición activada' : ''}`}>
       <View testID="song-speed-control" style={{ gap: 4 }}>
         <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={ui.text}>Velocidad · {rate.toFixed(2).replace('.', ',')}×</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Restablecer velocidad normal" onPress={() => setRate(1)} style={[ui.icon, { width: 44 }]}><Text style={{ color: palette.plum, fontWeight: '700' }}>1×</Text></TouchableOpacity></View>
         {Platform.OS === 'web' ? <input aria-label="Velocidad de reproducción" aria-valuetext={`${rate.toFixed(2).replace('.', ',')} veces la velocidad normal`} type="range" min={0.7} max={1} step={0.05} value={rate} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={(event) => setRate(Number(event.target.value))} /> : null}
         <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={[ui.text, { fontSize: 12 }]}>0,70× · Más despacio</Text><Text style={[ui.text, { fontSize: 12 }]}>1× · Normal</Text></View>
       </View>
-      <View style={ui.wrap}>{playbackMode === 'queue' ? <Chip label="Repetir cola" selected={repeatMode === 'queue'} onPress={() => setRepeatMode(repeatMode === 'queue' ? 'off' : 'queue')} /> : null}<Chip label="Repetir canción" selected={repeatMode === 'track'} onPress={() => setRepeatMode(repeatMode === 'track' ? playbackMode === 'queue' ? 'queue' : 'off' : 'track')} />{selected.lyrics ? <Chip label={lyricsOpen ? 'Ocultar letra' : 'Ver letra'} selected={lyricsOpen} onPress={() => setLyricsOpen(!lyricsOpen)} /> : null}</View>
+      <View style={ui.wrap}>{playbackMode === 'queue' ? <Chip label="Repetir cola" selected={repeatMode === 'queue'} onPress={() => setRepeatMode(repeatMode === 'queue' ? 'off' : 'queue')} /> : null}<Chip label="Repetir canción" selected={repeatMode === 'track'} onPress={() => setRepeatMode(repeatMode === 'track' ? playbackMode === 'queue' ? 'queue' : 'off' : 'track')} /></View>
+      </Disclosure>
+      {selected.lyrics ? <Chip label={lyricsOpen ? 'Ocultar letra' : 'Ver letra'} selected={lyricsOpen} onPress={() => setLyricsOpen(!lyricsOpen)} /> : null}
       {lyricsOpen && selected.lyrics ? <Text selectable style={[ui.text, { color: palette.ink }]}>{selected.lyrics}</Text> : null}
       {error ? <Text accessibilityRole="alert" style={ui.error}>{error}</Text> : null}
     </View> : null}
@@ -293,11 +296,17 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
       <Icon name={selectedKey === track.key && playing ? 'volume-high' : 'play-circle-outline'} size={30} />
       <View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 17 }]}>{track.title}</Text><Text style={ui.text}>{track.audio.label}{track.audio.guideRoles.length ? ` · ${track.audio.guideRoles.join(', ')}` : ''}</Text></View>
     </TouchableOpacity>)}
-    <Button label="Gestionar audios de la obra" secondary disabled={!manifest} onPress={onManageWork} />
     </>}
     {selected && error ? <Button label="Reintentar audio" secondary onPress={() => play(selected)} /> : null}
     </>}
     </ScrollView>
+    <Sheet title="Opciones de canciones" visible={optionsOpen} onClose={() => setOptionsOpen(false)}>
+      <Chip label="Calentar antes de cantar" selected={activity.enabled} disabled={!activity.loaded} onPress={() => vocalPractice.setEnabled(!activity.enabled)} />
+      <Text style={ui.text}>Calentamiento automático si llevas más de dos horas sin cantar. Siempre puedes omitirlo.</Text>
+      {activity.error ? <Text style={ui.error}>{activity.error}</Text> : null}
+      <Button label="+ Subir canción de audición" disabled={!manifest} onPress={() => { setOptionsOpen(false); openEditor(); }} />
+      <Button label="Gestionar audios de la obra" secondary disabled={!manifest} onPress={() => { setOptionsOpen(false); onManageWork(); }} />
+    </Sheet>
     <Sheet title="Mis personajes · Canciones" visible={rolesOpen} onClose={() => setRolesOpen(false)}>
       <Text style={ui.text}>Esta selección se recuerda para las canciones de esta obra en este dispositivo.</Text><View style={ui.wrap}>{availableRoles.map((role) => <Chip key={role} label={role} selected={musicRoles.includes(role)} onPress={() => setMusicRoles((previous) => previous.includes(role) ? previous.filter((value) => value !== role) : [...previous,role])} />)}</View>
       {!availableRoles.length ? <Text style={ui.text}>Los personajes aparecerán al añadir los fragmentos.</Text> : null}<Button label="Listo" onPress={() => setRolesOpen(false)} />
