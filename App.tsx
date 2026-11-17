@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Text, View } from 'react-native';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { restoreAdminSession } from './src/store/adminSession';
+import { restoreRehearsalPreparation } from './src/store/rehearsalPreparationStorage';
 import { getNativePrototypeInfo, isNativePrototypeShell, NATIVE_READY_EVENT } from './src/utils/nativePrototype';
 
 export default function App() {
@@ -13,6 +14,9 @@ export default function App() {
     ready(); window.addEventListener(NATIVE_READY_EVENT, ready);
     const timer = setTimeout(() => setNativeError(true), 10000);
     return () => { clearTimeout(timer); window.removeEventListener(NATIVE_READY_EVENT, ready); };
+  }, [nativeReady]);
+  useEffect(() => {
+    if (nativeReady) void restoreRehearsalPreparation();
   }, [nativeReady]);
   useEffect(() => {
     void restoreAdminSession();

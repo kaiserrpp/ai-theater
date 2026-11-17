@@ -1798,6 +1798,7 @@ export const RehearsalView: React.FC<Props> = ({
           AsyncStorage.getItem(REHEARSAL_AUDIO_MODE_STORAGE_KEY),
           AsyncStorage.getItem(REHEARSAL_TRANSCRIPT_STORAGE_KEY),
           AsyncStorage.getItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY),
+          rehearsalPreparationSession.load(),
         ]);
 
         if (!isMounted) {
@@ -2921,11 +2922,17 @@ export const RehearsalView: React.FC<Props> = ({
 
   const voiceStartedRef = useRef(false);
   useEffect(() => {
-    if (!voiceStart || voiceStartedRef.current || !preferencesLoaded ||
+    if (voiceStartedRef.current || !preferencesLoaded ||
       listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') return;
+    const preparation = rehearsalPreparationSession.getSnapshot();
+    const measurement = preferNativeLevelInput ? 'native_peak' : 'rms';
+    const savedSetupReady = preparation.loaded && preparation.remember && preparation.speakerConfirmed &&
+      (listenModeSelection === 'manual' || Boolean(preparation.calibration && (preparation.calibration.measurement || 'rms') === measurement));
+    if (!voiceStart && (!savedSetupReady || hasConfirmedRehearsalSetup)) return;
     voiceStartedRef.current = true;
     handleStartConfiguredRehearsal();
-  }, [voiceStart, preferencesLoaded, listenModeSelection, rehearsalAudioModeSelection, handleStartConfiguredRehearsal]);
+  }, [voiceStart, preferencesLoaded, listenModeSelection, rehearsalAudioModeSelection, handleStartConfiguredRehearsal,
+    preferNativeLevelInput, hasConfirmedRehearsalSetup]);
 
   if (isExitingRehearsal) {
     return <View style={styles.container}>

@@ -126,7 +126,7 @@ test('failed or incomplete measurements never count as completed calibration', (
   assert.equal(nextStep('auto', session.getSnapshot()), 'ready');
 });
 
-test('repeat clears every check; a newly opened app starts with no prior evidence', () => {
+test('repeat clears every check; an unconfigured memory session starts with no prior evidence', () => {
   const session = createSession();
   const updates = [];
   const unsubscribe = session.subscribe(() => updates.push(session.getSnapshot()));
@@ -160,4 +160,109 @@ test('a denied recognition session cannot use prior checks to pretend audio is l
   assert.equal(recognition.getSnapshot().status, 'error');
   assert.equal(session.getSnapshot().recognitionOutputConfirmed, true);
   recognition.dispose();
+});
+
+const storageFixture = () => {
+  const values = new Map();
+  const storage = { key: 'audio-test:browser', context: 'browser',
+    read: async key => values.get(key) || null,
+    write: async (key, value) => { values.set(key, value); },
+  };
+  return { values, storage };
+};
+const confirm = session => {
+  session.confirmSpeaker(); session.rememberCalibration(calibration);
+  session.confirmRecognitionOutput('prueba de micro', 'native');
+};
+
+test('saved speaker, calibration and per-engine checks survive closing the app without retaining permission or audio', async () => {
+  const f = storageFixture(), first = createSession(f.storage); await first.load();
+  first.confirmSpeaker(); first.rememberCalibration({ ...calibration, audio: [0.42], deviceId: 'private-device' });
+  first.confirmRecognitionOutput('prueba de micro', 'native'); await first.flush();
+  const serialized = f.values.get(f.storage.key);
+  assert.equal(serialized.includes('0.42'), false); assert.equal(serialized.includes('private-device'), false);
+  assert.equal(serialized.includes('prueba de micro'), false);
+  const restored = createSession(f.storage); assert.equal(restored.getSnapshot().loaded, false);
+  await restored.load(); assert.equal(restored.getSnapshot().loaded, true);
+  assert.equal(restored.getSnapshot().speakerConfirmed, true);
+  assert.equal(restored.getSnapshot().calibration.voiceThreshold, calibration.voiceThreshold);
+  assert.equal(restored.hasConfirmedRecognitionEngine('native'), true);
+  assert.equal(restored.hasConfirmedRecognitionEngine('whisper'), false);
+  assert.equal(nextStep('intelligent', restored.getSnapshot()), 'recognition', 'a saved profile never means capture is currently open');
+  assert.equal(canStart('intelligent', evidence(restored)), false);
+  assert.equal(nextStep('auto', restored.getSnapshot()), 'ready');
+  assert.equal(nextStep('manual', restored.getSnapshot()), 'ready');
+});
+
+test('opting out keeps the current open session useful and removes saved checks from the next app launch', async () => {
+  const f = storageFixture(), current = createSession(f.storage); await current.load(); confirm(current); await current.flush();
+  current.setRemember(false); await current.flush();
+  assert.equal(current.getSnapshot().speakerConfirmed, true);
+  const restored = createSession(f.storage); await restored.load();
+  assert.equal(restored.getSnapshot().remember, false); assert.equal(restored.getSnapshot().speakerConfirmed, false);
+  assert.equal(restored.getSnapshot().calibration, null); assert.equal(restored.hasConfirmedRecognitionEngine('native'), false);
+  current.setRemember(true); await current.flush();
+  const enabled = createSession(f.storage); await enabled.load(); assert.equal(enabled.getSnapshot().speakerConfirmed, true);
+});
+
+test('repeat tests removes only this audio profile and remains cleared after a reload', async () => {
+  const f = storageFixture(), current = createSession(f.storage); f.values.set('unrelated-songs', 'keep');
+  await current.load(); confirm(current); await current.flush(); current.reset(); await current.flush();
+  const restored = createSession(f.storage); await restored.load();
+  assert.equal(nextStep('intelligent', restored.getSnapshot()), 'speaker');
+  assert.equal(restored.hasConfirmedRecognitionEngine('native'), false);
+  assert.equal(f.values.get('unrelated-songs'), 'keep');
+});
+
+test('a late restore cannot undo a reset, an opt-out or a new confirmed calibration', async () => {
+  const f = storageFixture(), first = createSession(f.storage); await first.load(); confirm(first); await first.flush();
+  const saved = f.values.get(f.storage.key);
+  for (const change of [session => session.reset(), session => session.setRemember(false), session => { session.confirmSpeaker(); session.rememberCalibration({ ...calibration, voiceThreshold: .09 }); }]) {
+    let complete;
+    const session = createSession({ ...f.storage, read: () => new Promise(resolve => { complete = resolve; }) });
+    const loading = session.load(); change(session); const expected = session.getSnapshot();
+    complete(saved); await loading; await session.flush();
+    assert.equal(session.getSnapshot().speakerConfirmed, expected.speakerConfirmed);
+    assert.equal(session.getSnapshot().remember, expected.remember);
+    assert.deepEqual(session.getSnapshot().calibration, expected.calibration);
+    assert.equal(session.hasConfirmedRecognitionEngine('native'), false);
+  }
+});
+
+test('corrupt, incompatible and out of range saved values do not bypass first setup', async () => {
+  const f = storageFixture();
+  const valid = { version: 1, context: 'browser', remember: true, speakerConfirmed: true, calibration, engines: ['native'] };
+  for (const invalid of ['{broken', JSON.stringify({ ...valid, version: 999 }), JSON.stringify({ ...valid, context: 'native-android-peak' }),
+    JSON.stringify({ ...valid, calibration: { ...calibration, voiceThreshold: 4 } }),
+    JSON.stringify({ ...valid, calibration: { ...calibration, status: 'error' } }),
+    JSON.stringify({ ...valid, engines: ['made-up'] })]) {
+    f.values.set(f.storage.key, invalid); const session = createSession(f.storage); await session.load();
+    assert.equal(nextStep('intelligent', session.getSnapshot()), 'speaker');
+    assert.equal(session.getSnapshot().loaded, true); assert.ok(session.getSnapshot().storageError);
+  }
+});
+
+test('browser and native profiles stay separate, and retiring only calibration keeps speaker and engine checks', async () => {
+  const f = storageFixture(), session = createSession(f.storage); await session.load(); confirm(session); await session.flush();
+  session.resetCalibration(); await session.flush();
+  const restored = createSession(f.storage); await restored.load();
+  assert.equal(restored.getSnapshot().calibration, null); assert.equal(restored.getSnapshot().speakerConfirmed, true);
+  assert.equal(restored.hasConfirmedRecognitionEngine('native'), true);
+  restored.configurePersistence({ ...f.storage, key: 'audio-test:native-android-peak', context: 'native-android-peak' });
+  await restored.load(); assert.equal(restored.getSnapshot().speakerConfirmed, false);
+  assert.equal(restored.hasConfirmedRecognitionEngine('native'), false);
+  assert.ok(f.values.has('audio-test:browser'));
+});
+
+test('read/write failures report persistence honestly and a later successful save clears the error', async () => {
+  const f = storageFixture(); let fail = true;
+  const session = createSession({ ...f.storage, write: async (...args) => { if (fail) throw new Error('full'); await f.storage.write(...args); } });
+  await session.load(); confirm(session); await session.flush();
+  assert.equal(session.getSnapshot().speakerConfirmed, true); assert.ok(session.getSnapshot().storageError);
+  assert.equal(f.values.size, 0); fail = false; session.confirmSpeaker(); await session.flush();
+  assert.equal(session.getSnapshot().storageError, null);
+  let readFailed = true;
+  const retry = createSession({ ...f.storage, read: async key => { if (readFailed) throw new Error('temporarily unavailable'); return f.storage.read(key); } });
+  await retry.load(); assert.equal(retry.getSnapshot().speakerConfirmed, false); assert.ok(retry.getSnapshot().storageError);
+  readFailed = false; await retry.load(); assert.equal(retry.getSnapshot().speakerConfirmed, true);
 });

@@ -18,7 +18,7 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   const [repeatRequested, setRepeatRequested] = useState(false);
   const native = getNativePrototypeInfo();
   return <>
-  <Text style={ui.text}>La app recuerda tu elección en este dispositivo. Las pruebas de audio se hacen una vez y se conservan hasta que cierres la app.</Text>
+  <Text style={ui.text}>La app recuerda tus ajustes en este dispositivo y los usa por defecto, también después de cerrarla. Puedes cambiarlos o repetir las pruebas cuando quieras.</Text>
   {([
     ['intelligent', 'Inteligente', 'Comprueba tus palabras y avanza al completar la réplica.'],
     ['manual', 'Manual', 'Avanza tú con el botón siguiente.'],
@@ -47,12 +47,21 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
     <Switch accessibilityLabel="Mostrar transcripción" value={showTranscript} onValueChange={onTranscriptChange} trackColor={{ true: palette.plum }} />
   </View>
   <View style={ui.card}>
+    <View style={ui.row}><View style={{ flex: 1, gap: 4 }}><Text style={ui.subtitle}>Recordar audio y micrófono</Text>
+      <Text style={ui.text}>Guarda las pruebas completadas para los próximos ensayos. El permiso del micrófono lo gestiona tu navegador o teléfono.</Text></View>
+      <Switch accessibilityLabel="Recordar configuración de audio y micrófono" value={preparation.remember} disabled={!preparation.loaded}
+        onValueChange={value => rehearsalPreparationSession.setRemember(value)} trackColor={{ true: palette.plum }} /></View>
+  </View>
+  <View style={ui.card}>
     <Text style={ui.subtitle}>Pruebas de audio</Text>
+    <Text style={ui.text}>Si cambias de micrófono, altavoz o entorno, puedes repetir estas pruebas.</Text>
     <Text style={ui.text}>{getSpeechOutputHelp()}</Text>
     <Text accessibilityLiveRegion="polite" style={ui.text}>{repeatRequested
       ? 'Volveremos a comprobar el audio al empezar el próximo ensayo.'
-      : preparation.speakerConfirmed ? 'El altavoz ya está comprobado. Reutilizaremos las pruebas completadas mientras la app siga abierta.'
+      : !preparation.loaded ? 'Recuperando tu configuración de audio…'
+      : preparation.speakerConfirmed ? preparation.remember ? 'Usaremos por defecto las pruebas de audio guardadas en este dispositivo.' : 'Reutilizaremos las pruebas mientras la app siga abierta.'
       : 'Comprobaremos el audio al empezar el ensayo.'}</Text>
+    {preparation.storageError ? <Text accessibilityLiveRegion="polite" style={ui.error}>{preparation.storageError}</Text> : null}
     <Button label={onRepeatPreparation ? 'Repetir pruebas de audio' : 'Repetir pruebas en el próximo ensayo'} secondary onPress={() => {
       rehearsalPreparationSession.reset();
       setRepeatRequested(true);
