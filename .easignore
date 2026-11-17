@@ -11,6 +11,7 @@ assets/*
 !assets/images
 assets/images/*
 !assets/images/caras-teatro.png
+!assets/images/ai-theatre-play.png
 !assets/images/splash-icon.png
 !src
 src/*

@@ -23,7 +23,7 @@ if (command === 'check') {
   const required = ['App.native.tsx', 'app.json', 'package.json', 'package-lock.json', 'eas.json', 'tsconfig.json',
     'src/nativePrototype/controller.ts', 'src/nativePrototype/bridgeBootstrap.ts', 'src/nativePrototype/protocol.ts', 'src/nativePrototype/levelInput.ts',
     'src/nativePrototype/recognitionHints.ts', 'src/nativePrototype/recognitionRuntime.ts',
-    'assets/images/caras-teatro.png', 'assets/images/splash-icon.png'];
+    'assets/images/caras-teatro.png', 'assets/images/ai-theatre-play.png', 'assets/images/splash-icon.png'];
   for (const file of required) {
     if (!fs.existsSync(path.join(root, file)) || ignore.ignores(file)) throw Error(`Falta en el paquete nativo: ${file}`);
     // EAS walks each parent with fs.cp, passing directory names without a

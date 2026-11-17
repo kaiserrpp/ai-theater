@@ -24,8 +24,9 @@
       }
     },
     "android": {
+      "icon": "./assets/images/ai-theatre-play.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/caras-teatro.png",
+        "foregroundImage": "./assets/images/ai-theatre-play.png",
         "backgroundColor": "#5f0c14"
       },
       "package": "com.kaiserrpp.aitheatre.prototype",
