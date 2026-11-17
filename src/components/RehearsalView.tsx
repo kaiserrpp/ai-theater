@@ -3,6 +3,7 @@ import packageInfo from '../../package.json';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { submitIntelligentLineFeedback } from '../api/sharedScripts';
+import { feedbackOutbox } from '../store/feedbackOutbox';
 import { useSilenceAdvance } from '../hooks/useSilenceAdvance';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { useRehearsalComparison } from '../hooks/useRehearsalComparison';
@@ -76,6 +77,8 @@ interface Props {
   spokenOnly?: boolean;
   onProgressChange?: (lineIndex: number, totalLines: number) => void;
   onExit: () => void;
+  onCompleted?: () => void;
+  voiceStart?: boolean;
 }
 
 type RehearsalPreflightPhase =
@@ -454,6 +457,8 @@ export const RehearsalView: React.FC<Props> = ({
   spokenOnly = false,
   onProgressChange,
   onExit,
+  onCompleted,
+  voiceStart = false,
 }) => {
   const { palette, ui } = usePracticeTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
@@ -532,6 +537,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [feedbackStatusMessage, setFeedbackStatusMessage] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const sendingFeedbackRef = useRef(false);
+  const completionRequestedRef = useRef(false);
+  const rehearsalOpenedAt = useRef(Date.now());
   const [microphoneReportMessage, setMicrophoneReportMessage] = useState<string | null>(null);
   const [showMicrophoneDiagnostic, setShowMicrophoneDiagnostic] = useState(false);
   const microphoneReportIdRef = useRef(createSessionId());
@@ -1023,6 +1030,13 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, [recognitionEngine, resetSpeechRecognitionTranscript, shouldListenForSceneCommand, speechRecognitionFinalTranscript,
     speechRecognitionInterimTranscript, speechRecognitionLastUtterance, startCurrentScene]);
+  const voiceSceneStarted = useRef(false);
+  useEffect(() => {
+    if (voiceStart && !voiceSceneStarted.current && hasCompletedRehearsalPreflight && currentIndex === 0 &&
+      sceneCommandReadyKey && currentLine && isSceneMarker(currentLine)) {
+      voiceSceneStarted.current = true; startCurrentScene();
+    }
+  }, [voiceStart, hasCompletedRehearsalPreflight, currentIndex, sceneCommandReadyKey, currentLine, startCurrentScene]);
 
   const intelligentLineMatch = useMemo(
     () =>
@@ -2297,6 +2311,38 @@ export const RehearsalView: React.FC<Props> = ({
     void waitForRecognitionEnd().then(async () => { await persistComparisonDraft(feedbackEntriesRef.current).catch(() => {}); onExit(); });
   };
 
+  const finishCompletedRef = useRef(() => {});
+  finishCompletedRef.current = () => {
+    if (completionRequestedRef.current || exitRequestedRef.current) return;
+    completionRequestedRef.current = true;
+    stopRehearsalSpeech(); disposeSongAudio(); disposeCalibrationAudio();
+    finishComparison('exit'); stopRecognition();
+    void (async () => {
+      await releaseListening();
+      if (!await waitForRecognitionEnd()) throw new Error('La escucha aún se está cerrando. Pulsa Volver al inicio para reintentar.');
+      await feedbackOutbox.enqueue({
+        sessionId: `completed-${intelligentSessionIdRef.current}`, scriptId: resolvedScriptId, shareId, scriptTitle,
+        appVersion: packageInfo.version, userRoles: myRoles, userAgent: getUserAgent(),
+        runtime: getNativePrototypeInfo()?.platform === 'ios' ? 'native_ios' : getNativePrototypeInfo()?.platform === 'android' ? 'native_android' : 'browser',
+        nativeAppVersion: getNativePrototypeInfo()?.appVersion,
+        entries: feedbackEntriesRef.current.slice(),
+        completedRehearsal: { lineCount: filteredGuion.length,
+          listenMode: listenModeSelection === 'pending' ? 'manual' : listenModeSelection,
+          elapsedMs: Math.max(0, Date.now() - rehearsalOpenedAt.current) },
+      });
+      await persistComparisonDraft([]).catch(() => {});
+      void feedbackOutbox.flush();
+      exitRequestedRef.current = true;
+      (onCompleted || onExit)();
+    })().catch(error => {
+      completionRequestedRef.current = false;
+      setFeedbackStatusMessage(error instanceof Error ? error.message : 'No se pudo conservar el informe. Reintenta antes de salir.');
+    });
+  };
+  useEffect(() => {
+    if (isFinished && filteredGuion.length > 0 && hasCompletedRehearsalPreflight) finishCompletedRef.current();
+  }, [isFinished, filteredGuion.length, hasCompletedRehearsalPreflight]);
+
   const currentAudioModeLabel = currentMusicalNumber ? 'numero musical' : 'cancion';
   const shouldShowCurrentAudioOptions = currentRehearsalAudioOptions.length > 0;
 
@@ -2873,6 +2919,14 @@ export const RehearsalView: React.FC<Props> = ({
     finishRehearsalPreparation, listenModeSelection, prepareRehearsalMedia, primeSongPlayback,
     rehearsalAudioModeSelection, spokenOnly, stopRecognition, preferNativeLevelInput]);
 
+  const voiceStartedRef = useRef(false);
+  useEffect(() => {
+    if (!voiceStart || voiceStartedRef.current || !preferencesLoaded ||
+      listenModeSelection === 'pending' || rehearsalAudioModeSelection === 'pending') return;
+    voiceStartedRef.current = true;
+    handleStartConfiguredRehearsal();
+  }, [voiceStart, preferencesLoaded, listenModeSelection, rehearsalAudioModeSelection, handleStartConfiguredRehearsal]);
+
   if (isExitingRehearsal) {
     return <View style={styles.container}>
       {renderHeader('Terminando ensayo')}
@@ -3379,7 +3433,7 @@ export const RehearsalView: React.FC<Props> = ({
             {feedbackStatusMessage ? (
               <Text style={styles.intelligentFeedbackStatus}>{feedbackStatusMessage}</Text>
             ) : null}
-            <TouchableOpacity onPress={handleExit} style={styles.btnBack}>
+            <TouchableOpacity onPress={() => finishCompletedRef.current()} style={styles.btnBack}>
               <Text style={styles.btnText}>Volver al inicio</Text>
             </TouchableOpacity>
           </View>

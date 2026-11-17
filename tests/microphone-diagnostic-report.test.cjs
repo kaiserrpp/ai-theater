@@ -41,4 +41,19 @@ test('a preparation diagnostic can be sent without scene results, with bounded e
   const invalid = response();
   await handler({ method: 'POST', body: { entries: [], microphoneDiagnostic: { ...diagnostic, kind: 'anything' } } }, invalid);
   assert.equal(invalid.code, 400); assert.equal(saved.length, 2);
+  for (const mode of ['manual', 'auto', 'intelligent']) {
+    const completed = response();
+    await handler({ method: 'POST', body: { sessionId: `completed-${mode}`, entries: [],
+      completedRehearsal: { lineCount: 21, listenMode: mode, elapsedMs: 1234.4, audio: [0.42] } } }, completed);
+    assert.equal(completed.code, 200);
+    assert.deepEqual(saved.at(-1).body.completedRehearsal, { lineCount: 21, listenMode: mode, elapsedMs: 1234 });
+    assert.deepEqual(saved.at(-1).body.entries, []);
+    assert.equal(JSON.stringify(saved.at(-1).body).includes('0.42'), false);
+  }
+  for (const summary of [{ lineCount: 0, listenMode: 'manual', elapsedMs: 0 },
+    { lineCount: 1, listenMode: 'fake', elapsedMs: 0 }, { lineCount: 1, listenMode: 'manual', elapsedMs: -1 }]) {
+    const result = response();
+    await handler({ method: 'POST', body: { entries: [], completedRehearsal: summary } }, result);
+    assert.equal(result.code, 400);
+  }
 });

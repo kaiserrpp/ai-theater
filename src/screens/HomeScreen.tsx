@@ -166,6 +166,8 @@ export const HomeScreen = () => {
   const [currentScriptFileName, setCurrentScriptFileName] = useState<string | null>(null);
   const [myRoles, setMyRoles] = useState<string[]>([]);
   const [isRehearsing, setIsRehearsing] = useState(false);
+  const [voiceRehearsalStart, setVoiceRehearsalStart] = useState(false);
+  const [homeVoiceReady, setHomeVoiceReady] = useState(false);
   const [selectedScenes, setSelectedScenes] = useState<string[]>([]);
   const [activeRehearsalScenes, setActiveRehearsalScenes] = useState<string[]>([]);
   const [activeRehearsalMode, setActiveRehearsalMode] = useState<RehearsalMode | null>(null);
@@ -925,6 +927,8 @@ export const HomeScreen = () => {
           initialIndex={rehearsalStartIndex}
           onProgressChange={handleRehearsalProgressChange}
           onExit={() => setIsRehearsing(false)}
+          voiceStart={voiceRehearsalStart}
+          onCompleted={() => { setIsRehearsing(false); setHomeVoiceReady(true); setVoiceRehearsalStart(false); }}
         />
       </ScreenWrapper>
     );
@@ -933,7 +937,9 @@ export const HomeScreen = () => {
   if (!isManagingWorkspace && !isManagingSongs) {
     return <ScreenWrapper><PracticeHome script={displayScriptData} manifest={sharedScript}
       myRoles={myRoles} onRolesChange={setMyRoles} sceneTitles={currentSceneTitles}
-      onStart={requestRehearsalStart} onStartScene={(scene) => {
+      homeVoiceReady={homeVoiceReady} onStartDirect={() => { setVoiceRehearsalStart(true); launchRehearsal(lastRehearsalMode && getScenesForMode(lastRehearsalMode).length ? lastRehearsalMode : 'MINE', 0); }}
+      onStart={(mode) => { setVoiceRehearsalStart(false); requestRehearsalStart(mode); }} onStartScene={(scene) => {
+        setVoiceRehearsalStart(false);
         setActiveRehearsalMode('SELECTED'); setSelectedScenes([scene]); setActiveRehearsalScenes([scene]);
         const checkpoint = getApplicableCheckpoint('SELECTED', [scene]);
         setRehearsalStartIndex(checkpoint?.lineIndex ?? 0); setLastRehearsalMode('SELECTED'); setIsRehearsing(true);

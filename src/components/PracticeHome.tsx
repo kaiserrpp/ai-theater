@@ -16,6 +16,8 @@ import { Button, Chip, Icon, Sheet, usePracticeTheme } from './PracticeUI';
 import { AppearanceSettings } from './AppearanceSettings';
 import { SongPracticeLibrary } from './SongPracticeLibrary';
 import { VersionBadge } from './VersionBadge';
+import { HomeVoiceStart } from './HomeVoiceStart';
+import { feedbackOutbox, useFeedbackOutbox } from '../store/feedbackOutbox';
 
 interface Props {
   script: ScriptData | null; manifest: SharedScriptManifest | null;
@@ -29,6 +31,8 @@ interface Props {
   onManifestUpdated: (manifest: SharedScriptManifest) => void;
   loading: boolean; status: string; error: string | null; onRefresh: () => void;
   preferenceNotice: string;
+  homeVoiceReady?: boolean;
+  onStartDirect: () => void;
 }
 
 export const PracticeHome = (props: Props) => {
@@ -47,7 +51,25 @@ export const PracticeHome = (props: Props) => {
   const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('native');
   const [storageNotice, setStorageNotice] = useState('');
   const [auditionUploadRequest, setAuditionUploadRequest] = useState(0);
+  const [voiceWanted, setVoiceWanted] = useState(Boolean(props.homeVoiceReady));
+  const [directAuditionRequest, setDirectAuditionRequest] = useState(0);
+  const [lastTarget, setLastTarget] = useState<'work' | 'audition'>('work');
+  const [musicBusy, setMusicBusy] = useState(false);
+  const reportStatus = useFeedbackOutbox();
   const shareId = props.manifest?.shareId;
+  useEffect(() => {
+    void feedbackOutbox.flush();
+    const retry = () => { void feedbackOutbox.flush(); };
+    if (typeof window !== 'undefined') { window.addEventListener('online', retry); window.addEventListener('pageshow', retry); }
+    return () => { if (typeof window !== 'undefined') { window.removeEventListener('online', retry); window.removeEventListener('pageshow', retry); } };
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    if (shareId) void AsyncStorage.getItem(`@teatro_ia_last_rehearsal_target:${shareId}`).then(value => {
+      if (!cancelled) setLastTarget(value === 'audition' ? 'audition' : 'work');
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [shareId]);
   const openRecognitionComparison = async () => {
     await Promise.all([AsyncStorage.setItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, 'comparison'),
       AsyncStorage.setItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY, 'intelligent')]).catch(() => setStorageNotice('La comparativa está seleccionada, pero no se pudo recordar.'));
@@ -71,7 +93,8 @@ export const PracticeHome = (props: Props) => {
   }, [shareId]);
 
   const savePreference = (key: string, value: string) => { void AsyncStorage.setItem(key, value).catch(() => setStorageNotice('No se pudo recordar este ajuste. Seguirá activo mientras uses esta pantalla.')); };
-  const chooseTab = (next: typeof tab) => { setTab(next); setInitialAudition(null); };
+  const rememberTarget = (target: typeof lastTarget) => { setLastTarget(target); if (shareId) savePreference(`@teatro_ia_last_rehearsal_target:${shareId}`, target); };
+  const chooseTab = (next: typeof tab) => { setTab(next); setInitialAudition(null); setDirectAuditionRequest(0); };
   const lastScene = props.manifest?.auditionScenes.find((scene) => scene.id === lastAudition?.id);
   useEffect(() => {
     let cancelled = false;
@@ -84,10 +107,16 @@ export const PracticeHome = (props: Props) => {
     }
     return () => { cancelled = true; };
   }, [inRehearsal, lastAudition, lastScene, shareId, tab]);
-  const openAuditions = (id: string | null = null) => { setScope('auditions'); setInitialAudition(id); setTab('scenes'); };
+  const openAuditions = (id: string | null = null) => { setDirectAuditionRequest(0); setScope('auditions'); setInitialAudition(id); setTab('scenes'); };
   const workScenes = mine ? getScenesForRolesAndSongs(props.script?.guion ?? [], props.myRoles, props.manifest?.songs ?? []) : props.sceneTitles;
   const canResume = Boolean(canResumeAudition || props.resumeMode);
   const openMaterials = (action: () => void) => { setSheet(null); action(); };
+  const startByVoice = () => {
+    setVoiceWanted(false);
+    if (lastTarget === 'audition' && lastScene && lastAudition) {
+      setScope('auditions'); setInitialAudition(lastScene.id); setDirectAuditionRequest(Date.now()); setTab('scenes');
+    } else props.onStartDirect();
+  };
 
   return <View style={{ flex: 1 }}>
     {!inRehearsal ? <View style={ui.header}>
@@ -109,24 +138,29 @@ export const PracticeHome = (props: Props) => {
         <TouchableOpacity accessibilityRole="button" onPress={() => chooseTab('songs')} style={ui.card}><View style={ui.row}><Icon name="music-note-outline" size={30} /><Text style={[ui.subtitle, { flex: 1 }]}>Escuchar y practicar</Text><Icon name="arrow-right" /></View><Text style={ui.text}>Aprende la canción con voz o ensaya con karaoke.</Text></TouchableOpacity>
       </>}
       {props.resumeChoice}
+      {props.script && !sheet && !musicBusy && (lastTarget === 'audition' ? Boolean(lastScene) : props.myRoles.length > 0) ? <HomeVoiceStart initiallyEnabled={voiceWanted} onStart={startByVoice} /> : null}
+      {reportStatus.message ? <View testID="automatic-report-status" style={ui.card}><Text accessibilityLiveRegion="polite" style={ui.text}>{reportStatus.message}</Text>
+        {reportStatus.pending ? <Button label="Reintentar informes pendientes" secondary onPress={() => void feedbackOutbox.flush()} /> : null}</View> : null}
       <Button label="Ensayar en Comparativa" secondary onPress={openRecognitionComparison} />
     </ScrollView> : null}
 
     {tab === 'scenes' ? <View style={{ flex: 1 }}>
       {!inRehearsal ? <View style={{ paddingHorizontal: 22, paddingTop: 18, paddingBottom: 6, gap: 14 }}><Text style={ui.title}>Ensayar escenas</Text><View style={ui.wrap}><Chip label="Audiciones" selected={scope === 'auditions'} onPress={() => setScope('auditions')} /><Chip label="Obra" selected={scope === 'work'} onPress={() => setScope('work')} /></View></View> : null}
       {scope === 'auditions' ? <AuditionScenesPanel practiceOnly initialSceneId={initialAudition} initialMode={initialAudition ? lastAudition?.mode : undefined} sharedScript={props.manifest} obraTitle={props.script?.obra || ''}
+        autoStartRequest={directAuditionRequest} onCompleted={() => { setInRehearsal(false); setVoiceWanted(true); chooseTab('home'); }}
         onEnsureShared={props.onEnsureShared} onManifestUpdated={props.onManifestUpdated} onExit={() => chooseTab('home')}
-        onRehearsalActiveChange={setInRehearsal} onPracticeSelected={(id, auditionMode) => { const value = { id, mode: auditionMode }; setLastAudition(value); if (shareId) savePreference(`@teatro_ia_last_audition:${shareId}`, JSON.stringify(value)); }} /> : <ScrollView contentContainerStyle={ui.page}>
+        onRehearsalActiveChange={setInRehearsal} onPracticeSelected={(id, auditionMode) => { rememberTarget('audition'); const value = { id, mode: auditionMode }; setLastAudition(value); if (shareId) savePreference(`@teatro_ia_last_audition:${shareId}`, JSON.stringify(value)); }} /> : <ScrollView contentContainerStyle={ui.page}>
         <TouchableOpacity accessibilityRole="button" onPress={() => setSheet('roles')} style={[ui.card, ui.row, { padding: 15 }]}><Icon name="account-outline" /><View style={{ flex: 1 }}><Text style={ui.text}>Mis personajes</Text><Text style={{ color: palette.ink, fontWeight: '600' }}>{props.myRoles.join(', ') || 'Elegir personaje'}</Text></View><Icon name="chevron-down" /></TouchableOpacity>
         <View style={ui.wrap}><Chip label="Mis escenas" selected={mine} onPress={() => setMine(true)} /><Chip label="Todas" selected={!mine} onPress={() => setMine(false)} /></View>
-        {props.myRoles.length ? <Button label={mine ? 'Ensayar mis escenas' : 'Ensayar la obra'} disabled={!workScenes.length} onPress={() => props.onStart(mine ? 'MINE' : 'ALL')} /> : <Text style={ui.text}>Elige tu personaje para que la app interprete las demás réplicas.</Text>}
+        {props.myRoles.length ? <Button label={mine ? 'Ensayar mis escenas' : 'Ensayar la obra'} disabled={!workScenes.length} onPress={() => { rememberTarget('work'); props.onStart(mine ? 'MINE' : 'ALL'); }} /> : <Text style={ui.text}>Elige tu personaje para que la app interprete las demás réplicas.</Text>}
         {props.resumeChoice}
-        {workScenes.map((scene, index) => <TouchableOpacity accessibilityRole="button" disabled={!props.myRoles.length} key={scene} onPress={() => props.onStartScene(scene)} style={[ui.card, ui.row, { padding: 16 }]}><Text style={ui.label}>{String(index + 1).padStart(2, '0')}</Text><Text style={[ui.subtitle, { flex: 1, fontSize: 17 }]}>{scene}</Text><Icon name="play-outline" /></TouchableOpacity>)}
+        {workScenes.map((scene, index) => <TouchableOpacity accessibilityRole="button" disabled={!props.myRoles.length} key={scene} onPress={() => { rememberTarget('work'); props.onStartScene(scene); }} style={[ui.card, ui.row, { padding: 16 }]}><Text style={ui.label}>{String(index + 1).padStart(2, '0')}</Text><Text style={[ui.subtitle, { flex: 1, fontSize: 17 }]}>{scene}</Text><Icon name="play-outline" /></TouchableOpacity>)}
         {!workScenes.length ? <Text style={ui.text}>{props.sceneTitles.length ? 'No hay escenas para estos personajes.' : 'El guion de la obra todavía no está cargado.'}</Text> : null}
       </ScrollView>}
     </View> : null}
 
     {!inRehearsal ? <SongPracticeLibrary manifest={props.manifest} active={tab === 'songs'} defaultRoles={props.myRoles}
+      onActivityChange={setMusicBusy}
       onUpdated={props.onManifestUpdated} onManageWork={props.onSongMaterials} onOpen={() => setTab('songs')} openEditorRequest={auditionUploadRequest} /> : null}
     {!inRehearsal ? <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: palette.rule, backgroundColor: palette.surface, paddingTop: 6, paddingBottom: 10 }}>
       {([['home', 'Inicio', 'home-outline'], ['scenes', 'Ensayar', 'drama-masks'], ['songs', 'Canciones', 'music-note-outline']] as const).map(([value, label, icon]) => <TouchableOpacity key={value} accessibilityRole="tab" aria-selected={tab === value} accessibilityState={{ selected: tab === value }} onPress={() => chooseTab(value)} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 4 }}><Icon name={icon} color={tab === value ? palette.plum : palette.sub} /><Text style={{ fontSize: 12, fontWeight: tab === value ? '700' : '500', color: tab === value ? palette.plum : palette.sub }}>{label}</Text></TouchableOpacity>)}

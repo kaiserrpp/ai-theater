@@ -11,6 +11,7 @@ module.exports = async (request, response) => {
 
   response.status(200).json({
     namespace: getStorageNamespace(),
+    feedbackWritable: !getProtectedLibrary(getStorageNamespace()) && sharedStorage.hasSharedStorage(),
     ...(sharedStorage.usesSupabase() ? { provider: 'supabase', maximumUploadBytes: sharedStorage.MAX_UPLOAD_BYTES } : {}),
     ...(getProtectedLibrary(getStorageNamespace()) ? { readOnly: true,
       message: 'Puedes seguir ensayando. Las nuevas subidas y los cambios compartidos están temporalmente protegidos hasta conectar el almacenamiento alternativo.' } : {}),

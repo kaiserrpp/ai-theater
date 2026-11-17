@@ -343,6 +343,7 @@ export interface IntelligentLineFeedbackEntry {
 }
 
 export interface IntelligentLineFeedbackSessionInput {
+  completedRehearsal?: { lineCount: number; listenMode: 'intelligent' | 'manual' | 'auto'; elapsedMs: number };
   microphoneDiagnostic?: import('../utils/microphoneCapture').MicrophoneInputDiagnostic;
   runtime?: 'browser' | 'native_ios' | 'native_android';
   nativeAppVersion?: string;

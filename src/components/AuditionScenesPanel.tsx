@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import {
   getAuditionLineRoles, normalizeAuditionScript, resolveAuditionPreferences, validateAuditionScript,
@@ -23,6 +23,8 @@ interface Props {
   practiceOnly?: boolean;
   initialSceneId?: string | null;
   initialMode?: AuditionRehearsalMode;
+  autoStartRequest?: number;
+  onCompleted?: () => void;
   onRehearsalActiveChange?: (active: boolean) => void;
   onPracticeSelected?: (id: string, mode: AuditionRehearsalMode) => void;
   sharedScript: SharedScriptManifest | null;
@@ -59,7 +61,7 @@ const Field = ({ label, value, onChangeText, multiline = false, editable = true 
   </View>
 );
 
-export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, onManifestUpdated, onExit, practiceOnly = false, initialSceneId, initialMode, onRehearsalActiveChange, onPracticeSelected }: Props) => {
+export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, onManifestUpdated, onExit, practiceOnly = false, initialSceneId, initialMode, onRehearsalActiveChange, onPracticeSelected, autoStartRequest = 0, onCompleted }: Props) => {
   const { palette, ui } = usePracticeTheme();
   const isAdmin = useIsAdmin();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -100,6 +102,8 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
     previous && rehearsal && previous.revision === rehearsal.scene.revision
       ? recordAuditionRehearsalProgress(previous, rehearsal.mode, rehearsal.sceneFilter, rehearsal.roles, lineIndex) : previous), [rehearsal]);
   const exitRehearsal = useCallback(() => setRehearsal(null), []);
+  const autoStartedRequest = useRef(0);
+  const voiceRehearsal = useRef(false);
   useEffect(() => { if (initialSceneId) setSelectedId(initialSceneId); }, [initialSceneId]);
   useEffect(() => { if (initialMode) setPracticeMine(initialMode === 'MINE'); }, [initialMode]);
   useEffect(() => { onRehearsalActiveChange?.(Boolean(rehearsal)); }, [rehearsal, onRehearsalActiveChange]);
@@ -262,9 +266,19 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
   };
 
   const requestRehearsal = (scene: SharedAuditionScene, mode: AuditionRehearsalMode) => {
+    voiceRehearsal.current = false;
     if (selectedPlans?.[mode].canResume) setPendingResumeMode(mode);
     else launchRehearsal(scene, mode);
   };
+
+  const autoLaunch = useRef(() => {});
+  autoLaunch.current = () => {
+    if (!autoStartRequest || autoStartRequest === autoStartedRequest.current || !selectedScene || selectedScene.id !== initialSceneId || !selectedPlans) return;
+    autoStartedRequest.current = autoStartRequest;
+    voiceRehearsal.current = true;
+    launchRehearsal(selectedScene, initialMode || 'MINE');
+  };
+  useEffect(() => { autoLaunch.current(); }, [autoStartRequest, selectedPlans, initialSceneId, initialMode]);
 
   if (rehearsal) {
     return <RehearsalView key={`${rehearsal.scene.id}:${rehearsal.scene.revision}`}
@@ -274,6 +288,8 @@ export const AuditionScenesPanel = ({ sharedScript, obraTitle, onEnsureShared, o
       scriptTitle={`${obraTitle} · ${rehearsal.scene.title}`} shareId={sharedScript?.shareId}
       initialIndex={rehearsal.start}
       onProgressChange={handleProgress}
+      voiceStart={voiceRehearsal.current}
+      onCompleted={() => { setRehearsal(null); onCompleted?.(); }}
       onExit={exitRehearsal} />;
   }
 

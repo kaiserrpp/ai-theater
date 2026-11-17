@@ -117,6 +117,11 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
     if (catalog?.rest && session && session.index < session.exercises.length - 1) planned.push({
       key: `${exercise.id}:rest`, exerciseId: exercise.id, title: 'Descansa y bebe agua si te apetece', phase: 'rest', audio: catalog.rest.audio,
     });
+    if (catalog && session && session.index === session.exercises.length - 1 &&
+      session.exercises.length === catalog.exercises.length && session.exercises.every((item, index) => item.id === catalog.exercises[index].id)) planned.push({
+      key: 'warmup:complete', exerciseId: exercise.id, title: 'Has terminado el calentamiento', phase: 'complete',
+      audio: { audioUrl: '/audio/warmup-complete.mp3', durationSeconds: 6.188 },
+    });
     preparationAbort.current?.abort(); const controller = new AbortController(); preparationAbort.current = controller;
     const next = await preparation.current!.prepare(planned, controller.signal);
     if (token !== transition.current) return;
@@ -140,7 +145,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
       if (catalog && session.exercises.length === catalog.exercises.length && session.exercises.every((exercise, index) => exercise.id === catalog.exercises[index].id)) {
         vocalPractice.recordActivity(true);
         // Release handlers before the next owner starts on the shared element.
-        if (autoStart !== undefined) { player.current?.destroy(); player.current = null; preparation.current?.clear(); onComplete?.(); }
+        player.current?.destroy(); player.current = null; preparation.current?.clear(); onComplete?.();
       }
     }
   };
@@ -242,7 +247,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
       {current && !rest && !launching && !retryStep ? <View testID="warmup-player" style={[ui.card, { backgroundColor: palette.soft }]}>
         {workout ? <Text style={ui.label}>Ejercicio {workout.index + 1} de {workout.exercises.length}</Text> : <Text style={ui.label}>Ejercicio terminado. Puedes repetirlo o iniciar otra selección.</Text>}
         <Text style={ui.label}>ESCUCHANDO</Text><Text style={ui.subtitle}>{current.title}</Text>
-        <Text accessibilityLiveRegion="polite" style={ui.text}>{queue.index + 1} de {queue.total} · {current.phase === 'piano' ? 'Piano' : current.phase === 'tip' ? 'Consejo' : current.phase === 'rest' ? 'Aviso de descanso' : 'Explicación'}{repeat ? ' · En bucle' : ''}</Text>
+        <Text accessibilityLiveRegion="polite" style={ui.text}>{queue.index + 1} de {queue.total} · {current.phase === 'piano' ? 'Piano' : current.phase === 'tip' ? 'Consejo' : current.phase === 'rest' ? 'Aviso de descanso' : current.phase === 'complete' ? 'Calentamiento terminado' : 'Explicación'}{repeat ? ' · En bucle' : ''}</Text>
         <View style={ui.row}><View style={{ flex: 1 }}><Button label={playing ? 'Pausar calentamiento' : 'Reanudar calentamiento'} onPress={() => { if (playing) player.current?.pause(); else player.current?.resume(); }} /></View><Button label="Detener" secondary onPress={stop} /></View>
         {Platform.OS === 'web' ? <input aria-label="Posición del audio de calentamiento" type="range" min={0} max={duration || 1} step={.1} value={position} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={event => player.current?.seek(Number(event.target.value))} /> : null}
         <Text style={ui.text}>{sourceClock(position)} / {sourceClock(duration)} de este audio</Text>

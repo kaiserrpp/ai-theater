@@ -56,7 +56,7 @@ export interface WarmupTrack {
   key: string;
   title: string;
   exerciseId: string;
-  phase: 'explanation' | 'piano' | 'tip' | 'rest';
+  phase: 'explanation' | 'piano' | 'tip' | 'rest' | 'complete';
   audio: PreparedWarmupAudio;
   root?: number;
 }

@@ -259,7 +259,11 @@ module.exports = async (request, response) => {
       : [];
 
     const microphoneDiagnostic = normalizeMicrophoneDiagnostic(payload.microphoneDiagnostic);
-    if (!entries.length && !microphoneDiagnostic) {
+    const summary = payload.completedRehearsal;
+    const completedRehearsal = summary && Number.isSafeInteger(summary.lineCount) && summary.lineCount > 0 && summary.lineCount <= 100000 &&
+      ['intelligent', 'manual', 'auto'].includes(summary.listenMode) && Number.isFinite(summary.elapsedMs) && summary.elapsedMs >= 0
+      ? { lineCount: summary.lineCount, listenMode: summary.listenMode, elapsedMs: Math.min(86400000, Math.round(summary.elapsedMs)) } : null;
+    if (!entries.length && !microphoneDiagnostic && !completedRehearsal) {
       response.status(400).json({ error: 'No hay resultados de prueba para enviar.' });
       return;
     }
@@ -278,6 +282,7 @@ module.exports = async (request, response) => {
       userAgent: typeof payload.userAgent === 'string' ? clampText(payload.userAgent).slice(0, 280) : null,
       entryCount: entries.length,
       entries,
+      ...(completedRehearsal ? { completedRehearsal } : {}),
       ...(microphoneDiagnostic ? { microphoneDiagnostic } : {}),
       createdAt: new Date().toISOString(),
     };

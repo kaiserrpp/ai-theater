@@ -16,14 +16,25 @@ type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudi
 type SingingRequest = { id: number; trackKey: string; queueKeys: string[]; mode: SongPlaybackMode; position: number; repeat?: SongRepeatMode };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
-export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork, onOpen, defaultRoles, openEditorRequest = 0 }: {
+export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork, onOpen, defaultRoles, openEditorRequest = 0, onActivityChange }: {
   manifest: SharedScriptManifest | null; active: boolean; defaultRoles: string[]; openEditorRequest?: number;
   onUpdated: (manifest: SharedScriptManifest) => void; onManageWork: () => void;
   onOpen?: () => void;
+  onActivityChange?: (busy: boolean) => void;
 }) => {
   const { palette, ui } = usePracticeTheme();
   const isAdmin = useIsAdmin();
   const [scope, setScope] = useState<'auditions' | 'work'>('auditions');
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
+  const scopeKey = manifest ? `@teatro_ia_music_scope:${manifest.shareId}` : null;
+  useEffect(() => {
+    let cancelled = false; setLoadedScope(null);
+    if (scopeKey) void AsyncStorage.getItem(scopeKey).then(value => {
+      if (!cancelled) setScope(value === 'work' ? 'work' : 'auditions');
+    }).catch(() => {}).finally(() => { if (!cancelled) setLoadedScope(scopeKey); });
+    return () => { cancelled = true; };
+  }, [scopeKey]);
+  useEffect(() => { if (scopeKey && scopeKey === loadedScope) void AsyncStorage.setItem(scopeKey, scope).catch(() => {}); }, [scopeKey, loadedScope, scope]);
   const [warmupOpen, setWarmupOpen] = useState(false);
   const activity = useVocalPractice();
   const [pendingSinging, setPendingSinging] = useState<SingingRequest | null>(null);
@@ -103,6 +114,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   const [playbackMode, setPlaybackMode] = useState<SongPlaybackMode>('single');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  useEffect(() => { onActivityChange?.(playing || (active && warmupOpen)); return () => onActivityChange?.(false); }, [playing, active, warmupOpen, onActivityChange]);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [repeatMode, setRepeatMode] = useState<SongRepeatMode>('queue');
@@ -167,9 +179,8 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   };
   const finishWarmup = () => {
     const request = pendingSingingRef.current;
-    if (!request) return;
     pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false);
-    startRequestedSong(request);
+    if (request) startRequestedSong(request);
   };
   const requestSong = (track: Track, queue: Track[], mode: SongPlaybackMode, at = 0, repeat?: SongRepeatMode) => {
     if (singing.current && sharedAudio.current && !sharedAudio.current.paused) vocalPractice.recordActivity(true);

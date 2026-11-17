@@ -329,10 +329,11 @@ export const deleteSharedMusicalNumberAudio = async (input: SharedMusicalNumberA
 };
 
 export const submitIntelligentLineFeedback = async (
-  input: IntelligentLineFeedbackSessionInput
+  input: IntelligentLineFeedbackSessionInput, signal?: AbortSignal
 ) => {
   const response = await fetch(buildProtectedApiUrl('/intelligent-feedback'), {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       'X-AI-Theatre-Admin': '1',
