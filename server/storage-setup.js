@@ -9,6 +9,9 @@ module.exports = async (request, response) => {
     return response.status(401).json({ error: 'Accede como administrador para preparar el almacenamiento.' });
   }
   try {
+    if (request.query?.action === 'migrate-feedback') {
+      return response.status(200).json(await require('./feedback-archive').migrateFeedbackArchive(getStorageNamespace()));
+    }
     const config = storage.configuration(), client = storage.client();
     for (const [name, isPublic, size, types] of [
       [config.media, true, storage.MAX_UPLOAD_BYTES, ['audio/*', 'video/*', 'image/*']],
