@@ -20,7 +20,7 @@ Las nuevas subidas usan una URL firmada para la ruta de la obra/entorno y la ses
 
 Desde 2026.11.242, cada ensayo completado conserva un informe en una cola local antes de volver a Inicio. La cola sólo transmite si el contexto del servidor indica `feedbackWritable: true` y no está en `readOnly`; el rechazo de red/almacenamiento mantiene el informe para reintentar con el mismo ID. No se añaden audio ni vídeo. Los modos sin transcripciones registran únicamente un resumen de finalización. Se reintenta al abrir Inicio, recuperar conexión o mediante el botón de pendientes, sin sondeos continuos. El guardado está ligado al navegador/dispositivo; no borrar sus datos si hay informes pendientes. Esta cola no activa Supabase, no recupera cuota Blob y no sustituye la verificación de la conexión pendiente.
 
-Los informes anteriores permanecen en Blob y todavía no se han copiado a Supabase. No borrar ese archivo histórico ni anunciarlo como migrado. La comprobación de una nueva subida debe incluir CORS y rangos HTTP, además del guardado y lectura de metadatos y del envío de un informe. Hasta completar la configuración y el despliegue real no anunciar restablecidas esas operaciones.
+Antes de completar la conexión, los informes anteriores permanecían sólo en Blob. No borrar ese archivo histórico. La comprobación de una nueva subida debe incluir CORS y rangos HTTP, además del guardado y lectura de metadatos y del envío de un informe. El resultado de la conexión y la copia se documenta a continuación.
 
 ## Finalización de la conexión, 2026.11.248
 
@@ -29,3 +29,29 @@ El 18/11 la preparación autenticada de producción ha devuelto `ok: true`, `see
 La operación administrativa `POST /api/shared-script?resource=storage-setup&action=migrate-feedback` permite copiar el histórico a `theatre-data` privado sin borrar los originales. Guarda un índice privado por entorno y copia cinco informes por petición, comprobando su lectura exacta. Un reintento reutiliza el índice y omite cualquier informe ya existente, sin reemplazarlo. La lista de Blob se consulta sólo al crear una página del índice (hasta 1.000 archivos), nunca desde las consultas ordinarias de informes. El estado devuelve cantidades, continuidad y las rutas/fechas del histórico al completar cada página; no devuelve claves ni audio. Sólo un resultado `complete: true` permite dar por terminada la copia; conservar las fechas originales dentro de cada informe para el análisis.
 
 Los informes pendientes de la tablet y del iPhone se transmiten desde Inicio al volver a abrir la aplicación con conexión, o mediante «Reintentar informes pendientes». La restauración del servidor no puede leer por sí sola el almacenamiento local de esos dispositivos. Comprobar también el envío mediante el código real de la cola y su lectura administrativa, no sólo el contexto del servidor.
+
+### Comprobación de producción terminada, 18/11
+
+Publicada **2026.11.248**, fuente `584d128`; Vercel confirma el despliegue terminado (`6fJbVjQoGYA388uzPQujRUJjxqFT`). El bundle servido es `AppEntry-f1ce604f480aaf35956595ae7b5a4177.js` y contiene la versión nueva. El contexto real devuelve `provider: supabase`, `feedbackWritable: true`, máximo 52.428.800 bytes y ya no indica modo de sólo lectura. Preparación inicial: dos JSON sembrados, cero archivos multimedia copiados; obra y calentamiento leídos en producción coinciden con el material publicado anteriormente.
+
+La copia del histórico terminó con **75 informes copiados y comprobados**, cero reemplazados y cero borrados. El índice de origen sumaba 1.075.775 bytes; cada JSON se contrastó tras guardarlo en `theatre-data` privado. Se utilizó una sola consulta de listado de Blob y el índice privado persistido para las siguientes tandas. Los originales públicos se conservan; no afirmar que sus enlaces hayan dejado de existir.
+
+Verificación real del servidor con tres contextos de navegador aislados (ordenador, tamaño de iPhone y tablet): el código de la cola restauró y envió exactamente una vez cada informe técnico y lo retiró sólo después de la respuesta correcta; tras recargar no volvió a enviarlo. La lectura administrativa devolvió el mismo ID y resumen. Los informes de comprobación usan `scriptId: storage-check-20261118` y título explícito «Verificación técnica de conexión (sin ensayo real)»; no contarlos como ensayos del usuario ni como calidad del reconocedor. Lectura anónima del API: 401; acceso público directo al JSON privado: rechazado. Subida firmada real de un WAV sintético de 3.244 bytes: 200, lectura exacta, rangos 206 y reproducción/decodificación de 0,1 s desde el origen web. No se ha hecho una nueva prueba acústica física en los teléfonos. **428 pruebas**, lint, TypeScript y exportación web correctos.
+
+### Revisión de los ensayos recuperados
+
+Las fechas del análisis proceden de `createdAt` del informe original, no de la fecha de su copia a Supabase. El último histórico real recibido es del **16/11 a las 19:16, Madrid**. No habían llegado informes reales del 17–18/11 en la comprobación posterior a la conexión; se ha solicitado abrir Inicio en ambos dispositivos para transmitir los que sigan locales, sin repetir ensayos.
+
+| Origen y versión | Informes | Réplicas registradas | Avances automáticos | Saltos manuales |
+| --- | ---: | ---: | ---: | ---: |
+| Lenovo instalada, web/APK 232, 15/11 (ya revisados) | 2 | 12 | 9 | 3 |
+| Chrome/Linux, web 235, 16/11 | 7 | 60 | 57 | 3 |
+| Safari/iPhone, web 238, 16/11 | 7 | 67 | 64 | 3 |
+
+El user agent de Chrome/Linux no identifica la Lenovo ni un host nativo: no atribuir esos siete informes a la tablet por suposición. Los tres bloqueos de la APK 232 («hey honey», «sore», «so so») ya se aceptan al reproducir sus transcripciones con las equivalencias de la 233; no son cambios nuevos ni prueba física posterior al ajuste.
+
+En el iPhone, los tres saltos manuales corresponden a «Ma marzo?» reconocido como «Marzo», el nombre Usnavi convertido en «UVI» y el deletreo de «Q.H.J.». Propuestas: variantes explícitas por réplica para vacilaciones, tratamiento de siglas y nombres limitado al contexto de esa línea. Sin audio no se puede decidir automáticamente que cada discrepancia sea un fallo del ASR o una lectura correcta; no añadir sustituciones globales a partir de estos tres casos.
+
+La prioridad de evaluación es evitar finales incompletos: **11 de los 64 avances del iPhone** usaron `strong_coverage` con palabras finales aún sin transcribir. Por ejemplo, se aceptó terminar en «y preparar» donde faltaba «mis exámenes». Las once transcripciones siguen siendo aceptadas por el código actual. Son indicios de avance temprano; el informe no contiene audio para probar un corte acústico. Antes de ampliar tolerancias conviene exigir evidencia del cierre de la réplica también en esa vía, conservando las variantes válidas y las pausas del actor.
+
+Las 62 mediciones disponibles del iPhone promedian **1.951 ms** de cierre de entrada (mediana 1.866) y **1.964 ms** desde aceptación a evento de inicio de voz. Casi toda esa espera está en cerrar el servicio de Safari; los eventos no miden el inicio audible físico. No forzar `abort/stop` en Safari/iOS 27 ni cambiar automáticamente el motor elegido para intentar recortar esa espera. Es útil completar los informes futuros con primera transcripción, errores/reinicios y el estado al saltar manualmente una réplica. Esta entrega conecta el almacenamiento y revisa los datos; no modifica el reconocedor, `lineMatching`, umbrales ni pausas.
