@@ -1,0 +1,4 @@
+Primera beta cerrada para AI Theatre.
+Ensayo de escenas, canciones con voz y karaoke, calentamiento guiado y ajustes de audio recordados.
+Acceso directo a escenas y canciones.
+Permisos limitados al funcionamiento en primer plano y firma compatible con las instalaciones anteriores.

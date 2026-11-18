@@ -2,7 +2,7 @@
   "expo": {
     "name": "AI-Theatre",
     "slug": "ai-theatre",
-    "version": "2026.11.246",
+    "version": "2026.11.247",
     "orientation": "portrait",
     "icon": "./assets/images/caras-teatro.png",
     "userInterfaceStyle": "light",
@@ -30,7 +30,7 @@
         "backgroundColor": "#5f0c14"
       },
       "package": "com.kaiserrpp.aitheatre.prototype",
-      "versionCode": 7,
+      "versionCode": 8,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
