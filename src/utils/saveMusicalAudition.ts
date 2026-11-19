@@ -1,17 +1,23 @@
-import type { MusicalAuditionDetailsInput, SharedMusicalAudition, SharedScriptManifest, SharedSongAudioKind } from '../types/sharedScript';
+import type { MusicalAuditionDetailsInput, SharedMusicalAudition, SharedScriptManifest, SharedSongAudioAsset, SharedSongAudioKind } from '../types/sharedScript';
 import type { SharedSongUploadResult } from '../api/sharedSongUploads';
 
-export interface PendingAuditionAudio { kind: SharedSongAudioKind; file: File; }
+export interface AuditionAudioReference { id: string; kind: SharedSongAudioKind; }
+export interface PendingAuditionAudio extends AuditionAudioReference { label: string; file?: File; audio?: SharedSongAudioAsset; }
+
+export const auditionAudioLabel = (audio: Pick<SharedSongAudioAsset, 'kind' | 'label'>) => {
+  const kind = audio.kind === 'karaoke' ? 'Karaoke' : 'Con voz';
+  return ['Karaoke', 'Con voz', 'Vocal guide'].includes(audio.label) ? kind : `${kind} · ${audio.label}`;
+};
 
 // Metadata is committed first. Each completed audio is acknowledged separately,
 // so retrying a failed second upload never duplicates the fragment or first file.
-export const performMusicalAuditionSave = async (input: MusicalAuditionDetailsInput, files: PendingAuditionAudio[], removeKinds: SharedSongAudioKind[], operations: {
+export const performMusicalAuditionSave = async (input: MusicalAuditionDetailsInput, files: PendingAuditionAudio[], removals: AuditionAudioReference[], operations: {
   saveDetails: (input: MusicalAuditionDetailsInput) => Promise<SharedScriptManifest>;
   upload: (file: File, kind: SharedSongAudioKind) => Promise<SharedSongUploadResult>;
-  saveAudio: (cut: SharedMusicalAudition, kind: SharedSongAudioKind, uploaded: SharedSongUploadResult) => Promise<SharedScriptManifest>;
-  removeAudio: (cut: SharedMusicalAudition, kind: SharedSongAudioKind) => Promise<SharedScriptManifest>;
+  saveAudio: (cut: SharedMusicalAudition, pending: PendingAuditionAudio, uploaded: Pick<SharedSongUploadResult, 'url' | 'fileName' | 'contentType' | 'size'>) => Promise<SharedScriptManifest>;
+  removeAudio: (cut: SharedMusicalAudition, reference: AuditionAudioReference) => Promise<SharedScriptManifest>;
   onCommitted: (manifest: SharedScriptManifest, cut: SharedMusicalAudition) => void;
-  onFileCommitted: (kind: SharedSongAudioKind) => void;
+  onFileCommitted: (id: string) => void;
   uploadedFiles: Map<File, SharedSongUploadResult>;
 }) => {
   let manifest = await operations.saveDetails(input);
@@ -22,18 +28,22 @@ export const performMusicalAuditionSave = async (input: MusicalAuditionDetailsIn
     return cut;
   };
   let cut = resolveCut();
-  for (const kind of removeKinds) {
-    manifest = await operations.removeAudio(cut, kind); cut = resolveCut();
+  for (const reference of removals) {
+    manifest = await operations.removeAudio(cut, reference); cut = resolveCut();
   }
   for (const pending of files) {
-    let uploaded = operations.uploadedFiles.get(pending.file);
-    if (!uploaded) {
-      uploaded = await operations.upload(pending.file, pending.kind);
-      operations.uploadedFiles.set(pending.file, uploaded);
+    let uploaded = pending.file ? operations.uploadedFiles.get(pending.file) : pending.audio ? {
+      url: pending.audio.audioUrl, fileName: pending.audio.audioFileName, contentType: pending.audio.contentType, size: pending.audio.size,
+    } : null;
+    if (!uploaded && pending.file) {
+      const result = await operations.upload(pending.file, pending.kind);
+      operations.uploadedFiles.set(pending.file, result);
+      uploaded = result;
     }
-    manifest = await operations.saveAudio(cut, pending.kind, uploaded);
+    if (!uploaded) continue;
+    manifest = await operations.saveAudio(cut, pending, uploaded);
     cut = resolveCut();
-    operations.onFileCommitted(pending.kind);
+    operations.onFileCommitted(pending.id);
   }
   return manifest;
 };

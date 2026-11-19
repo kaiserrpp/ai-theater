@@ -23,6 +23,8 @@ module.exports = async (request, response) => {
   }
   if (request.method === 'PATCH' && operation !== 'details') {
     if (!['vocal_guide', 'karaoke'].includes(input.kind)) return response.status(400).json({ error: 'Elige Con voz o Karaoke.' });
+    if (input.audioId != null && (typeof input.audioId !== 'string' || !/^[a-zA-Z0-9_:-]{1,200}$/.test(input.audioId))) return response.status(400).json({ error: 'El identificador de la versión no es válido.' });
+    if (input.label != null && (typeof input.label !== 'string' || !input.label.trim() || input.label.length > 120)) return response.status(400).json({ error: 'Pon una etiqueta a la versión (máximo 120 caracteres).' });
     if (operation === 'audio' && (!input.audio || !validAudioUrl(input.audio.audioUrl) ||
       (input.audio.contentType && !/^audio\//i.test(input.audio.contentType)) ||
       (input.audio.size != null && (!Number.isFinite(input.audio.size) || input.audio.size < 0 || input.audio.size > 512 * 1024 * 1024)))) {
@@ -62,11 +64,20 @@ module.exports = async (request, response) => {
         musicalNumberId: number.id, title: input.title.trim(), roles: normalizeRoles(input.roles), lyrics: input.lyrics?.trim() || '',
         audios: existing?.audios || [], revision: existing ? existing.revision + 1 : 1, createdAt: existing?.createdAt || now, updatedAt: now };
     } else {
-      const audios = existing.audios.filter((audio) => audio.kind !== input.kind);
-      if (operation === 'audio') audios.push({ id: `${existing.id}:${input.kind}`, kind: input.kind,
-        label: input.kind === 'karaoke' ? 'Karaoke' : 'Con voz', guideRoles: existing.roles,
-        audioUrl: input.audio.audioUrl.trim(), audioFileName: typeof input.audio.audioFileName === 'string' ? input.audio.audioFileName.slice(0, 255) : null,
-        contentType: input.audio.contentType || null, size: input.audio.size ?? null, timelineCues: [], updatedAt: now });
+      // Older clients address only the original slot. Never let them remove
+      // additional versions of the same kind created by a newer client.
+      const audioId = input.audioId || `${existing.id}:${input.kind}`;
+      const previous = existing.audios.find((audio) => audio.id === audioId);
+      if (previous && previous.kind !== input.kind) return response.status(400).json({ error: 'El tipo de esta versión no coincide.' });
+      const audios = existing.audios.filter((audio) => audio.id !== audioId);
+      if (operation === 'audio') {
+        const nextAudio = { id: audioId, kind: input.kind,
+          label: input.label?.trim() || previous?.label || (input.kind === 'karaoke' ? 'Karaoke' : 'Con voz'), guideRoles: existing.roles,
+          audioUrl: input.audio.audioUrl.trim(), audioFileName: typeof input.audio.audioFileName === 'string' ? input.audio.audioFileName.slice(0, 255) : null,
+          contentType: input.audio.contentType || null, size: input.audio.size ?? null, timelineCues: [], updatedAt: now };
+        if (previous) audios.splice(existing.audios.indexOf(previous), 0, nextAudio);
+        else audios.push(nextAudio);
+      }
       next = { ...existing, audios, revision: existing.revision + 1, updatedAt: now };
     }
     return response.status(200).json(await writeManifest({ ...manifest, musicalNumbers: numbers,

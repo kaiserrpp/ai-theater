@@ -147,10 +147,10 @@ const mutateMusicalAudition = async (method: string, input: object) => {
 };
 export const saveMusicalAudition = (input: MusicalAuditionDetailsInput) =>
   mutateMusicalAudition(input.revision == null ? 'POST' : 'PATCH', input);
-export const saveMusicalAuditionAudio = (input: { shareId: string; password?: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke'; audio: {
+export const saveMusicalAuditionAudio = (input: { shareId: string; password?: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke'; audioId?: string; label?: string; audio: {
   audioUrl: string; audioFileName: string | null; contentType: string | null; size: number | null;
 } }) => mutateMusicalAudition('PATCH', { ...input, operation: 'audio' });
-export const removeMusicalAuditionAudio = (input: { shareId: string; password?: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke' }) =>
+export const removeMusicalAuditionAudio = (input: { shareId: string; password?: string; auditionId: string; revision: number; kind: 'vocal_guide' | 'karaoke'; audioId?: string }) =>
   mutateMusicalAudition('PATCH', { ...input, operation: 'remove-audio' });
 export const deleteMusicalAudition = (input: { shareId: string; password?: string; auditionId: string; revision: number }) =>
   mutateMusicalAudition('DELETE', input);

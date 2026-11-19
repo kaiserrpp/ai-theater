@@ -101,3 +101,58 @@ test('normalization deduplicates roles and slots without treating a full song as
   assert.deepEqual(values[0].roles,['ANA','LUIS']); assert.equal(values[0].audios.length,1);
   assert.deepEqual(normalizeMusicalAuditions([{id:'cut',title:'Song',musicalNumberId:'parent',roles:[]}]),[]);
 });
+
+test('normalization preserves labelled versions of both kinds and deduplicates only their IDs', () => {
+  const audios = ['vocal_guide','karaoke'].flatMap(kind => ['original','plus-two'].map(id => ({
+    ...audio(kind).audio, id:`${kind}-${id}`, kind, label:id === 'original' ? 'Original' : ' +2 semitonos ',
+  })));
+  const [cut] = normalizeMusicalAuditions([{...input(),id:'cut',musicalNumberId:'parent',audios:[...audios,audios[3]]}]);
+  assert.equal(cut.audios.length,4);
+  assert.deepEqual(cut.audios.map(value=>value.label),['Original','+2 semitonos','Original','+2 semitonos']);
+  assert.deepEqual(normalizeMusicalAuditions([cut])[0],cut);
+});
+
+test('adding, renaming, replacing and removing a specific version preserves its same-kind siblings and the full work', async () => {
+  const api=setup(); await api.request('POST',input());
+  const baseline=structuredClone(api.current());
+  let revision=1;
+  for(const kind of ['vocal_guide','karaoke']) for(const id of ['original','plus-two']) {
+    const payload={...audio(kind,revision++),audioId:`${kind}-${id}`,label:id==='original'?'Original':'+2 semitonos'};
+    payload.audio.audioUrl=`https://example.com/${kind}-${id}.mp3`;
+    assert.equal((await api.request('PATCH',payload)).statusCode,200);
+  }
+  const saved=structuredClone(api.current().musicalAuditions[0].audios);
+  const replacement={...audio('karaoke',revision++),audioId:'karaoke-plus-two',label:'+2 · Benny',audio:{...audio('karaoke').audio,audioUrl:'https://example.com/new.mp3'}};
+  assert.equal((await api.request('PATCH',replacement)).statusCode,200);
+  assert.deepEqual(api.current().musicalAuditions[0].audios.slice(0,3),saved.slice(0,3));
+  assert.equal(api.current().musicalAuditions[0].audios[3].label,'+2 · Benny');
+  const rename={...replacement,revision:revision++,label:'Aguda'};
+  assert.equal((await api.request('PATCH',rename)).statusCode,200);
+  assert.equal(api.current().musicalAuditions[0].audios[3].audioUrl,'https://example.com/new.mp3');
+  assert.equal((await api.request('PATCH',{...audio('karaoke',revision),audioId:'karaoke-plus-two',operation:'remove-audio'})).statusCode,200);
+  assert.deepEqual(api.current().musicalAuditions[0].audios,saved.slice(0,3));
+  for(const key of ['scriptData','musicalNumbers','songs','auditionScenes']) assert.deepEqual(api.current()[key],baseline[key]);
+});
+
+test('an old client replaces or removes only the original and never discards additional versions', async () => {
+  const api=setup(); await api.request('POST',input()); await api.request('PATCH',audio('karaoke'));
+  await api.request('PATCH',{...audio('karaoke',2),audioId:'extra',label:'+2 semitonos'});
+  const extra=structuredClone(api.current().musicalAuditions[0].audios[1]);
+  await api.request('PATCH',audio('karaoke',3));
+  assert.equal(api.current().musicalAuditions[0].audios.length,2);
+  await api.request('PATCH',{...audio('karaoke',4),operation:'remove-audio'});
+  assert.deepEqual(api.current().musicalAuditions[0].audios,[extra]);
+  await api.request('PATCH',{...audio('karaoke',5),operation:'remove-audio'});
+  assert.deepEqual(api.current().musicalAuditions[0].audios,[extra]);
+});
+
+test('invalid version identifiers, labels, kind changes and stale revisions cannot mutate any version', async () => {
+  const api=setup(); await api.request('POST',input());
+  await api.request('PATCH',{...audio('karaoke'),audioId:'original',label:'Original'});
+  const saved=structuredClone(api.current()),writes=api.writes();
+  for(const changes of [{audioId:''},{audioId:'../other'},{audioId:4},{label:' '},{label:'x'.repeat(121)},{label:5},{audioId:'original',kind:'vocal_guide'}]) {
+    assert.equal((await api.request('PATCH',{...audio('karaoke',2),...changes})).statusCode,400);
+  }
+  assert.equal((await api.request('PATCH',{...audio('karaoke'),audioId:'original',label:'Stale'})).statusCode,409);
+  assert.deepEqual(api.current(),saved);assert.equal(api.writes(),writes);
+});

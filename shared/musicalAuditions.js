@@ -25,12 +25,14 @@ const normalizeMusicalAuditions = (value) => {
     if (!isObject(cut) || typeof cut.id !== 'string' || !cut.id.trim() || seen.has(cut.id.trim()) ||
       typeof cut.musicalNumberId !== 'string' || !cut.musicalNumberId.trim() || validateMusicalAudition(cut)) return [];
     seen.add(cut.id.trim());
-    const kinds = new Set();
+    const audioIds = new Set();
     const audios = (Array.isArray(cut.audios) ? cut.audios : []).flatMap((audio) => {
-      if (!isObject(audio) || !['vocal_guide', 'karaoke'].includes(audio.kind) || kinds.has(audio.kind) || !validAudioUrl(audio.audioUrl)) return [];
-      kinds.add(audio.kind);
-      return [{ id: typeof audio.id === 'string' ? audio.id : `${cut.id}:${audio.kind}`,
-        label: audio.kind === 'karaoke' ? 'Karaoke' : 'Con voz', kind: audio.kind,
+      if (!isObject(audio) || !['vocal_guide', 'karaoke'].includes(audio.kind) || !validAudioUrl(audio.audioUrl)) return [];
+      const id = typeof audio.id === 'string' && audio.id.trim() ? audio.id.trim() : `${cut.id}:${audio.kind}`;
+      if (audioIds.has(id)) return [];
+      audioIds.add(id);
+      return [{ id,
+        label: typeof audio.label === 'string' && audio.label.trim() ? audio.label.trim().slice(0, 120) : audio.kind === 'karaoke' ? 'Karaoke' : 'Con voz', kind: audio.kind,
         guideRoles: normalizeRoles(cut.roles), audioUrl: audio.audioUrl.trim(),
         audioFileName: typeof audio.audioFileName === 'string' ? audio.audioFileName : null,
         contentType: typeof audio.contentType === 'string' ? audio.contentType : null,

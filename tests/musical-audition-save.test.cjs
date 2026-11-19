@@ -12,12 +12,12 @@ if(previousLoader)require.extensions['.ts']=previousLoader;else delete require.e
 test('a failed second upload retains the first, and retry reuses already uploaded files after a registration failure', async () => {
   let cut={id:'cut',revision:1,musicalNumberId:'number',audios:[]};
   const cached=new Map(), uploaded=[],completed=[],pending={vocal_guide:new File(['voice'],'voice.m4a'),karaoke:new File(['karaoke'],'karaoke.mp3')};
-  const files=()=>Object.entries(pending).map(([kind,file])=>({kind,file}));
+  const files=()=>Object.entries(pending).map(([kind,file])=>({id:kind,kind,label:'Original',file}));
   let fail=true;
   const operations={
     uploadedFiles:cached,saveDetails:async()=>({musicalAuditions:[cut]}),
     upload:async(file,kind)=>{uploaded.push(kind);return {url:`https://example.com/${file.name}`,fileName:file.name};},
-    saveAudio:async(current,kind,upload)=>{if(kind==='karaoke'&&fail)throw new Error('network');cut={...current,revision:current.revision+1,audios:[...current.audios,{kind,audioUrl:upload.url}]};return {musicalAuditions:[cut]};},
+    saveAudio:async(current,version,upload)=>{if(version.kind==='karaoke'&&fail)throw new Error('network');cut={...current,revision:current.revision+1,audios:[...current.audios,{...version,audioUrl:upload.url}]};return {musicalAuditions:[cut]};},
     removeAudio:async()=>{throw new Error('unexpected delete');},onCommitted:()=>{},
     onFileCommitted:kind=>{completed.push(kind);delete pending[kind];},
   };
@@ -70,10 +70,38 @@ test('a lost audio registration after extraction never reuploads or reconverts t
     removeAudio:async()=>{throw new Error('unexpected removal');},
     upload:()=>prepare(file,{sourceUploads,upload:async()=>{uploads++;return {url:'https://example.com/voice.mp4'};},
       extract:async()=>{conversions++;return audio;},onExtracting:()=>{}}),
-    saveAudio:async(current,kind,value)=>{assert.equal(value,audio);registrations++;if(registrations===1)throw new Error('registration failed');
-      cut={...current,revision:current.revision+1,audios:[{kind,audioUrl:value.url}]};return {musicalAuditions:[cut]};},
+    saveAudio:async(current,version,value)=>{assert.equal(value,audio);registrations++;if(registrations===1)throw new Error('registration failed');
+      cut={...current,revision:current.revision+1,audios:[{id:version.id,kind:version.kind,audioUrl:value.url}]};return {musicalAuditions:[cut]};},
   };
-  await assert.rejects(save({auditionId:'cut'},[{kind:'vocal_guide',file}],[],operations),/registration failed/);
-  await save({auditionId:'cut'},[{kind:'vocal_guide',file}],[],operations);
+  await assert.rejects(save({auditionId:'cut'},[{id:'voice',kind:'vocal_guide',label:'Original',file}],[],operations),/registration failed/);
+  await save({auditionId:'cut'},[{id:'voice',kind:'vocal_guide',label:'Original',file}],[],operations);
   assert.equal(uploads,1);assert.equal(conversions,1);assert.equal(cut.audios[0].audioUrl,audio.url);
+});
+
+test('two files of the same kind retain independent IDs and retry only the uncommitted version', async () => {
+  const pending=[{id:'original',kind:'karaoke',label:'Original',file:new File(['one'],'one.mp3')},
+    {id:'plus-two',kind:'karaoke',label:'+2 semitonos',file:new File(['two'],'two.mp3')}];
+  let cut={id:'cut',revision:1,audios:[]},fail=true;const uploads=[],committed=[];
+  const operations={uploadedFiles:new Map(),saveDetails:async()=>({musicalAuditions:[cut]}),
+    upload:async file=>{uploads.push(file.name);return {url:`https://example.com/${file.name}`,fileName:file.name};},
+    saveAudio:async(current,version,upload)=>{if(version.id==='plus-two'&&fail)throw new Error('network');
+      cut={...current,revision:current.revision+1,audios:[...current.audios,{id:version.id,label:version.label,audioUrl:upload.url}]};return {musicalAuditions:[cut]};},
+    onCommitted:()=>{},onFileCommitted:id=>committed.push(id),removeAudio:async()=>{throw new Error('unexpected');}};
+  await assert.rejects(save({auditionId:'cut'},pending,[],operations),/network/);
+  assert.deepEqual(committed,['original']);fail=false;
+  await save({auditionId:'cut'},pending.filter(version=>!committed.includes(version.id)),[],operations);
+  assert.deepEqual(uploads,['one.mp3','two.mp3']);assert.deepEqual(cut.audios.map(value=>value.id),['original','plus-two']);
+});
+
+test('renaming an existing version does not upload and removal uses its exact ID and current revision', async () => {
+  const existing={id:'original',kind:'karaoke',label:'Original',audioUrl:'https://example.com/one.mp3',audioFileName:'one.mp3',contentType:'audio/mpeg',size:42};
+  let cut={id:'cut',revision:5,audios:[existing,{...existing,id:'plus-two',label:'+2 semitonos'}]};
+  const operations={uploadedFiles:new Map(),saveDetails:async()=>({musicalAuditions:[cut]}),
+    upload:async()=>{throw new Error('must not upload');},onCommitted:()=>{},onFileCommitted:()=>{},
+    removeAudio:async(current,reference)=>{assert.equal(current.revision,5);assert.equal(reference.id,'plus-two');
+      cut={...current,revision:6,audios:current.audios.filter(value=>value.id!==reference.id)};return {musicalAuditions:[cut]};},
+    saveAudio:async(current,version,upload)=>{assert.equal(current.revision,6);assert.equal(version.id,'original');assert.equal(upload.url,existing.audioUrl);
+      cut={...current,revision:7,audios:[{...existing,label:version.label}]};return {musicalAuditions:[cut]};}};
+  await save({auditionId:'cut'},[{id:'original',kind:'karaoke',label:'Tono original',audio:existing}],[{id:'plus-two',kind:'karaoke'}],operations);
+  assert.equal(cut.audios.length,1);assert.equal(cut.audios[0].label,'Tono original');
 });

@@ -11,6 +11,7 @@ import { Button, Chip, Disclosure, Icon, Sheet, usePracticeTheme } from './Pract
 import { WarmupLibrary } from './WarmupLibrary';
 import { useVocalPractice, vocalPractice } from '../store/vocalPractice';
 import { primeSongPracticeAudio } from '../utils/songPracticeAudio';
+import { auditionAudioLabel } from '../utils/saveMusicalAudition';
 
 type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudioAsset; auditionId?: string; numberTitle?: string };
 type SingingRequest = { id: number; trackKey: string; queueKeys: string[]; mode: SongPlaybackMode; position: number; repeat?: SongRepeatMode };
@@ -225,9 +226,20 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   const showSongs = (nextScope: typeof scope) => {
     requestVersion.current++; pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false); setScope(nextScope);
   };
+  const versionButtons = (auditionId: string, filter: SongPlaylistKind = 'all', scrollToTop = false) => <View style={{ gap: 8 }}>
+    {(['vocal_guide', 'karaoke'] as const).filter(audioKind => filter === 'all' || audioKind === filter).map(audioKind => {
+      const choices = tracks.filter(track => track.auditionId === auditionId && track.audio.kind === audioKind);
+      return <View key={audioKind} style={{ gap: 8 }}>
+        {choices.length ? choices.map(track => <Button key={track.key} label={auditionAudioLabel(track.audio)} secondary={selectedKey !== track.key} onPress={() => {
+          if (selectedKey === track.key && playing) toggle(); else play(track);
+          if (scrollToTop) scroll.current?.scrollTo({ y: 0, animated: true });
+        }} />) : <Button label={`Sin ${audioKind === 'karaoke' ? 'karaoke' : 'con voz'}`} secondary disabled onPress={() => {}} />}
+      </View>;
+    })}
+  </View>;
 
   if (!active) return selected ? <View style={[ui.header, { backgroundColor: palette.soft, gap: 6, paddingHorizontal: 16 }]}>
-    <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text><Text numberOfLines={1} style={ui.text}>{selected.audio.label}</Text></View>
+    <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text><Text numberOfLines={1} style={ui.text}>{auditionAudioLabel(selected.audio)}</Text></View>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" /></TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={ui.icon}><Icon name={playing ? 'pause' : 'play'} /></TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" /></TouchableOpacity>
@@ -251,12 +263,9 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     </View></Disclosure></View>
 
     {selected ? <View style={[ui.card, { backgroundColor: palette.soft, borderColor: palette.soft }]}>
-      <View style={ui.row}><Text style={[ui.subtitle, { flex: 1 }]}>{selected.title}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{selected.audio.label}</Text>
+      <View style={ui.row}><Text style={[ui.subtitle, { flex: 1 }]}>{selected.title}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{auditionAudioLabel(selected.audio)}</Text>
       <Text testID="song-queue-status" accessibilityLiveRegion="polite" style={ui.text}>{queueInfo.index + 1} de {queueInfo.total} · {playbackMode === 'single' ? 'Solo esta canción' : repeatMode === 'queue' ? 'Cola en bucle' : repeatMode === 'track' ? 'Una canción en bucle' : 'La cola termina al llegar al final'}</Text>
-      {selected.auditionId ? <View style={ui.row}>{([['vocal_guide','Con voz'],['karaoke','Karaoke']] as const).map(([audioKind,label]) => {
-        const track = tracks.find((candidate) => candidate.auditionId === selected.auditionId && candidate.audio.kind === audioKind);
-        return <View key={audioKind} style={{flex:1}}><Button label={label} secondary={selected.audio.kind !== audioKind} disabled={!track} onPress={() => { if (track) play(track); }} /></View>;
-      })}</View> : null}
+      {selected.auditionId ? versionButtons(selected.auditionId) : null}
       <View style={[ui.row, { justifyContent: 'space-between', gap: 0 }]}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 44 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" size={30} /></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retroceder diez segundos" style={[ui.icon, { width: 44 }]} onPress={() => player.current?.seek(position - 10)}><Icon name="rewind-10" size={26} /></TouchableOpacity>
@@ -284,17 +293,14 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
         <View style={ui.row}><View style={{ flex: 1, gap: 6 }}><Text style={ui.label}>{manifest?.musicalNumbers.find((number) => number.id === cut.musicalNumberId)?.title || 'Número musical'}</Text><Text style={ui.subtitle}>{cut.title}</Text><Text style={ui.text}>{cut.roles.join(' · ')}</Text></View>
           {isAdmin ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Editar ${cut.title}`} onPress={() => openEditor(cut)} style={ui.icon}><Icon name="pencil-outline" /></TouchableOpacity> : null}
         </View>
-        {selected?.auditionId !== cut.id ? <View style={ui.row}>{([['vocal_guide','Con voz'],['karaoke','Karaoke']] as const).filter(([audioKind]) => kind === 'all' || audioKind === kind).map(([audioKind,label]) => {
-          const track = tracks.find((candidate) => candidate.auditionId === cut.id && candidate.audio.kind === audioKind);
-          return <View key={audioKind} style={{ flex: 1 }}><Button label={track ? label : `Sin ${label.toLowerCase()}`} secondary={selected?.auditionId !== cut.id || selected.audio.kind !== audioKind} disabled={!track} onPress={() => { if (track) { if (selectedKey === track.key && playing) toggle(); else play(track); scroll.current?.scrollTo({y:0,animated:true}); } }} /></View>;
-        })}</View> : null}
+        {selected?.auditionId !== cut.id ? versionButtons(cut.id, kind, true) : null}
         {!cut.audios.length ? <Text style={ui.text}>Fragmento preparado. Todavía faltan los audios.</Text> : null}
       </View>)}
     </> : <>
     {!visibleTracks.length ? <View style={ui.card}><Icon name="music-note-outline" size={32} /><Text style={ui.subtitle}>No hay audios {kind === 'karaoke' ? 'de karaoke' : kind === 'vocal_guide' ? 'con voz' : 'todavía'}</Text><Text style={ui.text}>Los materiales que se añadan a esta obra aparecerán aquí.</Text></View> : null}
-    {visibleTracks.map((track) => <TouchableOpacity key={track.key} accessibilityRole="button" accessibilityLabel={`Escuchar ${track.title}, ${track.audio.label}`} onPress={() => play(track)} style={[ui.card, ui.row, { padding: 16 }, selectedKey === track.key && { borderColor: palette.plum }]}>
+    {visibleTracks.map((track) => <TouchableOpacity key={track.key} accessibilityRole="button" accessibilityLabel={`Escuchar ${track.title}, ${auditionAudioLabel(track.audio)}`} onPress={() => play(track)} style={[ui.card, ui.row, { padding: 16 }, selectedKey === track.key && { borderColor: palette.plum }]}>
       <Icon name={selectedKey === track.key && playing ? 'volume-high' : 'play-circle-outline'} size={30} />
-      <View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 17 }]}>{track.title}</Text><Text style={ui.text}>{track.audio.label}{track.audio.guideRoles.length ? ` · ${track.audio.guideRoles.join(', ')}` : ''}</Text></View>
+      <View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 17 }]}>{track.title}</Text><Text style={ui.text}>{auditionAudioLabel(track.audio)}{track.audio.guideRoles.length ? ` · ${track.audio.guideRoles.join(', ')}` : ''}</Text></View>
     </TouchableOpacity>)}
     </>}
     {selected && error ? <Button label="Reintentar audio" secondary onPress={() => play(selected)} /> : null}

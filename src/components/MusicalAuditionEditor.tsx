@@ -6,7 +6,7 @@ import { deleteMusicalAudition, fetchSharedScript, removeMusicalAuditionAudio, s
 import { extractSharedSongAudioFromVideo, MAX_SHARED_SONG_UPLOAD_BYTES, uploadSharedSongAudio, type SharedSongUploadResult } from '../api/sharedSongUploads';
 import { useIsAdmin } from '../store/adminSession';
 import type { SharedMusicalAudition, SharedScriptManifest, SharedSongAudioKind } from '../types/sharedScript';
-import { AUDITION_MEDIA_PICKER_TYPES, performMusicalAuditionSave, prepareAuditionMedia, resolveAuditionMediaMimeType } from '../utils/saveMusicalAudition';
+import { AUDITION_MEDIA_PICKER_TYPES, performMusicalAuditionSave, prepareAuditionMedia, resolveAuditionMediaMimeType, type PendingAuditionAudio } from '../utils/saveMusicalAudition';
 import { AdminAccessPanel } from './AdminAccessPanel';
 import { Button, Chip, Sheet, usePracticeTheme } from './PracticeUI';
 import { UploadActivity, type UploadActivityState } from './UploadActivity';
@@ -14,6 +14,8 @@ import { UploadActivity, type UploadActivityState } from './UploadActivity';
 interface Props { manifest: SharedScriptManifest; initial?: SharedMusicalAudition | null; onUpdated: (manifest: SharedScriptManifest) => void; onClose: () => void; onSaved: () => void; }
 const kinds = [['vocal_guide', 'Con voz'], ['karaoke', 'Karaoke']] as const;
 const newId = () => `musical-audition-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+type AudioDraft = PendingAuditionAudio & { removed?: boolean };
+const emptyAudio = (kind: SharedSongAudioKind, label = 'Original'): AudioDraft => ({ id: newId(), kind, label });
 
 export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, onSaved }: Props) => {
   const { palette, ui } = usePracticeTheme();
@@ -23,8 +25,10 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
     musicalNumberId: initial?.musicalNumberId || '', musicalNumberTitle: '', title: initial?.title || '',
     roles: initial?.roles || [], lyrics: initial?.lyrics || '' }));
   const [saved, setSaved] = useState(initial || null);
-  const [files, setFiles] = useState<Partial<Record<SharedSongAudioKind, File>>>({});
-  const [removeKinds, setRemoveKinds] = useState<SharedSongAudioKind[]>([]);
+  const [versions, setVersions] = useState<AudioDraft[]>(() => kinds.flatMap(([kind]) => {
+    const audios = initial?.audios.filter((audio) => audio.kind === kind) || [];
+    return audios.length ? audios.map((audio) => ({ id: audio.id, kind, label: ['Con voz', 'Karaoke', 'Vocal guide'].includes(audio.label) ? 'Original' : audio.label, audio })) : [emptyAudio(kind)];
+  }));
   const uploadedFiles = useRef(new Map<File, SharedSongUploadResult>());
   const sourceUploads = useRef(new Map<File, SharedSongUploadResult>());
   const [newRole, setNewRole] = useState('');
@@ -41,7 +45,7 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
     else setConfirm('close');
   };
 
-  const chooseAudio = async (kind: SharedSongAudioKind) => {
+  const chooseAudio = async (id: string) => {
     if (!isAdmin || busy) return;
     setError('');
     try {
@@ -60,8 +64,7 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
       } finally {
         if (asset.uri.startsWith('blob:')) URL.revokeObjectURL(asset.uri);
       }
-      setFiles((previous) => ({ ...previous, [kind]: file }));
-      setRemoveKinds((previous) => previous.filter((value) => value !== kind));
+      setVersions((previous) => previous.map((version) => version.id === id ? { ...version, file, removed: false } : version));
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo abrir el audio.'); }
   };
 
@@ -70,15 +73,22 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
     const invalid = validateMusicalAudition(draft);
     if (invalid) { setError(invalid); return; }
     if (!draft.musicalNumberId && !draft.musicalNumberTitle.trim()) { setError('Elige el número musical o escribe su nombre.'); return; }
+    if (versions.some((version) => !version.removed && (version.file || version.audio) && (!version.label.trim() || version.label.length > 120))) {
+      setError('Pon una etiqueta a cada versión (máximo 120 caracteres).'); return;
+    }
     setBusy(true); setError(''); setActivity({ stage: 'preparing' });
     try {
       await performMusicalAuditionSave({ ...draft, auditionId: draft.id, shareId: manifest.shareId },
-        kinds.flatMap(([kind]) => files[kind] ? [{ kind, file: files[kind]! }] : []), removeKinds, {
+        versions.filter((version) => !version.removed && (version.file || (version.audio && version.label.trim() !== version.audio.label))),
+        versions.filter((version) => version.removed && version.audio), {
           saveDetails: saveMusicalAudition, uploadedFiles: uploadedFiles.current,
           onCommitted: (next, cut) => {
             onUpdated(next); setSaved(cut);
             setDraft((previous) => ({ ...previous, revision: cut.revision, musicalNumberId: cut.musicalNumberId }));
-            setRemoveKinds((previous) => previous.filter((kind) => cut.audios.some((audio) => audio.kind === kind)));
+            setVersions((previous) => previous.flatMap((version) => {
+              const audio = cut.audios.find((candidate) => candidate.id === version.id);
+              return version.removed && !audio ? [] : [{ ...version, audio }];
+            }));
           },
           upload: async (file, kind) => {
             const label = kind === 'karaoke' ? 'Karaoke' : 'Con voz';
@@ -92,28 +102,30 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
               extract: (source) => extractSharedSongAudioFromVideo({ shareId: manifest.shareId, targetId: draft.id, targetType: 'musical-audition', sourceUrl: source.url, sourcePathname: source.pathname, sourceFileName: source.fileName, sourceContentType: source.contentType }),
             });
           },
-          saveAudio: (cut, kind, upload) => {
-            setActivity({ stage: 'saving', label: kind === 'karaoke' ? 'Karaoke' : 'Con voz' });
+          saveAudio: (cut, version, upload) => {
+            setActivity({ stage: 'saving', label: version.label });
             return saveMusicalAuditionAudio({ shareId: manifest.shareId, auditionId: cut.id, revision: cut.revision,
-              kind, audio: { audioUrl: upload.url, audioFileName: upload.fileName, contentType: upload.contentType, size: upload.size } });
+              kind: version.kind, audioId: version.id, label: version.label.trim(), audio: { audioUrl: upload.url, audioFileName: upload.fileName, contentType: upload.contentType, size: upload.size } });
           },
-          removeAudio: (cut, kind) => removeMusicalAuditionAudio({ shareId: manifest.shareId, auditionId: cut.id, revision: cut.revision, kind }),
-          onFileCommitted: (kind) => setFiles((previous) => ({ ...previous, [kind]: undefined })),
+          removeAudio: (cut, version) => removeMusicalAuditionAudio({ shareId: manifest.shareId, auditionId: cut.id, revision: cut.revision, kind: version.kind, audioId: version.id }),
+          onFileCommitted: (id) => setVersions((previous) => previous.map((version) => version.id === id ? { ...version, file: undefined } : version)),
         });
       onSaved(); onClose();
     } catch (failure) {
       // A response can be lost after the server saved it. Recover the revision
-      // and committed slots while keeping unsent files and the user's edits.
+      // and committed versions while keeping unsent files and the user's edits.
       try {
         const latest = await fetchSharedScript(manifest.shareId);
         const cut = latest.musicalAuditions.find((candidate) => candidate.id === draft.id);
         onUpdated(latest);
         if (cut) {
           setSaved(cut); setDraft((previous) => ({ ...previous, revision: cut.revision, musicalNumberId: cut.musicalNumberId }));
-          setFiles((previous) => Object.fromEntries(Object.entries(previous).filter(([kind, file]) => {
-            const uploaded = file && uploadedFiles.current.get(file);
-            return !uploaded || !cut.audios.some((audio) => audio.kind === kind && audio.audioUrl === uploaded.url);
-          })));
+          setVersions((previous) => previous.flatMap((version) => {
+            const audio = cut.audios.find((candidate) => candidate.id === version.id);
+            if (version.removed && !audio) return [];
+            const uploaded = version.file && uploadedFiles.current.get(version.file);
+            return [{ ...version, audio, file: uploaded && audio?.audioUrl === uploaded.url ? undefined : version.file }];
+          }));
         }
       } catch { /* The form and selected files remain available for retry. */ }
       setError(`${failure instanceof Error ? failure.message : 'No se pudo completar la subida.'} Los datos y audios ya guardados se conservan. Puedes volver a guardar para completar lo pendiente.`);
@@ -135,7 +147,7 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
   </View> : undefined}>
     {!isAdmin ? <><Text style={ui.text}>Para subir o modificar canciones, entra con la clave de gestión. Escuchar no requiere clave.</Text><AdminAccessPanel initiallyExpanded /></>
       : Platform.OS !== 'web' ? <Text style={ui.text}>Abre la app web en Safari para subir los archivos.</Text> : <>
-        <Text style={ui.text}>Sube el trozo de la audición ya recortado. Puedes guardar una versión y añadir la otra después.</Text>
+        <Text style={ui.text}>Sube el trozo de la audición ya recortado. Puedes añadir varias versiones con voz o karaoke y distinguirlas con etiquetas, como «Original» o «+2 semitonos».</Text>
         <Text style={ui.text}>Puedes elegir un audio o un vídeo. Si es un vídeo, extraeremos su sonido al guardar.</Text>
         <Text style={ui.label}>NÚMERO MUSICAL</Text>
         <View style={ui.wrap}>{manifest.musicalNumbers.map((number) => <Chip key={number.id} label={number.title} selected={draft.musicalNumberId === number.id} onPress={() => !busy && change({ musicalNumberId: number.id })} />)}<Chip label="+ Nuevo número" selected={!draft.musicalNumberId} onPress={() => !busy && change({ musicalNumberId: '' })} /></View>
@@ -144,11 +156,18 @@ export const MusicalAuditionEditor = ({ manifest, initial, onUpdated, onClose, o
         <Text style={ui.label}>PERSONAJES QUE CANTAN</Text><View style={ui.wrap}>{availableRoles.map((role) => <Chip key={role} label={role} selected={draft.roles.includes(role)} onPress={() => !busy && change({ roles: draft.roles.includes(role) ? draft.roles.filter((candidate) => candidate !== role) : [...draft.roles, role] })} />)}</View>
         <View style={ui.row}><TextInput accessibilityLabel="Nuevo personaje" placeholder="Añadir personaje" value={newRole} editable={!busy} onChangeText={setNewRole} style={[inputStyle, { flex: 1, minWidth: 0 }]} /><Button label="Añadir" secondary disabled={busy || !newRole.trim()} onPress={() => { const canonical = availableRoles.find((role) => role.toLocaleLowerCase('es') === newRole.trim().toLocaleLowerCase('es')) || newRole.trim(); change({ roles: normalizeRoles([...draft.roles, canonical]) }); setNewRole(''); }} /></View>
         {kinds.map(([kind, label]) => {
-          const audio = saved?.audios.find((candidate) => candidate.kind === kind);
-          return <View key={kind} style={ui.card}><Text style={ui.subtitle}>{label}</Text><Text style={ui.text}>{files[kind]?.name || (removeKinds.includes(kind) ? 'Se quitará al guardar' : audio?.audioFileName || (audio ? 'Audio guardado' : 'Todavía sin audio'))}</Text>
-            {files[kind]?.type.startsWith('video/') ? <Text style={ui.text}>Vídeo seleccionado. Extraeremos su sonido al guardar.</Text> : null}
-            <Button label={files[kind] || audio ? `Cambiar ${label.toLowerCase()}` : `Elegir ${label.toLowerCase()}`} secondary disabled={busy} onPress={() => void chooseAudio(kind)} />
-            {files[kind] ? <Button label="Quitar archivo pendiente" secondary disabled={busy} onPress={() => setFiles((previous) => ({ ...previous, [kind]: undefined }))} /> : audio ? <Button label={removeKinds.includes(kind) ? 'Conservar audio' : 'Quitar audio al guardar'} secondary disabled={busy} onPress={() => setRemoveKinds((previous) => previous.includes(kind) ? previous.filter((value) => value !== kind) : [...previous, kind])} /> : null}</View>;
+          const entries = versions.filter((version) => version.kind === kind);
+          return <View key={kind} style={{ gap: 10 }}><Text style={ui.subtitle}>{label}</Text>
+            {entries.map((version, index) => <View key={version.id} testID={`audition-audio-${version.id}`} style={ui.card}>
+              <TextInput accessibilityLabel={`Etiqueta de ${label.toLowerCase()} ${index + 1}`} placeholder="Ej. Original, +2 semitonos" placeholderTextColor={palette.sub} maxLength={120} value={version.label} editable={!busy && !version.removed} onChangeText={(value) => { setError(''); setVersions((previous) => previous.map((entry) => entry.id === version.id ? { ...entry, label: value } : entry)); }} style={inputStyle} />
+              <Text style={ui.text}>{version.removed ? 'Se quitará al guardar' : version.file?.name || version.audio?.audioFileName || (version.audio ? 'Audio guardado' : 'Todavía sin audio')}</Text>
+              {version.file?.type.startsWith('video/') ? <Text style={ui.text}>Vídeo seleccionado. Extraeremos su sonido al guardar.</Text> : null}
+              {!version.removed ? <Button label={version.file || version.audio ? `Cambiar ${label.toLowerCase()}` : `Elegir ${label.toLowerCase()}`} secondary disabled={busy} onPress={() => void chooseAudio(version.id)} /> : null}
+              {version.file ? <Button label="Quitar archivo pendiente" secondary disabled={busy} onPress={() => setVersions((previous) => previous.map((entry) => entry.id === version.id ? { ...entry, file: undefined } : entry))} /> : null}
+              {version.audio ? <Button label={version.removed ? 'Conservar versión' : 'Quitar versión al guardar'} secondary disabled={busy} onPress={() => setVersions((previous) => previous.map((entry) => entry.id === version.id ? { ...entry, removed: !entry.removed } : entry))} /> : entries.length > 1 ? <Button label="Quitar esta versión pendiente" secondary disabled={busy} onPress={() => setVersions((previous) => previous.filter((entry) => entry.id !== version.id))} /> : null}
+            </View>)}
+            <Button label={`+ Añadir versión de ${label.toLowerCase()}`} secondary disabled={busy} onPress={() => setVersions((previous) => [...previous, emptyAudio(kind, entries.length ? `Versión ${entries.length + 1}` : 'Original')])} />
+          </View>;
         })}
         <Text style={ui.text}>En iPhone: «Explorar» para audios en Archivos y «Fototeca» para vídeos. Si Fotos se queda preparando un vídeo, guárdalo en Archivos y elígelo con «Explorar».</Text>
         <Text style={ui.label}>LETRA DEL FRAGMENTO · OPCIONAL</Text><TextInput accessibilityLabel="Letra del fragmento" placeholder="Pega aquí la letra de este trozo" value={draft.lyrics} editable={!busy} onChangeText={(lyrics) => change({ lyrics })} multiline style={[inputStyle, { minHeight: 100, textAlignVertical: 'top' }]} />
