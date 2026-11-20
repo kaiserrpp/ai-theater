@@ -26,7 +26,7 @@ Para comprobar localmente la selección de archivos: `npm run ios:personal:check
 
 ## Coste de esta compilación
 
-El workflow sólo arranca manualmente y sólo en el repositorio **público**. Utiliza `macos-15`, una máquina estándar gratuita de GitHub; si el repositorio pasa a privado, el trabajo se omite. No usa máquinas grandes, Expo Build, cachés de Actions ni artefactos de Actions facturables. Los instaladores se guardan como assets de una prerelease propia de GitHub, sin límites de almacenamiento total o ancho de banda de releases según su documentación.
+El workflow sólo arranca manualmente y sólo en el repositorio **público**. Utiliza `macos-15-intel`, una máquina estándar gratuita de GitHub; si el repositorio pasa a privado, el trabajo se omite. No usa máquinas grandes, Expo Build, cachés de Actions ni artefactos de Actions facturables. Los instaladores se guardan como assets de una prerelease propia de GitHub, sin límites de almacenamiento total o ancho de banda de releases según su documentación.
 
 Las credenciales Apple y certificados no se suben a GitHub. El trabajo sólo recibe el token temporal del repositorio en el paso que publica la prerelease. No modifica permisos del repositorio, planes de pago ni facturación. Se conserva la separación del almacenamiento de Vercel; la app personal abre la misma URL de producción configurada en `app.json`.
 
