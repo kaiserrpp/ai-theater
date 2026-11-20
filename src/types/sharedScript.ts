@@ -293,6 +293,8 @@ export interface RecognitionComparisonTiming {
 }
 
 export interface IntelligentLineFeedbackEntry {
+  recognitionDiagnostics?: import('../../shared/recognitionDiagnostics').RecognitionSessionDiagnostics | null;
+  recognitionAttempt?: { source: 'latest_utterance' | 'repeated_line'; text: string; rawTranscriptTruncated?: boolean };
   nativeRecognition?: import('../nativePrototype/recognitionHints').NativeRecognitionInfo;
   recognitionEngine?: 'native' | 'vosk' | 'whisper' | 'comparison';
   rehearsalComparison?: {

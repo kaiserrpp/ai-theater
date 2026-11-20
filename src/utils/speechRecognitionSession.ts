@@ -1,4 +1,5 @@
 import type { NativeRecognitionInfo, RecognitionHints } from '../nativePrototype/recognitionHints';
+import type { RecognitionSessionDiagnostics } from '../../shared/recognitionDiagnostics';
 export type SpeechRecognitionStatus = 'unsupported' | 'idle' | 'suspended' | 'preparing' | 'processing' | 'finishing' | 'starting' | 'listening' | 'error';
 
 type RecognitionResult = {
@@ -51,6 +52,7 @@ type RecognitionOptions = {
   prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
   usage?: { started: boolean };
   getNativeHints?: () => RecognitionHints | undefined;
+  now?: () => number;
 };
 const documentRecognitionUsage = { started: false };
 
@@ -115,6 +117,18 @@ export const createSpeechRecognitionSession = (
   let preparing = false;
   let preparationVersion = 0;
   let cancelPreparation: (() => void) | null = null;
+  const now = options.now ?? (() => Date.now());
+  let diagnosticStartedAt: number | null = null;
+  const freshDiagnostics = () => ({ startCount: 0, audioStartCount: 0, textEventCount: 0, endCount: 0,
+    retryCount: 0, noSpeechCount: 0, inputAlreadyActive: false, firstServiceStartMs: null as number | null,
+    firstAudioStartMs: null as number | null, firstTextMs: null as number | null,
+    errors: [] as { code: string; atMs: number }[] });
+  let diagnostics = freshDiagnostics();
+  const diagnosticOffset = () => diagnosticStartedAt === null ? 0 : Math.max(0, now() - diagnosticStartedAt);
+  const resetDiagnostics = () => { diagnosticStartedAt = null; diagnostics = freshDiagnostics(); };
+  const recordError = (code: string) => {
+    diagnostics.errors = [...diagnostics.errors, { code, atMs: diagnosticOffset() }].slice(-8);
+  };
   const endWaiters = new Set<(ended: boolean) => void>();
   const inputEndWaiters = new Set<(ended: boolean) => void>();
   // A final result/speechend can leave WebKit's capture source alive. Only
@@ -162,6 +176,7 @@ export const createSpeechRecognitionSession = (
     try { recognition.abort(); } catch { /* Wait for the real native terminal event. */ }
   };
   const fail = (message: string, code: string | null = null, detail: string | null = null) => {
+    recordError(code || 'recognition-failed');
     blocked = true;
     clearEvidence(); cancelCue();
     if ((options.naturalEnd || options.controlledEnd) && recognition) {
@@ -216,6 +231,8 @@ export const createSpeechRecognitionSession = (
     latestResults = { length: 0 };
     let current: SpeechRecognitionHandle;
     try {
+      diagnosticStartedAt ??= now();
+      diagnostics.startCount++;
       current = new Constructor();
       recognition = current;
       current.continuous = !options.naturalEnd;
@@ -236,11 +253,16 @@ export const createSpeechRecognitionSession = (
       controlledStopRequested = false;
       update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null, lastUtterance: null });
       current.onstart = () => {
-        if (recognition === current && enabled && pageVisible && !blocked && !closingForChange) update({ status: 'listening' });
+        if (recognition === current && enabled && pageVisible && !blocked && !closingForChange) {
+          diagnostics.firstServiceStartMs ??= diagnosticOffset();
+          update({ status: 'listening' });
+        }
       };
       current.onaudiostart = () => {
         if (recognition !== current || !enabled || !pageVisible || blocked || closingForChange) return;
         hadAudioInput = true;
+        diagnostics.audioStartCount++;
+        diagnostics.firstAudioStartMs ??= diagnosticOffset();
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
         update({ status: 'listening', isAudioActive: true, error: null });
@@ -262,7 +284,8 @@ export const createSpeechRecognitionSession = (
           detach(false); closingForChange = false; needsCue = true;
           return;
         }
-        if (!enabled || closingForChange || event.error === 'no-speech') return;
+        if (!enabled || closingForChange) return;
+        if (event.error === 'no-speech') { diagnostics.noSpeechCount++; return; }
         fail(recognitionErrorMessage(event.error, event.message), event.error ?? null, event.message?.trim() || null);
       };
       current.onresult = (event) => {
@@ -283,18 +306,26 @@ export const createSpeechRecognitionSession = (
           all.push(text);
           (result?.isFinal ? finals : interims).push(text);
         }
-        if (all.length) clearEvidence();
+        if (all.length) {
+          clearEvidence(); diagnostics.textEventCount++;
+          diagnostics.firstTextMs ??= diagnosticOffset();
+        }
+        const lastText = last?.[0]?.transcript?.trim();
+        const utterance = lastText ? { text: lastText, isFinal: last!.isFinal, lineKey } : null;
+        const sameUtterance = snapshot.lastUtterance?.text === utterance?.text &&
+          snapshot.lastUtterance?.isFinal === utterance?.isFinal && snapshot.lastUtterance?.lineKey === utterance?.lineKey;
         update({
           status: 'listening', isAudioActive: !audioEnded, error: null,
           transcript: [committedTranscript, ...all].filter(Boolean).join(' '),
           finalTranscript: [committedTranscript, ...finals].filter(Boolean).join(' '),
           interimTranscript: interims.join(' '),
           hasReceivedTranscript: all.length > 0,
-          lastUtterance: last?.[0]?.transcript?.trim() ? { text: last[0]!.transcript.trim(), isFinal: last.isFinal, lineKey } : null,
+          lastUtterance: sameUtterance ? snapshot.lastUtterance : utterance,
         });
       };
       current.onend = () => {
         if (recognition !== current) return;
+        if (enabled && pageVisible && !closingForChange) diagnostics.endCount++;
         if (!pageVisible) {
           detach(false); closingForChange = false; needsCue = true;
           return;
@@ -364,6 +395,9 @@ export const createSpeechRecognitionSession = (
   };
   return {
     getSnapshot: () => snapshot,
+    getDiagnostics: (): RecognitionSessionDiagnostics => ({ kind: 'recognition_session', ...diagnostics,
+      errors: diagnostics.errors.map(error => ({ ...error })), elapsedMs: diagnosticOffset(), status: snapshot.status,
+      currentTranscriptEmpty: !snapshot.transcript.trim(), inputActive: snapshot.isAudioActive }),
     setPageVisible: (visible: boolean) => {
       if (pageVisible === visible) return;
       if (!visible) { suspendForPageHide(); return; }
@@ -384,6 +418,9 @@ export const createSpeechRecognitionSession = (
     // Volume calibration is not evidence that this separate service works.
     activate: (next: { lang: string; lineKey: string; preserveTranscript?: boolean }) => {
       const preserveTranscript = next.preserveTranscript === true && language === next.lang && lineKey === next.lineKey;
+      if (lineKey !== next.lineKey) resetDiagnostics();
+      diagnosticStartedAt ??= now();
+      diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive);
       cancelCue(); clearEvidence();
       if (!options.naturalEnd && !options.controlledEnd) detach();
       enabled = true;
@@ -408,8 +445,10 @@ export const createSpeechRecognitionSession = (
       // result index can hide the first words of the actor's next turn.
       const hadPartialResult = Array.from({ length: latestResults.length }, (_, index) => latestResults[index])
         .some((result) => result && !result.isFinal);
-      if (lineChanged) { resetTranscript(); clearEvidence(); }
+      if (lineChanged) { resetDiagnostics(); resetTranscript(); clearEvidence(); }
       if (!next.enabled || !next.lineKey) { stop(); return; }
+      diagnosticStartedAt ??= now();
+      diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive && !languageChanged && !hadPartialResult);
       enabled = true;
       armEvidence();
       if (languageChanged || (lineChanged && hadPartialResult)) {
@@ -424,6 +463,7 @@ export const createSpeechRecognitionSession = (
     // browser can associate recognition.start() with that user interaction.
     restart: () => {
       if (!enabled) return;
+      diagnostics.retryCount++;
       blocked = false;
       cancelCue(); clearEvidence();
       if ((options.naturalEnd || options.controlledEnd) && recognition) {

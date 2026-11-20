@@ -61,6 +61,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = fa
     getNativeHints: () => nativeHintsRef.current,
   }), [Constructor, naturalEnd, controlledEnd, isLocal]);
   const getNativeRecognitionInfo = useCallback(() => session.getSnapshot().nativeRecognition || null, [session]);
+  const getRecognitionDiagnostics = useCallback(() => session.getDiagnostics(), [session]);
 
   useEffect(() => {
     if (engine !== 'vosk') disposeLocalSpeechRecognition();
@@ -85,6 +86,7 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = fa
     isLocal,
     getRecognitionProcessingTiming,
     getNativeRecognitionInfo,
+    getRecognitionDiagnostics,
     resetTranscript: session.resetTranscript,
     finishRecognitionInput: session.finishInput,
     activateRecognition: session.activate,

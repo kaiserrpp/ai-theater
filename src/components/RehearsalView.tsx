@@ -49,14 +49,14 @@ import {
   getAutomaticLineMatchReason,
   getGoodLineCommandAcceptedText,
   hashLineText,
-  inferSpeechRecognitionLanguage,
   isNextLineCommand,
   scoreLineMatch,
 } from '../utils/lineMatching';
 import { prepareRehearsalSpeech, speakRehearsalSpeech, stopRehearsalSpeech } from '../utils/rehearsalSpeech';
 import { getRehearsalResponseTiming } from '../utils/rehearsalResponseTiming';
 import { getNativeLevelInput, getNativePrototypeInfo } from '../utils/nativePrototype';
-import { buildNativeRecognitionPlan } from '../nativePrototype/recognitionHints';
+import { buildRehearsalRecognitionPlan } from '../utils/rehearsalRecognitionPlan';
+import { getRehearsalRecognitionAttempt } from '../utils/rehearsalRecognitionAttempt';
 import { getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
 import { getSpeechOutputErrorMessage, getSpeechOutputHelp } from '../utils/speechOutputHelp';
 import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
@@ -804,9 +804,8 @@ export const RehearsalView: React.FC<Props> = ({
       !isSceneMarker(line) && !isSongCue(line) && lineMatchesRoles(line, myRoles)
     );
     const text = isMyTurn ? speakableLineText : nextActorLine?.t ?? speakableLineText;
-    const legacy = inferSpeechRecognitionLanguage(text);
-    return nativeHintsEnabled ? buildNativeRecognitionPlan(text, nativeRecognitionContext, legacy) : { lang: legacy, hints: undefined };
-  }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText, nativeHintsEnabled, nativeRecognitionContext]);
+    return buildRehearsalRecognitionPlan(text, nativeRecognitionContext, recognitionEngine, nativeHintsEnabled);
+  }, [currentIndex, filteredGuion, isMyTurn, myRoles, speakableLineText, nativeHintsEnabled, nativeRecognitionContext, recognitionEngine]);
   const intelligentRecognitionLanguage = recognitionLinePlan.lang;
   const isIntelligentListenMode = listenModeSelection === 'intelligent';
   const isCheckingIntelligentRecognition = isIntelligentListenMode && rehearsalPreflightPhase === 'intelligent-check';
@@ -928,6 +927,7 @@ export const RehearsalView: React.FC<Props> = ({
     hasReceivedTranscript: hasRecognitionReceivedText,
     getRecognitionProcessingTiming,
     getNativeRecognitionInfo,
+    getRecognitionDiagnostics,
     error: speechRecognitionError,
     errorCode: speechRecognitionErrorCode,
     errorDetail: speechRecognitionErrorDetail,
@@ -1038,15 +1038,16 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, [voiceStart, hasCompletedRehearsalPreflight, currentIndex, sceneCommandReadyKey, currentLine, startCurrentScene]);
 
-  const intelligentLineMatch = useMemo(
-    () =>
-      scoreLineMatch(
-        speakableLineText,
-        speechRecognitionTranscript,
-        currentAcceptedLineVariants
-      ),
-    [currentAcceptedLineVariants, speakableLineText, speechRecognitionTranscript]
-  );
+  const recognitionAttempt = useMemo(() => recognitionEngine === 'native' && isMyTurn && shouldUseIntelligentRecognition
+    ? getRehearsalRecognitionAttempt({ expectedText: speakableLineText, transcript: speechRecognitionTranscript,
+      acceptedVariants: currentAcceptedLineVariants, lineKey: recognitionLineKey,
+      interimTranscript: speechRecognitionInterimTranscript, lastUtterance: speechRecognitionLastUtterance })
+    : { text: speechRecognitionTranscript, source: 'accumulated' as const,
+      match: scoreLineMatch(speakableLineText, speechRecognitionTranscript, currentAcceptedLineVariants) },
+  [recognitionEngine, isMyTurn, shouldUseIntelligentRecognition, speakableLineText, speechRecognitionTranscript,
+    currentAcceptedLineVariants, recognitionLineKey, speechRecognitionInterimTranscript, speechRecognitionLastUtterance]);
+  const intelligentLineMatch = recognitionAttempt.match;
+  const evaluatedRecognitionText = recognitionAttempt.text;
 
   const persistLineVariants = useCallback(
     async (nextVariants: LineVariantMap) => {
@@ -1118,7 +1119,7 @@ export const RehearsalView: React.FC<Props> = ({
       const score = Number(feedbackLineMatch.score.toFixed(3));
       const autoAdvanceReason = getAutomaticLineMatchReason(
         speakableLineText,
-        heardText,
+        heardTextOverride === undefined ? evaluatedRecognitionText : heardText,
         feedbackLineMatch
       );
       const nativeRecognition = recognitionEngine === 'native' ? getNativeRecognitionInfo() : null;
@@ -1127,6 +1128,9 @@ export const RehearsalView: React.FC<Props> = ({
         scriptContextEnabled: usesWhisperRecognition(recognitionEngine) ? Boolean(recognitionContext.prompt) : Boolean(nativeRecognition?.contextTermCount),
         scriptContextTermCount: usesWhisperRecognition(recognitionEngine) ? recognitionContext.names.length + recognitionContext.vocabulary.length : nativeRecognition?.contextTermCount || 0,
         ...(nativeRecognition ? { nativeRecognition } : {}),
+        recognitionDiagnostics: getRecognitionDiagnostics(),
+        ...(heardTextOverride === undefined && recognitionAttempt.source !== 'accumulated'
+          ? { recognitionAttempt: { source: recognitionAttempt.source, text: evaluatedRecognitionText.trim() } } : {}),
         recognitionTiming: usesWhisperRecognition(recognitionEngine) ? getRecognitionProcessingTiming() : null,
         lineIndex: currentLineIndexInScript,
         character: currentLine.p,
@@ -1143,7 +1147,7 @@ export const RehearsalView: React.FC<Props> = ({
         negationPenaltyApplied: feedbackLineMatch.negationPenaltyApplied,
         autoAdvanceReason,
         result,
-        ...(result === 'informe_parcial' && speechRecognitionError ? { issueType: 'otro' as const, issueNote: speechRecognitionError } : {}),
+        ...(speechRecognitionError ? { issueType: 'otro' as const, issueNote: speechRecognitionError } : {}),
         matchedReferenceText: feedbackLineMatch.referenceText,
         matchedReferenceIndex: feedbackLineMatch.referenceIndex,
         language: intelligentRecognitionLanguage,
@@ -1168,6 +1172,9 @@ export const RehearsalView: React.FC<Props> = ({
       recognitionContext,
       getRecognitionProcessingTiming,
       getNativeRecognitionInfo,
+      getRecognitionDiagnostics,
+      recognitionAttempt,
+      evaluatedRecognitionText,
       isLocalSpeechRecognition,
       finishComparison,
     ]
@@ -1205,8 +1212,8 @@ export const RehearsalView: React.FC<Props> = ({
 
   const handleRetryIntelligentLine = useCallback(() => {
     stopRehearsalSpeech();
+    recordIntelligentFeedback('reintentar');
     if (speechRecognitionTranscript.trim()) {
-      recordIntelligentFeedback('reintentar');
       setFeedbackStatusMessage('Resultado guardado. Reintentamos esta linea.');
     } else {
       setFeedbackStatusMessage('Reiniciando la escucha de esta linea.');
@@ -1385,11 +1392,11 @@ export const RehearsalView: React.FC<Props> = ({
   useEffect(() => {
     const automaticReason = getAutomaticLineMatchReason(
       speakableLineText,
-      speechRecognitionTranscript,
+      evaluatedRecognitionText,
       intelligentLineMatch
     );
     const advanceDelay = getAutomaticLineAdvanceDelay(
-      speakableLineText, speechRecognitionTranscript,
+      speakableLineText, evaluatedRecognitionText,
       speechRecognitionInterimTranscript, intelligentLineMatch
     );
 
@@ -1446,6 +1453,7 @@ export const RehearsalView: React.FC<Props> = ({
     speakableLineText,
     speechRecognitionInterimTranscript,
     speechRecognitionTranscript,
+    evaluatedRecognitionText,
   ]);
 
   useEffect(() => {
@@ -3137,12 +3145,13 @@ export const RehearsalView: React.FC<Props> = ({
     const finalPhrasePercent = Math.round(intelligentLineMatch.finalPhraseScore * 100);
     const automaticReason = getAutomaticLineMatchReason(
       speakableLineText,
-      speechRecognitionTranscript,
+      evaluatedRecognitionText,
       intelligentLineMatch
     );
     const canRepeatWhisperLine = usesWhisperRecognition(recognitionEngine) && hasTranscript &&
-      getAutomaticLineAdvanceDelay(speakableLineText, speechRecognitionTranscript,
+      getAutomaticLineAdvanceDelay(speakableLineText, evaluatedRecognitionText,
         speechRecognitionInterimTranscript, intelligentLineMatch) === null;
+    const canRepeatLine = canRepeatWhisperLine || (recognitionEngine === 'native' && isRecognitionAudioActive && !automaticReason);
     const scoreToneStyle =
       automaticReason || intelligentLineMatch.score >= 0.88
         ? styles.intelligentScoreGood
@@ -3170,7 +3179,7 @@ export const RehearsalView: React.FC<Props> = ({
           <Text style={ui.label}>HE OÍDO</Text>
           <Text style={[ui.text, { color: palette.ink }]}>{speechRecognitionTranscript || 'Tu transcripción aparecerá aquí…'}</Text>
         </View> : null}
-        {canRepeatWhisperLine ? <Button label="Repetir réplica" secondary disabled={isPaused || !pageVisible}
+        {canRepeatLine ? <Button label={hasTranscript ? 'Repetir réplica' : 'Reintentar escucha'} secondary disabled={isPaused || !pageVisible}
           onPress={handleRetryIntelligentLine} /> : null}
         {showDiagnostics ? <>
         <Text style={styles.intelligentTitle}>Laboratorio de linea</Text>

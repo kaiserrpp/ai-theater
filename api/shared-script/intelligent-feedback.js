@@ -3,6 +3,7 @@ const { head, list, put } = sharedStorage.selectStorage(require('@vercel/blob'))
 const { assertStorageWritable, getProtectedLibrary } = require('../../server/library-rescue');
 const { normalizeRecognitionComparison } = require('../../shared/recognitionComparison');
 const { normalizeRehearsalComparison } = require('../../shared/rehearsalComparison');
+const { normalizeRecognitionSessionDiagnostics } = require('../../shared/recognitionDiagnostics');
 const {
   getSongAdminPasswordFromRequest,
   getStorageNamespace,
@@ -89,6 +90,12 @@ const normalizeEntry = (entry) => {
 
   return {
     recognitionEngine: ['native', 'vosk', 'whisper', 'comparison'].includes(entry.recognitionEngine) ? entry.recognitionEngine : null,
+    ...(entry.recognitionDiagnostics ? { recognitionDiagnostics: normalizeRecognitionSessionDiagnostics(entry.recognitionDiagnostics) } : {}),
+    ...(['latest_utterance', 'repeated_line'].includes(entry.recognitionAttempt?.source) &&
+      typeof entry.recognitionAttempt.text === 'string' && entry.recognitionAttempt.text.trim() &&
+      typeof entry.heardText === 'string' && entry.heardText.trim().endsWith(entry.recognitionAttempt.text.trim())
+      ? { recognitionAttempt: { source: entry.recognitionAttempt.source, text: clampText(entry.recognitionAttempt.text),
+        ...(entry.heardText.trim().length > MAX_TEXT_LENGTH ? { rawTranscriptTruncated: true } : {}) } } : {}),
     ...(nativeRecognition ? { nativeRecognition } : {}),
     ...(rehearsalComparison ? { rehearsalComparison } : {}),
     scriptContextEnabled: entry.scriptContextEnabled === true,
