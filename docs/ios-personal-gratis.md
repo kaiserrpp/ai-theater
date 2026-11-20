@@ -2,6 +2,15 @@
 
 Este proceso genera una app **Release para un iPhone real**, con la interfaz web publicada y el puente de voz nativo actual. El IPA se entrega **sin firmar**: AltStore Classic lo firma con tu cuenta Apple gratuita al instalarlo desde Windows. No publica en App Store ni TestFlight y no renueva la membresía antigua de trabajo.
 
+## Primer instalador verificado · 20 de noviembre de 2026
+
+- **[Descargar AI-Theatre 2026.11.251 para iPhone personal](https://github.com/kaiserrpp/ai-theater/releases/download/ios-personal-2026.11.251-2/AI-Theatre-2026.11.251-iPhone-personal-unsigned.ipa)**: 11.151.127 bytes, build 6, sin firmar.
+- [Compilación terminada correctamente](https://github.com/kaiserrpp/ai-theater/actions/runs/44732274204), fuente `3869b736839de2db5cd870c17e408d3c9601fd00`, Xcode 16.4.
+- SHA256 `68ac8a1dfa266479d55b953f3e64418135f499bc7d1f40502dad4c29abe8bf1f`.
+- El IPA descargado se ha comprobado de nuevo en Windows: cuatro ejecutables ARM64/iPhoneOS, versión, permisos, bundle JS y hashes de los 16 archivos fuente correctos. No se ha instalado ni probado acústicamente en un iPhone físico.
+
+En este ordenador están el IPA, la guía, AltServer y los instaladores oficiales de iTunes/iCloud en `Descargas\AI-Theatre-iPhone-personal`. La preparación ha descargado los instaladores; no los ha instalado ni ha introducido credenciales Apple. iTunes e iCloud tienen firma válida de Apple. El ZIP oficial de AltServer incluye un MSI y un `setup.exe` sin firma Authenticode; se conserva su origen y hash en `herramientas-origen-y-hashes.json`.
+
 ## Qué está comprobado y qué falta
 
 El workflow verifica la plataforma iPhoneOS, los ejecutables ARM64, la versión, el identificador, las descripciones de micrófono/reconocimiento y el bundle JavaScript incluido. Rechaza binarios de simulador, perfiles de firma y archivos de credenciales. Esto no prueba la instalación ni el sonido o el reconocimiento en un teléfono físico.
