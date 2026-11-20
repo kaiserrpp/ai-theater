@@ -1,0 +1,52 @@
+name: iOS personal gratuito
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-personal-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Nunca consume minutos de un repositorio privado ni usa máquinas de pago.
+    if: github.event.repository.private == false
+    runs-on: macos-15
+    timeout-minutes: 55
+    permissions:
+      contents: write
+    env:
+      EXPO_NO_DOTENV: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Instalar herramientas del proyecto
+        run: npm ci --no-audit --no-fund
+      - name: Verificar la selección nativa
+        run: npm run ios:personal:check
+      - name: Rechazar paquetes de simulador, versiones incorrectas y credenciales
+        run: python3 -m unittest discover -s tests -p ios_personal_test.py
+      - name: Compilar Release para iPhone sin firma Apple
+        id: build
+        run: npm run ios:personal:build
+      - name: Publicar el instalador personal y su comprobación
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTPUT: ${{ steps.build.outputs.output }}
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          tag="ios-personal-${VERSION}-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" "$OUTPUT"/*.ipa "$OUTPUT/build-info.json" "$OUTPUT/SHA256SUMS.txt" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "AI-Theatre ${VERSION} · iPhone personal sin firmar" --notes-file "$OUTPUT/RELEASE.md"
+          printf '## Instalador personal de iPhone\n\n' >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
+          printf '\nIPA sin firmar, para AltStore Classic. Prueba física pendiente.\n' >> "$GITHUB_STEP_SUMMARY"

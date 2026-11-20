@@ -53,7 +53,8 @@ if (command === 'check') {
   console.log('Android: el reconocimiento, la voz y la calibración de Inteligente/nativo usan las API nativas; la interfaz y los guiones siguen en la web.');
   console.log('Paquete de compilación limitado a la app nativa, sin .env, servidor, guiones PDF ni archivos temporales.');
   console.log(app.extra.eas?.projectId ? `Proyecto Expo vinculado: ${app.extra.eas.projectId}` : 'Pendiente: iniciar sesión en Expo y vincular el proyecto (npm run prototype:login / prototype:link).');
-  console.log('iPhone: requiere una membresía Apple Developer activa y registrar el dispositivo antes de firmar el instalador.');
+  console.log('iPhone mediante Expo: requiere una membresía Apple Developer activa y registrar el dispositivo.');
+  console.log('iPhone personal gratuito: workflow iOS personal gratuito de GitHub + AltStore Classic; firma de siete días. Véase docs/ios-personal-gratis.md.');
   console.log('Android: APK para prueba interna; Google Play no es necesario.');
   console.log('Beta Google Play: npm run beta:android genera un AAB; la subida y el canal cerrado requieren Play Console.');
 } else {

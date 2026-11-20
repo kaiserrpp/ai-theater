@@ -87,11 +87,13 @@ Se verificó `CONTROL_AUDIO: allow` y se restauró Google con español de Españ
 
 ## Qué hace falta y qué se paga
 
+**Prueba personal gratuita desde Windows:** la alternativa de [iOS personal con AltStore Classic](docs/ios-personal-gratis.md) compila un IPA de dispositivo sin firmar en GitHub y lo firma al instalarlo con una cuenta Apple gratuita. La firma caduca a los siete días. No utiliza `prototype:ios`, Expo Go ni el binario de simulador; no publica en App Store/TestFlight. La instalación, permisos y audio del iPhone físico deben comprobarse con ese IPA real.
+
 | Concepto | Para esta prueba |
 | --- | --- |
 | Windows, Node y cuenta Expo | Se usa el ordenador actual. No hace falta comprar un Mac. |
 | Compilación en Expo Free | 0 USD dentro de la cuota vigente: 15 compilaciones Android y 15 iOS, con cola de prioridad baja. Comprobar la cuota disponible en la cuenta. |
-| Instalación en tu iPhone desde Windows | Membresía Apple Developer: 99 USD/año, o el precio local que indique Apple. También hay que registrar el iPhone para la distribución interna. |
+| Instalación en tu iPhone desde Windows mediante Expo | Membresía Apple Developer: 99 USD/año, o el precio local que indique Apple. También hay que registrar el iPhone para la distribución interna. Para la alternativa gratuita, véase la guía de AltStore anterior. |
 | Instalación en Android | APK de distribución interna: Google Play no es necesario. Hace falta un teléfono Android para validar el audio real. |
 | Publicación futura en Google Play | Cuenta de desarrollador: 25 USD de registro, pago único; no es necesaria para esta prueba. |
 | Transcripción | No se contrata una API facturada por minutos ni se usan créditos de un proveedor de transcripción. Los costes del alojamiento web existente siguen siendo independientes. |
