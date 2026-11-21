@@ -944,6 +944,7 @@ export const RehearsalView: React.FC<Props> = ({
     enabled: shouldKeepIntelligentRecognitionWarm,
     lang: recognitionEngine === 'vosk' || isCheckingIntelligentRecognition ? 'es-ES' : intelligentRecognitionLanguage,
     lineKey: recognitionLineKey,
+    continuous: shouldListenForSceneCommand && recognitionEngine === 'native' && getNativePrototypeInfo()?.platform === 'ios' ? false : undefined,
     prepareLocal: hasConfirmedRehearsalSetup && isIntelligentListenMode,
     engine: recognitionEngine,
     context: shouldUseIntelligentRecognition ? recognitionContext : undefined,

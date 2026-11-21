@@ -1,2 +1,2 @@
 // Generated from package.json.
-export const APP_VERSION = "2026.11.251";
+export const APP_VERSION = "2026.11.252";

@@ -10,6 +10,8 @@ const { createNativePrototypeController } = require('../src/nativePrototype/cont
 const { nativeBridgeBootstrap } = require('../src/nativePrototype/bridgeBootstrap.ts');
 const { parseBridgeCommand, isPrototypeUrl } = require('../src/nativePrototype/protocol.ts');
 const { createSpeechRecognitionSession } = require('../src/utils/speechRecognitionSession.ts');
+const { isHomeRehearsalCommand } = require('../src/utils/voiceAdvance.ts');
+const { getSceneAdvanceRecognitionAction } = require('../src/utils/rehearsalSceneTransition.ts');
 if (previous) require.extensions['.ts'] = previous; else delete require.extensions['.ts'];
 const command = (type, id, extra = {}) => ({ channel: 'ai-theatre-native', protocol: 1, type, id, ...extra });
 const deferred = () => { let resolve;const promise=new Promise(done=>{resolve=done});return{promise,resolve}; };
@@ -62,6 +64,70 @@ test('native capture closes by explicit command but playback waits for the actua
   f.end();await waiting;assert.equal(ended,true);
   const utterance=new f.window.SpeechSynthesisUtterance('Respuesta.');f.window.speechSynthesis.speak(utterance);await flush();
   assert.equal(f.spoken.length,1);assert.equal(f.spoken[0].text,'Respuesta.');
+});
+
+test('iPhone commands settle a whole utterance without accepting a provisional command prefix',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f=fixture(t);
+  f.session.configure({enabled:true,lang:'es-ES',lineKey:'home:ensayo',continuous:false});await flush();
+  assert.equal(f.starts[0].continuous,false,'iOS must be allowed to finish each command utterance');
+  f.words('ensayo');
+  assert.equal(f.session.getSnapshot().lastUtterance.isFinal,false);
+  f.words('ensayo mañana');f.end();
+  assert.equal(isHomeRehearsalCommand(f.session.getSnapshot().lastUtterance.text),false);
+  t.mock.timers.tick(0);await flush();
+  assert.equal(f.starts[1].continuous,false);
+  f.words('¡Ensayo!');f.end();
+  const home=f.session.getSnapshot().lastUtterance;
+  assert.equal(home.isFinal,true);assert.equal(isHomeRehearsalCommand(home.text),true);
+  f.session.stop();assert.equal(await f.session.waitForEnd(),true);
+  f.session.configure({enabled:true,lang:'es-ES',lineKey:'scene:1',continuous:false});await flush();
+  f.words('adelante');
+  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'wait');
+  f.words('adelante con la prueba');f.end();
+  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'discard');
+  f.session.resetTranscript();t.mock.timers.tick(0);await flush();
+  f.words('¡Adelante!');f.end();
+  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'start');
+  f.session.stop();t.mock.timers.tick(10000);await flush();
+  assert.equal(f.starts.length,4,'a consumed command must not reopen capture');
+});
+
+test('switching between a command and a continuous actor turn waits for native closure and keeps long pauses',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f=fixture(t);
+  f.session.configure({enabled:true,lang:'es-ES',lineKey:'scene:1',continuous:false});await flush();
+  f.words('adelante',true);
+  f.session.configure({enabled:true,lang:'es-ES',lineKey:'actor:1'});await flush();
+  assert.equal(f.starts.length,1);assert.deepEqual(f.calls,['abort']);
+  f.words('OLD COMMAND',true);f.end();t.mock.timers.tick(0);await flush();
+  assert.equal(f.starts.length,2);assert.equal(f.starts[1].continuous,true);
+  f.words('Primera parte');t.mock.timers.tick(14000);await flush();
+  assert.equal(f.starts.length,2);assert.equal(f.session.getSnapshot().transcript,'Primera parte');
+  assert.equal(f.session.getSnapshot().lastUtterance.isFinal,false);
+  f.words('Primera parte y final',true);
+  f.session.configure({enabled:true,lang:'es-ES',lineKey:'scene:2',continuous:false});await flush();
+  assert.equal(f.starts.length,2);f.end();t.mock.timers.tick(0);await flush();
+  assert.equal(f.starts.length,3);assert.equal(f.starts[2].continuous,false);
+  f.words('no adelante');f.end();
+  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'discard');
+});
+
+test('a settled native command survives automatic rearming until a new utterance or explicit reset',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f=fixture(t);
+  f.session.configure({enabled:true,lang:'es-ES',lineKey:'home:ensayo',continuous:false});await flush();
+  f.words('ensayo');f.end();t.mock.timers.tick(0);await flush();
+  assert.equal(f.starts.length,2);
+  assert.deepEqual(f.session.getSnapshot().lastUtterance,{text:'ensayo',isFinal:true,lineKey:'home:ensayo'});
+  f.words('no ensayo');
+  assert.equal(f.session.getSnapshot().lastUtterance.text,'no ensayo');
+  assert.equal(f.session.getSnapshot().lastUtterance.isFinal,false);
+  f.session.restart();f.end();t.mock.timers.tick(0);await flush();
+  assert.equal(f.session.getSnapshot().lastUtterance,null);
+  f.words('ensayo');f.end();t.mock.timers.tick(0);await flush();
+  f.session.configure({enabled:false,lang:'es-ES',lineKey:null});
+  assert.equal(f.session.getSnapshot().lastUtterance,null);
 });
 
 test('a native segmented result replaces the interim segment and accumulates completed words exactly once',async t=>{

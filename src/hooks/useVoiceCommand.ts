@@ -13,7 +13,10 @@ export const useVoiceCommand = (restKey: string | null, enabled: boolean, onAdva
   const input = useMemo(() => local ? createWarmupSpeechInput() : null, [local]);
   const engine = local ? 'vosk' : 'native';
   const recognition = useSpeechRecognition({ enabled: enabled && Boolean(restKey), lang: 'es-ES', lineKey: restKey,
-    engine, localConstructor: local ? input?.Constructor ?? null : undefined, prepareLocal: enabled });
+    engine, localConstructor: local ? input?.Constructor ?? null : undefined, prepareLocal: enabled,
+    // iOS continuous recognition can keep a whole command provisional until
+    // the service stops. Let commands finish naturally, never actor turns.
+    continuous: getNativePrototypeInfo()?.platform === 'ios' ? false : undefined });
   useEffect(() => { if (!enabled) input?.release(); }, [enabled, input]);
   useEffect(() => {
     const unobserve = observePageVisibility(visible => { if (!visible) input?.release(); });

@@ -99,6 +99,7 @@ export const createSpeechRecognitionSession = (
   let pageVisible = options.pageVisible ?? true;
   let blocked = false;
   let language = 'es-ES';
+  let continuous = !options.naturalEnd;
   let lineKey: string | null = null;
   let committedTranscript = '';
   let ignoredResultCount = 0;
@@ -206,7 +207,7 @@ export const createSpeechRecognitionSession = (
     else if (!options.naturalEnd) detach();
     update({ status: blocked ? 'error' : 'suspended', isAudioActive: false });
   };
-  const start = () => {
+  const start = (preserveSettledUtterance = false) => {
     if (!Constructor || !enabled || !pageVisible || blocked || recognition || preparing) return;
     if (options.naturalEnd && needsCue && options.prepareRestart) {
       const version = ++preparationVersion;
@@ -235,7 +236,7 @@ export const createSpeechRecognitionSession = (
       diagnostics.startCount++;
       current = new Constructor();
       recognition = current;
-      current.continuous = !options.naturalEnd;
+      current.continuous = continuous;
       current.interimResults = true;
       current.lang = language;
       current.maxAlternatives = 1;
@@ -251,7 +252,8 @@ export const createSpeechRecognitionSession = (
       inputEndReason = null;
       closingForChange = false;
       controlledStopRequested = false;
-      update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null, lastUtterance: null });
+      update({ status: 'starting', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null,
+        lastUtterance: preserveSettledUtterance ? snapshot.lastUtterance : null });
       current.onstart = () => {
         if (recognition === current && enabled && pageVisible && !blocked && !closingForChange) {
           diagnostics.firstServiceStartMs ??= diagnosticOffset();
@@ -337,7 +339,10 @@ export const createSpeechRecognitionSession = (
           update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false,
             finalTranscript: committedTranscript, interimTranscript: '',
             lastUtterance: snapshot.lastUtterance ? { ...snapshot.lastUtterance, isFinal: true } : null });
-          if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(); }, 0);
+          // React may observe the rearmed snapshot before its effects process
+          // the previous end. Keep the last settled command until new speech;
+          // manual retries, activation and cue changes still clear it.
+          if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(!continuous); }, 0);
           return;
         }
         if (options.naturalEnd) {
@@ -416,8 +421,9 @@ export const createSpeechRecognitionSession = (
     },
     // The ordinary Start button can open the real recognizer immediately.
     // Volume calibration is not evidence that this separate service works.
-    activate: (next: { lang: string; lineKey: string; preserveTranscript?: boolean }) => {
-      const preserveTranscript = next.preserveTranscript === true && language === next.lang && lineKey === next.lineKey;
+    activate: (next: { lang: string; lineKey: string; preserveTranscript?: boolean; continuous?: boolean }) => {
+      const nextContinuous = !options.naturalEnd && next.continuous !== false;
+      const preserveTranscript = next.preserveTranscript === true && language === next.lang && lineKey === next.lineKey && continuous === nextContinuous;
       if (lineKey !== next.lineKey) resetDiagnostics();
       diagnosticStartedAt ??= now();
       diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive);
@@ -426,6 +432,7 @@ export const createSpeechRecognitionSession = (
       enabled = true;
       blocked = false;
       language = next.lang;
+      continuous = nextContinuous;
       lineKey = next.lineKey;
       latestResults = { length: 0 };
       if (preserveTranscript) committedTranscript = snapshot.transcript;
@@ -436,11 +443,14 @@ export const createSpeechRecognitionSession = (
       }
       start();
     },
-    configure: (next: { enabled: boolean; lang: string; lineKey: string | null }) => {
+    configure: (next: { enabled: boolean; lang: string; lineKey: string | null; continuous?: boolean }) => {
       const languageChanged = language !== next.lang;
       const lineChanged = lineKey !== next.lineKey;
+      const nextContinuous = !options.naturalEnd && next.continuous !== false;
+      const continuousChanged = continuous !== nextContinuous;
       language = next.lang;
       lineKey = next.lineKey;
+      continuous = nextContinuous;
       // Discard a pending partial result from the previous cue. Otherwise its
       // result index can hide the first words of the actor's next turn.
       const hadPartialResult = Array.from({ length: latestResults.length }, (_, index) => latestResults[index])
@@ -448,10 +458,10 @@ export const createSpeechRecognitionSession = (
       if (lineChanged) { resetDiagnostics(); resetTranscript(); clearEvidence(); }
       if (!next.enabled || !next.lineKey) { stop(); return; }
       diagnosticStartedAt ??= now();
-      diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive && !languageChanged && !hadPartialResult);
+      diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive && !languageChanged && !continuousChanged && !hadPartialResult);
       enabled = true;
       armEvidence();
-      if (languageChanged || (lineChanged && hadPartialResult)) {
+      if (languageChanged || continuousChanged || (lineChanged && hadPartialResult)) {
         if ((options.naturalEnd || options.controlledEnd) && recognition) {
           closingForChange = true; update({ status: 'finishing' }); requestControlledEnd(); return;
         }

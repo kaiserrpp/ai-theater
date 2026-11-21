@@ -20,6 +20,7 @@ type UseSpeechRecognitionOptions = {
   prepareLocal?: boolean;
   engine?: RecognitionEngine;
   localConstructor?: SpeechRecognitionConstructor | null;
+  continuous?: boolean;
   context?: ScriptRecognitionContext;
   nativeHints?: RecognitionHints;
   whisperLanguage?: 'auto' | 'spanish' | 'english';
@@ -36,7 +37,7 @@ const getSpeechRecognitionConstructor = () => {
   return scopedWindow.SpeechRecognition ?? scopedWindow.webkitSpeechRecognition ?? null;
 };
 
-export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = false, engine = 'native', localConstructor, context, nativeHints, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
+export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = false, engine = 'native', localConstructor, continuous, context, nativeHints, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
   const contextRef = useRef(context); contextRef.current = context;
   const nativeHintsRef = useRef(nativeHints); nativeHintsRef.current = nativeHints;
   const whisperLanguageRef = useRef(whisperLanguage); whisperLanguageRef.current = whisperLanguage;
@@ -72,8 +73,8 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = fa
 
   useEffect(() => {
     processingTimingRef.current = null;
-    session.configure({ enabled, lang, lineKey });
-  }, [enabled, lang, lineKey, session]);
+    session.configure({ enabled, lang, lineKey, continuous });
+  }, [enabled, lang, lineKey, continuous, session]);
 
   useEffect(() => () => {
     session.dispose();

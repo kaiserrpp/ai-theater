@@ -7,9 +7,13 @@ Este proceso genera una app **Release para un iPhone real**, con la interfaz web
 - **[Descargar AI-Theatre 2026.11.251 para iPhone personal](https://github.com/kaiserrpp/ai-theater/releases/download/ios-personal-2026.11.251-2/AI-Theatre-2026.11.251-iPhone-personal-unsigned.ipa)**: 11.151.127 bytes, build 6, sin firmar.
 - [Compilación terminada correctamente](https://github.com/kaiserrpp/ai-theater/actions/runs/44732274204), fuente `3869b736839de2db5cd870c17e408d3c9601fd00`, Xcode 16.4.
 - SHA256 `68ac8a1dfa266479d55b953f3e64418135f499bc7d1f40502dad4c29abe8bf1f`.
-- El IPA descargado se ha comprobado de nuevo en Windows: cuatro ejecutables ARM64/iPhoneOS, versión, permisos, bundle JS y hashes de los 16 archivos fuente correctos. No se ha instalado ni probado acústicamente en un iPhone físico.
+- El IPA descargado se ha comprobado de nuevo en Windows: cuatro ejecutables ARM64/iPhoneOS, versión, permisos, bundle JS y hashes de los 16 archivos fuente correctos.
 
-En este ordenador están el IPA, la guía, AltServer y los instaladores oficiales de iTunes/iCloud en `Descargas\AI-Theatre-iPhone-personal`. La preparación ha descargado los instaladores; no los ha instalado ni ha introducido credenciales Apple. iTunes e iCloud tienen firma válida de Apple. El ZIP oficial de AltServer incluye un MSI y un `setup.exe` sin firma Authenticode; se conserva su origen y hash en `herramientas-origen-y-hashes.json`.
+**Instalación confirmada por el usuario el 22 de noviembre:** AltStore Classic ha firmado e instalado el IPA 251 en su iPhone y AI-Theatre se abre. El usuario ha probado la app y la valora favorablemente, aunque los comandos «ensayo» y «adelante» no respondían al iniciar. No se dispone de mediciones acústicas de esa prueba.
+
+La web **2026.11.252** corrige la escucha de comandos del instalador iOS existente: usa frases individuales, espera su resultado definitivo y conserva el último comando al rearmarse automáticamente. Las réplicas siguen con reconocimiento continuo y conservan sus pausas. No hay que descargar otro IPA: cerrar y volver a abrir AI-Theatre carga la web publicada. El resultado acústico de estos comandos debe comprobarse en el teléfono.
+
+En este ordenador están el IPA, la guía y los instaladores oficiales en `Descargas\AI-Theatre-iPhone-personal`; iTunes, iCloud y AltServer ya están instalados. Las credenciales Apple y los códigos se han introducido personalmente en sus ventanas, sin guardarlos en el proyecto. iTunes e iCloud tienen firma válida de Apple. El ZIP oficial de AltServer incluye un MSI y un `setup.exe` sin firma Authenticode; se conserva su origen y hash en `herramientas-origen-y-hashes.json`.
 
 ## Qué está comprobado y qué falta
 

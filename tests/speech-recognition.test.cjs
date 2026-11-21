@@ -37,6 +37,26 @@ test('does not claim the microphone is open just because recognition started', (
   assert.equal(session.getSnapshot().isAudioActive, true);
 });
 
+test('command configuration cannot remove Safari natural-end protection', t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  let handle;
+  class Recognition {
+    constructor() { handle=this; }
+    start() {}
+    abort() { throw Error('Safari must finish naturally'); }
+  }
+  const session=createSpeechRecognitionSession(Recognition,()=>{},{naturalEnd:true,usage:{started:false}});
+  t.after(()=>session.dispose());
+  session.configure(options({continuous:true}));
+  assert.equal(handle.continuous,false);
+  handle.onstart();handle.onaudiostart();
+  session.configure(options({continuous:false}));
+  handle.onresult({results:[result('adelante',false)]});handle.onend();
+  assert.equal(session.getSnapshot().lastUtterance.isFinal,true);
+  assert.equal(session.getSnapshot().lastUtterance.text,'adelante');
+  session.stop();
+});
+
 test('permission errors survive end events and subsequent scene changes without a retry loop', (t) => {
   const { session, handles } = fixture(t);
   session.configure(options());
