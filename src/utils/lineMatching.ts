@@ -485,12 +485,24 @@ const EQUIVALENT_LINE_REFERENCES: {
   },
 ];
 
-const getEquivalentLineReferences = (expectedText: string) => {
+const getEquivalentLineReferences = (expectedText: string, heardText: string) => {
   const normalizedExpectedText = normalizeSpeechText(expectedText);
-
-  return EQUIVALENT_LINE_REFERENCES.flatMap(({ expectedPattern, references }) =>
+  const references = EQUIVALENT_LINE_REFERENCES.flatMap(({ expectedPattern, references }) =>
     expectedPattern.test(normalizedExpectedText) ? references : []
   );
+  // A separate "No, pero espera." is a conversational preface, not the
+  // negation of the following statement. Keep that statement's own negatives.
+  // Never strip a short reply or "espera a ..." from a single sentence.
+  const withoutPreface = expectedText.replace(/^\s*no\s*,?\s*pero\s*,?\s*espera\s*[.!…]+\s*/i, '');
+  const content = getContentTokens(withoutPreface);
+  const heardOpening = getContentTokens(heardText).slice(0, 2);
+  // The new attempt must start at the following statement. Otherwise the
+  // preface's "no" could mask a missing negation inside that statement.
+  if (withoutPreface !== expectedText && content.length >= 8 &&
+    content.slice(0, 2).every((token, index) => token === heardOpening[index])) {
+    references.push(withoutPreface);
+  }
+  return references;
 };
 
 // The Spanish recognizer writes English sounds as Spanish words. Apply these
@@ -791,7 +803,7 @@ export const scoreLineMatch = (
 ) => {
   const references = [
     expectedText,
-    ...getEquivalentLineReferences(expectedText),
+    ...getEquivalentLineReferences(expectedText, heardText),
     ...acceptedVariants.filter((variant) => variant.trim()),
   ];
 
@@ -915,7 +927,8 @@ export const getAutomaticLineAdvanceDelay = (
   expectedText: string,
   heardText: string,
   interimText: string,
-  result: LineMatchResult
+  result: LineMatchResult,
+  continuousInterim = false
 ): number | null => {
   const reason = getAutomaticLineMatchReason(expectedText, heardText, result);
   if (!reason) return null;
@@ -928,9 +941,25 @@ export const getAutomaticLineAdvanceDelay = (
   const heardEnding = getTailTokens(tokenize(heardText, reference), ending.length);
   const hasCompleteEnding = ending.length >= 4 && heardEnding.length === ending.length &&
     ending.every((token, index) => tokensMatch(token, heardEnding[index]));
-  return !result.negationPenaltyApplied && hasCompleteEnding &&
+  if (!result.negationPenaltyApplied && hasCompleteEnding &&
     !finalPhraseAppearsBeforeEnding(reference) && result.coverageScore >= 0.5 &&
-    result.precisionScore >= 0.65 && result.orderScore >= 0.45 ? 120 : null;
+    result.precisionScore >= 0.65 && result.orderScore >= 0.45) return 120;
+
+  // iPhone continuous recognition may never mark its current words final.
+  // Flexible matches must not wait forever for an exact five-word ending:
+  // require the last two content words, in order at the end of the transcript,
+  // plus the existing accepted match and strong coverage of the whole reply.
+  // A repeated ending inside the reference is not evidence of its completion.
+  if (continuousInterim && !result.negationPenaltyApplied && result.finalPhraseScore >= 0.8 &&
+    result.coverageScore >= 0.6 && result.precisionScore >= 0.75 && result.orderScore >= 0.6) {
+    const content = getContentTokens(reference);
+    const tail = content.slice(-2);
+    const heardTail = getContentTokens(heardText, reference).slice(-2);
+    const repeatedTail = content.slice(0, -2).some((_, index) =>
+      tail.every((token, offset) => token === content[index + offset]));
+    if (tail.length === 2 && !repeatedTail && tail.every((token, index) => token === heardTail[index])) return 120;
+  }
+  return null;
 };
 
 export const isNextLineCommand = (heardText: string) => {

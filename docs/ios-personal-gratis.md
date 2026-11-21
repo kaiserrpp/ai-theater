@@ -13,6 +13,8 @@ Este proceso genera una app **Release para un iPhone real**, con la interfaz web
 
 La web **2026.11.252** corrige la escucha de comandos del instalador iOS existente: usa frases individuales, espera su resultado definitivo y conserva el último comando al rearmarse automáticamente. Las réplicas siguen con reconocimiento continuo y conservan sus pausas. No hay que descargar otro IPA: cerrar y volver a abrir AI-Theatre carga la web publicada. El resultado acústico de estos comandos debe comprobarse en el teléfono.
 
+La web **2026.11.253** corrige además la espera de resultados definitivos de las réplicas: recupera coincidencias flexibles y repeticiones completas con comprobaciones de final y negación. Los siete primeros informes nativos permiten reproducir siete intervenciones recuperadas sobre texto guardado; falta contrastar el resultado nuevo en el teléfono. Sigue sirviendo el IPA 251/build 6. [Diagnóstico y verificaciones](recognition-ios-2026-11-22.md).
+
 En este ordenador están el IPA, la guía y los instaladores oficiales en `Descargas\AI-Theatre-iPhone-personal`; iTunes, iCloud y AltServer ya están instalados. Las credenciales Apple y los códigos se han introducido personalmente en sus ventanas, sin guardarlos en el proyecto. iTunes e iCloud tienen firma válida de Apple. El ZIP oficial de AltServer incluye un MSI y un `setup.exe` sin firma Authenticode; se conserva su origen y hash en `herramientas-origen-y-hashes.json`.
 
 ## Qué está comprobado y qué falta

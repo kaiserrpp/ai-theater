@@ -1039,16 +1039,20 @@ export const RehearsalView: React.FC<Props> = ({
     }
   }, [voiceStart, hasCompletedRehearsalPreflight, currentIndex, sceneCommandReadyKey, currentLine, startCurrentScene]);
 
+  const continuousNativeInterim = recognitionEngine === 'native' && getNativePrototypeInfo()?.platform === 'ios';
   const recognitionAttempt = useMemo(() => recognitionEngine === 'native' && isMyTurn && shouldUseIntelligentRecognition
     ? getRehearsalRecognitionAttempt({ expectedText: speakableLineText, transcript: speechRecognitionTranscript,
       acceptedVariants: currentAcceptedLineVariants, lineKey: recognitionLineKey,
+      allowRepeatedInterim: continuousNativeInterim,
       interimTranscript: speechRecognitionInterimTranscript, lastUtterance: speechRecognitionLastUtterance })
     : { text: speechRecognitionTranscript, source: 'accumulated' as const,
       match: scoreLineMatch(speakableLineText, speechRecognitionTranscript, currentAcceptedLineVariants) },
   [recognitionEngine, isMyTurn, shouldUseIntelligentRecognition, speakableLineText, speechRecognitionTranscript,
-    currentAcceptedLineVariants, recognitionLineKey, speechRecognitionInterimTranscript, speechRecognitionLastUtterance]);
+    currentAcceptedLineVariants, recognitionLineKey, speechRecognitionInterimTranscript, speechRecognitionLastUtterance, continuousNativeInterim]);
   const intelligentLineMatch = recognitionAttempt.match;
   const evaluatedRecognitionText = recognitionAttempt.text;
+  const intelligentAdvanceDelay = getAutomaticLineAdvanceDelay(speakableLineText, evaluatedRecognitionText,
+    speechRecognitionInterimTranscript, intelligentLineMatch, continuousNativeInterim);
 
   const persistLineVariants = useCallback(
     async (nextVariants: LineVariantMap) => {
@@ -1396,10 +1400,7 @@ export const RehearsalView: React.FC<Props> = ({
       evaluatedRecognitionText,
       intelligentLineMatch
     );
-    const advanceDelay = getAutomaticLineAdvanceDelay(
-      speakableLineText, evaluatedRecognitionText,
-      speechRecognitionInterimTranscript, intelligentLineMatch
-    );
+    const advanceDelay = intelligentAdvanceDelay;
 
     if (
       !shouldUseIntelligentRecognition ||
@@ -1448,11 +1449,11 @@ export const RehearsalView: React.FC<Props> = ({
     currentLineVariantKey,
     filteredGuion.length,
     intelligentLineMatch,
+    intelligentAdvanceDelay,
     recordIntelligentFeedback,
     resetSpeechRecognitionTranscript,
     shouldUseIntelligentRecognition,
     speakableLineText,
-    speechRecognitionInterimTranscript,
     speechRecognitionTranscript,
     evaluatedRecognitionText,
   ]);
@@ -3150,9 +3151,8 @@ export const RehearsalView: React.FC<Props> = ({
       intelligentLineMatch
     );
     const canRepeatWhisperLine = usesWhisperRecognition(recognitionEngine) && hasTranscript &&
-      getAutomaticLineAdvanceDelay(speakableLineText, evaluatedRecognitionText,
-        speechRecognitionInterimTranscript, intelligentLineMatch) === null;
-    const canRepeatLine = canRepeatWhisperLine || (recognitionEngine === 'native' && isRecognitionAudioActive && !automaticReason);
+      intelligentAdvanceDelay === null;
+    const canRepeatLine = canRepeatWhisperLine || (recognitionEngine === 'native' && isRecognitionAudioActive && intelligentAdvanceDelay === null);
     const scoreToneStyle =
       automaticReason || intelligentLineMatch.score >= 0.88
         ? styles.intelligentScoreGood

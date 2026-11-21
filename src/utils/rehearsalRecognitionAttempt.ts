@@ -12,6 +12,7 @@ const sameWords = (left: string[], right: string[]) => left.length === right.len
 export const getRehearsalRecognitionAttempt = (input: {
   expectedText: string; transcript: string; acceptedVariants?: string[]; lineKey: string | null;
   interimTranscript?: string;
+  allowRepeatedInterim?: boolean;
   lastUtterance?: { text: string; isFinal: boolean; lineKey: string | null } | null;
 }) => {
   const { expectedText, transcript, acceptedVariants = [], lastUtterance } = input;
@@ -47,9 +48,10 @@ export const getRehearsalRecognitionAttempt = (input: {
       if (selected) return selected;
     }
   }
-  // A recognizer can put several repetitions in one final result. Require two
+  // A recognizer can put several repetitions in one result. Require two
   // consecutive exact copies at its end, never an arbitrary matching suffix.
-  if (!input.interimTranscript?.trim()) {
+  // iPhone continuous hypotheses may remain provisional until we close input.
+  if (!input.interimTranscript?.trim() || input.allowRepeatedInterim) {
     const tokens = words(transcript);
     if (tokens.length <= 2000) for (const reference of references) {
       const length = reference.length;
