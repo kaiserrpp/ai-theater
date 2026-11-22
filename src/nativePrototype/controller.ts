@@ -1,3 +1,4 @@
+import type { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
 import type { BridgeCommand, BridgeEvent } from './protocol';
 import type { NativeRecognitionInfo, RecognitionHints } from './recognitionHints';
 
@@ -14,6 +15,7 @@ type Dependencies = {
   speak: (text: string, options: SpeechOptions) => void;
   stopSpeech: () => Promise<void>;
   voices: () => Promise<NonNullable<BridgeEvent['voices']>>;
+  iosAudioSession?: Pick<typeof ExpoSpeechRecognitionModule, 'getAudioSessionCategoryAndOptionsIOS' | 'setCategoryIOS'>;
   startLevelInput?: (onLevel: (level: number) => void, onError: (message: string) => void) => Promise<void>;
   stopLevelInput?: () => Promise<void>;
 };
@@ -120,6 +122,15 @@ export const createNativePrototypeController = (deps: Dependencies) => {
       await stopped;
       if (input) { const previous = input; cancelInput(previous); await waitClosed(previous); }
       if (pendingSpeech !== command || !foreground || disposed || !command.id) return;
+      // iOS speech shares the audio session. Measurement mode reduces its playback level.
+      if (deps.iosAudioSession) {
+        try {
+          const session = deps.iosAudioSession.getAudioSessionCategoryAndOptionsIOS();
+          if (session.mode === 'measurement') deps.iosAudioSession.setCategoryIOS({ ...session, mode: 'default' });
+        } catch {
+          // Keep playback available if iOS rejects the mode change during a route transition.
+        }
+      }
       pendingSpeech = null; speaking = command.id;
       const id = command.id;
       const done = () => { if (speaking === id) { speaking = null; emit({ type: 'speech.end', id }); } };

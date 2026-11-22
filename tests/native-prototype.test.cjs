@@ -26,8 +26,9 @@ const fixture = (t, extra = {}) => {
     requestPermission:extra.requestPermission||(async()=>true),isRecognitionAvailable:()=>true,
     startRecognition:options=>{assert.equal(speech,false);active=true;starts.push(options);controller.recognitionEvent('start');controller.recognitionEvent('audiostart')},
     abortRecognition:()=>calls.push('abort'),stopRecognition:()=>calls.push('stop'),
-    speak:(text,options)=>{assert.equal(active,false,'native playback cannot overlap capture');speech=true;spoken.push({text,options});options.onStart()},
+    speak:(text,options)=>{assert.equal(active,false,'native playback cannot overlap capture');extra.onSpeak?.();speech=true;spoken.push({text,options});options.onStart()},
     stopSpeech:async()=>{speech=false;calls.push('stopSpeech')},voices:async()=>[],
+    iosAudioSession: extra.iosAudioSession,
   });
   vm.runInNewContext(nativeBridgeBootstrap({platform:'ios',appVersion:'2026.11.224'}),{window,Event,Map,JSON});
   const snapshots=[];
@@ -64,6 +65,50 @@ test('native capture closes by explicit command but playback waits for the actua
   f.end();await waiting;assert.equal(ended,true);
   const utterance=new f.window.SpeechSynthesisUtterance('Respuesta.');f.window.speechSynthesis.speak(utterance);await flush();
   assert.equal(f.spoken.length,1);assert.equal(f.spoken[0].text,'Respuesta.');
+});
+
+test('iOS restores the ordinary output mode after native input ends and before the response plays', async t => {
+  const inputConfiguration = { category: 'playAndRecord', categoryOptions: ['defaultToSpeaker', 'allowBluetooth'], mode: 'measurement' };
+  let settings = inputConfiguration;
+  const changes = [];
+  const voiceModes = [];
+  const f = fixture(t, {
+    iosAudioSession: {
+      getAudioSessionCategoryAndOptionsIOS: () => settings,
+      setCategoryIOS: next => { settings = next; changes.push(next); },
+    },
+    onSpeak: () => voiceModes.push(settings.mode),
+  });
+  await f.open();
+  f.session.stop();
+  const speak = () => f.window.speechSynthesis.speak(new f.window.SpeechSynthesisUtterance('Respuesta.'));
+  speak();
+  await flush();
+  assert.deepEqual(changes, []);
+  assert.deepEqual(voiceModes, []);
+
+  f.end();
+  await flush();
+  assert.deepEqual(changes, [{ ...inputConfiguration, mode: 'default' }]);
+  assert.deepEqual(voiceModes, ['default']);
+  speak();
+  await flush();
+  assert.deepEqual(voiceModes, ['default', 'default']);
+  assert.equal(changes.length, 1);
+});
+
+test('a rejected iOS output mode change still lets the system voice play', async t => {
+  let changeAttempts = 0;
+  const f = fixture(t, {
+    iosAudioSession: {
+      getAudioSessionCategoryAndOptionsIOS: () => ({ category: 'playAndRecord', categoryOptions: ['defaultToSpeaker'], mode: 'measurement' }),
+      setCategoryIOS: () => { changeAttempts++; throw new Error('Audio route changed'); },
+    },
+  });
+  f.window.speechSynthesis.speak(new f.window.SpeechSynthesisUtterance('Respuesta.'));
+  await flush();
+  assert.equal(changeAttempts, 1);
+  assert.equal(f.spoken.length, 1);
 });
 
 test('iPhone commands settle a whole utterance without accepting a provisional command prefix',async t=>{

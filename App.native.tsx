@@ -56,6 +56,7 @@ function NativePrototype() {
     stopSpeech: () => Speech.stop(),
     voices: async () => (await Speech.getAvailableVoicesAsync()).map(voice => ({ id: voice.identifier,
       name: voice.name, lang: voice.language, default: voice.language.toLowerCase().startsWith('es-es') })),
+    iosAudioSession: platform === 'ios' ? ExpoSpeechRecognitionModule : undefined,
     startLevelInput: levelInput.start,
     stopLevelInput: levelInput.stop,
   }), [levelInput, recognitionRuntime]);
