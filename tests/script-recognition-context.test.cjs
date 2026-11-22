@@ -52,7 +52,9 @@ test('context changes the Whisper input, not the reference, Vosk decoder or Inte
       whisper: async (input, options) => { assert.deepEqual(input, audio); assert.equal(options.expected, undefined); assert.deepEqual(options.context, context); return { text: 'Hey, Sonny.', contextUsed: true, contextTermCount: 3 }; },
     } });
   assert.equal(results[1].accepted, true);
-  for (const wrong of ['', 'Hey', 'Sonny', 'Hey, Sammy.', 'Hey, Johnny.', 'Hey, something.']) assert.equal(evaluateTranscript('Ey, Sonny.', wrong).accepted, false, wrong);
+  // "Sonny" was later confirmed by the actor as a good reading of this line.
+  assert.equal(evaluateTranscript('Ey, Sonny.', 'Sonny').accepted, true);
+  for (const wrong of ['', 'Hey', 'Hey, Sammy.', 'Hey, Johnny.', 'Hey, something.']) assert.equal(evaluateTranscript('Ey, Sonny.', wrong).accepted, false, wrong);
   assert.equal(evaluateTranscript('No puedo', 'puedo').accepted, false);
   const report = makeFeedbackEntries({ id: 'comparison', sampleId: 'same-audio', context, expected: 'Ey, Sonny.', results, order: ['vosk', 'whisper'] });
   assert(report.every((entry) => entry.recognitionComparison.sampleId === 'same-audio'));

@@ -359,6 +359,66 @@ export const normalizeSpeechText = (value) => compactRepeatedTokens(normalizeRaw
     .split(' ')
     .map((token) => normalizeToken(token.trim()))
     .filter(Boolean)).join(' ');
+// Manually advanced readings confirmed as good by the actor on 22/11/2026.
+// Match the entire script line AND the entire saved hypothesis. These are
+// recognition equivalents, not global word aliases or fuzzy shorter scripts:
+// an added negation, a continuation or a partial ending cannot select one.
+const CONFIRMED_TRANSCRIPT_REFERENCES = [
+    {
+        expected: 'Ey, sonny',
+        heard: ['Sonny', 'esta ni', 'y dani', 'y a dani', 'sane'],
+    },
+    {
+        expected: 'Tengo noticias. My Enlgish is getting much better.',
+        heard: [
+            'tengo noticias may ingleses que te mayweather',
+            'tengo noticias may ingleses que te macbeth',
+            'tengo noticias may ingleses macbeth',
+            'tengo noticias may ingleses gretchen macbeth',
+            'tengo noticias may inglés es que sin macbeth',
+        ],
+    },
+    { expected: 'Really?', heard: ['lee fraile', 'lee royale'] },
+    { expected: 'Sure (se rie)', heard: ['sour'] },
+    {
+        expected: 'Ya lo sé pero hay dos idiomas distintos: Dominican English y Puerto riquean English… necesito unas lecciones extras',
+        heard: [
+            'Ya lo sé pero es que son dos idiomas distintos en English y puertorriqueña en English lecciones extras',
+            'ya lo sé pero es que son dos de idiomas distintos dominicana inglés y puertorriqueña inglés voy a necesitar un las lecciones éxtasis',
+        ],
+    },
+    {
+        expected: 'Pues sí que has traido nuevas palabras',
+        heard: [
+            'Pues sigues traído nuevas palabras',
+            'Pues siguieras traído palabras nuevas',
+            'Pues sigues has aprendido palabras nuevas',
+        ],
+    },
+    {
+        expected: 'Por favor Carla, acompáñala y que se quede en la sombra ¿sí?',
+        heard: ['Por favor acompáñala y que se queden las sombras así'],
+    },
+    {
+        expected: 'No, no, quiero estar un rato solo, con mis cristales rotos',
+        heard: ['Solo con mis cristales rotos', 'Quiero estar solo con mis cristales rotos'],
+    },
+    { expected: 'No pero, espera', heard: ['Pero espera', 'Espera no espera', 'Espera'] },
+    { expected: 'Abuela, que paso? Porque gritas? Paso algo malo?', heard: ['Por qué gritas algo malo'] },
+    { expected: 'No, pero…', heard: ['Pero'] },
+    { expected: 'Para que?', heard: ['Qué'] },
+    { expected: 'Pero es que yo trate de llamar', heard: ['Traté de llamar'] },
+    {
+        expected: 'No, pero espera. Respecto a ayer, No te encontraba por ningún lado, la abuela se sentía mal tenía que volver a buscarla',
+        heard: [
+            'Respecto no te encontraba por ningún sitio además la Abuela Claudia se sentía mal y tuve que volver a buscarla',
+            'No encontraba ningún sitio además la Claudia se sentía mal y tuve que volver a buscarla',
+            'No encontraba por ningún sitio además la bola se sentía mal y tuve que volver a buscarla',
+        ],
+    },
+].map(({ expected, heard }) => ({
+    expected: normalizeSpeechText(expected), heard: new Set(heard.map(normalizeSpeechText)),
+}));
 const EQUIVALENT_LINE_REFERENCES = [
     {
         expectedPattern: /\btengo.*spot.*impresionado.*verdad\b/,
@@ -424,6 +484,10 @@ const EQUIVALENT_LINE_REFERENCES = [
 const getEquivalentLineReferences = (expectedText, heardText) => {
     const normalizedExpectedText = normalizeSpeechText(expectedText);
     const references = EQUIVALENT_LINE_REFERENCES.flatMap(({ expectedPattern, references }) => expectedPattern.test(normalizedExpectedText) ? references : []);
+    const normalizedHeardText = normalizeSpeechText(heardText);
+    if (CONFIRMED_TRANSCRIPT_REFERENCES.some(({ expected, heard }) => expected === normalizedExpectedText && heard.has(normalizedHeardText))) {
+        references.push(heardText);
+    }
     // A separate "No, pero espera." is a conversational preface, not the
     // negation of the following statement. Keep that statement's own negatives.
     // Never strip a short reply or "espera a ..." from a single sentence.

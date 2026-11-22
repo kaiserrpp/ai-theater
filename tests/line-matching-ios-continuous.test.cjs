@@ -32,7 +32,10 @@ test('omitting a separate conversational preface preserves the negative statemen
   assert.notEqual(accepts(yesterday, heard), null);
   assert.equal(accepts(yesterday, heard.replace('no te encontraba', 'te encontraba')), null);
   assert.equal(accepts(yesterday, 'No, pero espera. ' + heard.replace('no te encontraba', 'te encontraba')), null);
-  assert.equal(accepts('No pero, espera', 'Pero espera espera'), null);
+  // The actor subsequently confirmed this exact short reading as good. It is
+  // a scoped confirmed variant, independent of the long-preface rule above.
+  assert.equal(accepts('No pero, espera', 'Pero espera espera'), 60);
+  assert.equal(accepts('No pero, espera', 'Pero espera a tu hermano'), null);
   assert.equal(score('No, pero espera a tu hermano antes de salir de la casa', 'Espera a tu hermano antes de salir de la casa').negationPenaltyApplied, true);
 });
 
@@ -45,7 +48,7 @@ test('a pause, missing last word, negation, repeated ending or unrelated tail ca
     [yesterday, 'Respecto ayer no te encontraba por ningún sitio además la abuela se sentía mal y tuve que volver'],
     ['Quería volver a buscarla, pero antes de volver a buscarla', 'Quería volver a buscarla'],
     ['Quiero recoger las cartas y después llamar a mi hermano', 'Quiero recoger las cartas'],
-    ['Ey, Sonny', 'Sonny'],
+    ['Ey, Sonny', 'Johnny'],
   ]) assert.equal(accepts(expected, heard), null, `${expected}: ${heard}`);
 });
 
