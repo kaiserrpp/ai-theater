@@ -159,6 +159,13 @@ export const createNativePrototypeController = (deps: Dependencies) => {
       const run = input;
       if (type === 'audioend') run.audioEnded = true;
       if (type === 'end') { finishInput(run); return; }
+      if (type === 'error' && data.error === 'interrupted') {
+        if (run.cancelled) return;
+        // The iOS SDK tears down this run and emits end. Retire its results
+        // immediately and keep the input reserved until teardown finishes.
+        run.cancelled = true;
+        run.closing = true;
+      }
       if ((type === 'result' || type === 'configuration') && run.cancelled) return;
       if (type === 'error' && run.cancelled && data.error === 'aborted') return;
       if (type === 'error' && data.error === 'speech-timeout') data = { ...data, error: 'no-speech' };

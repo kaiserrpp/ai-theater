@@ -500,6 +500,7 @@ export const RehearsalView: React.FC<Props> = ({
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const pageVisible = usePageVisibility();
+  const waitingForIPhone = !pageVisible && getNativePrototypeInfo()?.platform === 'ios';
   const [isExitingRehearsal, setIsExitingRehearsal] = useState(false);
   const exitRequestedRef = useRef(false);
   const [sceneCommandReadyKey, setSceneCommandReadyKey] = useState<string | null>(null);
@@ -1228,6 +1229,7 @@ export const RehearsalView: React.FC<Props> = ({
   }, [recordIntelligentFeedback, restartRecognition, speechRecognitionTranscript]);
 
   const handleSkipIntelligentLine = useCallback(() => {
+    if (!isPageVisible()) return;
     recordIntelligentFeedback('siguiente_linea');
     resetSpeechRecognitionTranscript();
     advanceLine();
@@ -2828,6 +2830,13 @@ export const RehearsalView: React.FC<Props> = ({
     void AsyncStorage.setItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, next).catch(() => setPreferenceNotice('El reconocimiento elegido sigue activo, pero no se pudo recordar.'));
   }, [recognitionEngine, disposeCalibrationAudio, releaseListeningInput, stopRecognition, stopSongAudio, waitForRecognitionEnd, finishComparison]);
 
+  const recognitionInterrupted = speechRecognitionErrorCode === 'interrupted';
+  const renderRecognitionError = (onRetry: () => void, retryLabel: string) => speechRecognitionError && pageVisible && !isPaused ? (
+    <SpeechRecognitionErrorPanel error={speechRecognitionError}
+      errorCode={speechRecognitionErrorCode} errorDetail={speechRecognitionErrorDetail}
+      onRetry={onRetry} retryLabel={recognitionInterrupted ? 'Reactivar micrófono' : retryLabel} />
+  ) : null;
+
   const renderHeader = (title: string) => <>
     <View style={[ui.header, { paddingVertical: 10 }]}>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar ensayo" onPress={handleExit} style={ui.icon}><Icon name="arrow-left" /></TouchableOpacity>
@@ -2837,6 +2846,16 @@ export const RehearsalView: React.FC<Props> = ({
         <Text style={{ color: palette.plum, fontSize: 12, fontWeight: '700' }}>{listenModeSelection === 'intelligent' ? recognitionEngine === 'comparison' ? 'Comparativa' : 'Inteligente' : listenModeSelection === 'auto' ? 'Silencio' : 'Manual'} ⌄</Text>
       </TouchableOpacity>
     </View>
+    {waitingForIPhone ? (
+      <Text accessibilityLiveRegion="polite" style={[ui.text, { paddingHorizontal: 16, paddingVertical: 10 }]}>
+        Si se ha interrumpido el audio, espera a que termine la interrupción. Ve a la pantalla de inicio del iPhone y vuelve a AI-Theatre para seguir en el mismo punto.
+      </Text>
+    ) : null}
+    {recognitionInterrupted && (shouldUseIntelligentRecognition || shouldListenForSceneCommand) && !isExitingRehearsal && !showMicrophoneMenu ? (
+      <View accessibilityLiveRegion="polite" style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
+        {renderRecognitionError(shouldListenForSceneCommand ? restartRecognition : handleRetryIntelligentLine, 'Reactivar micrófono')}
+      </View>
+    ) : null}
     {!showMicrophoneMenu ? renderIntelligentFeedbackBar() : null}
     <Sheet title="Micrófono y voz" visible={showMicrophoneMenu} onClose={() => setShowMicrophoneMenu(false)}>
       <MicrophoneSettings mode={listenModeSelection === 'pending' ? 'intelligent' : listenModeSelection} supported={isSpeechRecognitionSupported}
@@ -2970,12 +2989,6 @@ export const RehearsalView: React.FC<Props> = ({
       </ScrollView>
     </View>;
   }
-
-  const renderRecognitionError = (onRetry: () => void, retryLabel: string) => speechRecognitionError ? (
-    <SpeechRecognitionErrorPanel error={speechRecognitionError}
-      errorCode={speechRecognitionErrorCode} errorDetail={speechRecognitionErrorDetail}
-      onRetry={onRetry} retryLabel={retryLabel} />
-  ) : null;
 
   if (isCheckingIntelligentRecognition) {
     return <View style={styles.container}>
@@ -3164,7 +3177,7 @@ export const RehearsalView: React.FC<Props> = ({
       <View style={styles.intelligentPanel}>
         <Text style={styles.intelligentLabel}>
           {isPaused ? 'Ensayo en pausa' : !pageVisible || speechRecognitionStatus === 'suspended'
-            ? 'Ensayo en espera. La escucha se recuperará al volver a esta pestaña.'
+            ? waitingForIPhone ? 'Ensayo en espera.' : 'Ensayo en espera. La escucha se recuperará al volver a esta pestaña.'
             : speechRecognitionStatus === 'error'
             ? 'La escucha necesita tu atención'
             : speechRecognitionStatus === 'preparing' || speechRecognitionStatus === 'finishing'
@@ -3175,7 +3188,7 @@ export const RehearsalView: React.FC<Props> = ({
                 ? 'Abriendo el micrófono…'
                 : 'Esperando la entrada del micrófono'}
         </Text>
-        {renderRecognitionError(handleRetryIntelligentLine, 'Activar micrófono')}
+        {!recognitionInterrupted ? renderRecognitionError(handleRetryIntelligentLine, 'Activar micrófono') : null}
         {showTranscript ? <View testID="rehearsal-transcript" style={{ gap: 6, marginTop: 10 }}>
           <Text style={ui.label}>HE OÍDO</Text>
           <Text style={[ui.text, { color: palette.ink }]}>{speechRecognitionTranscript || 'Tu transcripción aparecerá aquí…'}</Text>
@@ -3341,9 +3354,9 @@ export const RehearsalView: React.FC<Props> = ({
           {shouldListenForSceneCommand && isSpeechRecognitionSupported ? <>
             <Text accessibilityLiveRegion="polite" style={ui.text}>{isRecognitionAudioActive
               ? 'Escuchando «adelante»…' : 'Preparando la escucha…'}</Text>
-            {renderRecognitionError(restartRecognition, 'Activar micrófono')}
+            {!recognitionInterrupted ? renderRecognitionError(restartRecognition, 'Activar micrófono') : null}
           </> : null}
-          <Button label="Siguiente escena" onPress={startCurrentScene} />
+          <Button label="Siguiente escena" disabled={!pageVisible} onPress={startCurrentScene} />
         </View>
       </View>
     );
@@ -3545,7 +3558,7 @@ export const RehearsalView: React.FC<Props> = ({
             setIsPaused(true); stopRehearsalSpeech(); stopStandaloneSongAudio(); stopRecognition(); void releaseListening();
           }
         }} style={[ui.button, ui.row, { minWidth: 140 }]}><Icon name={isPaused ? 'play' : 'pause'} color="#fff" /><Text style={ui.buttonText}>{isPaused ? 'Reanudar' : 'Pausa'}</Text></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Siguiente línea" onPress={isIntelligentListenMode && isMyTurn ? handleSkipIntelligentLine : advanceLine} style={ui.icon}><Icon name="skip-next" size={28} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Siguiente línea" disabled={!pageVisible} onPress={isIntelligentListenMode && isMyTurn ? handleSkipIntelligentLine : advanceLine} style={[ui.icon, !pageVisible && { opacity: 0.3 }]}><Icon name="skip-next" size={28} /></TouchableOpacity>
       </View> : null}
     </View>
   );

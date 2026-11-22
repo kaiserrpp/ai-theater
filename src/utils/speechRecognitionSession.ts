@@ -72,6 +72,8 @@ const recognitionErrorMessage = (code?: string, detail = '') => {
         : 'No se ha podido acceder al servicio de reconocimiento de voz. Puedes volver a intentarlo o ensayar sin reconocimiento.';
     case 'audio-capture':
       return 'No se puede usar el micrófono. Comprueba que esté disponible y pulsa Activar micrófono.';
+    case 'interrupted':
+      return 'El sistema ha interrumpido la escucha. Cuando termine la interrupción, vuelve a activar el micrófono.';
     case 'network':
       return 'El servicio de reconocimiento no responde. Comprueba la conexión y pulsa Activar micrófono.';
     case 'language-not-supported':
@@ -278,6 +280,15 @@ export const createSpeechRecognitionSession = (
       current.onspeechend = null;
       current.onerror = (event) => {
         if (recognition !== current) return;
+        if (options.controlledEnd && event.error === 'interrupted') {
+          if (pageVisible && (!enabled || closingForChange)) return;
+          // The SDK will end this capture. Any interrupted utterance must
+          // be repeated, including a provisional voice command.
+          controlledStopRequested = true;
+          resetTranscript();
+          fail(recognitionErrorMessage(event.error), event.error, event.message?.trim() || null);
+          return;
+        }
         if (!pageVisible || /page.*(not visible|no longer visible|became invisible)/i.test(event.message ?? '')) {
           // WebKit stops capture when the page is hidden. This is a lifecycle
           // interruption, not a revoked microphone permission. Some versions
@@ -414,8 +425,9 @@ export const createSpeechRecognitionSession = (
       // Late events must never mutate the new foreground session.
       detach(false); closingForChange = false;
       needsCue = Boolean(options.naturalEnd && usage.started);
+      if (snapshot.errorCode === 'interrupted') blocked = false;
       if (!blocked) {
-        update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false });
+        update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false, error: null, errorCode: null, errorDetail: null });
         start();
       }
     },

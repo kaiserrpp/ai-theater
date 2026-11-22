@@ -74,7 +74,6 @@ function NativePrototype() {
         text: event.results[0]?.transcript || '', isFinal: event.isFinal,
       })),
       ExpoSpeechRecognitionModule.addListener('error', event => {
-        if (event.error === 'interrupted') controller.setForeground(false);
         controller.recognitionEvent('error', { error: recognitionRuntime.recoverLanguageError(event.error) ? 'no-speech' : event.error, message: event.message });
       }),
       ExpoSpeechRecognitionModule.addListener('languagedetection', event => {

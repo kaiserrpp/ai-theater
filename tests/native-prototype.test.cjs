@@ -155,6 +155,63 @@ test('background recovery preserves words and ignores the retired input, while a
   assert.equal(f.starts.length,count);assert.equal(f.spoken.length,0);
 });
 
+test('an iPhone audio interruption keeps the page active and lets the actor retry after native capture closes', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t);
+  await f.open();
+  f.words('Primera parte');
+  f.controller.recognitionEvent('error', { error: 'interrupted', message: 'Audio session was interrupted' });
+  f.words('Resultado tardío', true);
+
+  assert.equal(f.window.__AI_THEATRE_NATIVE_V1__.foreground, true);
+  assert.equal(f.session.getSnapshot().errorCode, 'interrupted');
+  assert.equal(f.session.getSnapshot().isAudioActive, false);
+  assert.equal(f.session.getSnapshot().lastUtterance, null);
+  assert.equal(f.session.getSnapshot().transcript, '');
+  assert.deepEqual(f.calls, [], 'iOS is already closing the interrupted capture');
+  assert.deepEqual(f.session.getDiagnostics().errors.map(error => error.code), ['interrupted']);
+
+  f.session.restart();
+  t.mock.timers.tick(100);
+  await flush();
+  assert.equal(f.starts.length, 1);
+  f.end();
+  t.mock.timers.tick(0);
+  await flush();
+  assert.equal(f.starts.length, 2);
+  f.words('La réplica completa', true);
+  assert.equal(f.session.getSnapshot().transcript, 'La réplica completa');
+  assert.equal(f.session.getSnapshot().error, null);
+});
+
+test('an interruption from the installed legacy bridge waits for a real foreground return', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(t);
+  f.session.configure({ enabled: true, lang: 'es-ES', lineKey: 'scene:2', continuous: false });
+  await flush();
+  f.words('adelante');
+  const { id } = f.events.find(event => event.type === 'recognition.start');
+
+  // The old installer emits visibility false before forwarding the SDK error.
+  f.controller.setForeground(false);
+  f.window.__AI_THEATRE_NATIVE_RECEIVE__({ type: 'recognition.error', id, error: 'interrupted' });
+  f.end();
+  t.mock.timers.tick(20000);
+  await flush();
+  assert.equal(f.session.getSnapshot().errorCode, 'interrupted');
+  assert.equal(f.session.getSnapshot().lastUtterance, null);
+  assert.equal(f.starts.length, 1);
+
+  f.controller.setForeground(true);
+  await flush();
+  assert.equal(f.starts.length, 2);
+  assert.equal(f.session.getSnapshot().error, null);
+  assert.notEqual(getSceneAdvanceRecognitionAction(f.session.getSnapshot()), 'start');
+  f.words('adelante');
+  f.end();
+  assert.equal(getSceneAdvanceRecognitionAction(f.session.getSnapshot()), 'start');
+});
+
 test('cancelling a pending permission cannot open a microphone after the user eventually grants it',async t=>{
   const permission=deferred(),f=fixture(t,{requestPermission:()=>permission.promise});await f.open();
   f.session.stop();permission.resolve(true);await flush();
