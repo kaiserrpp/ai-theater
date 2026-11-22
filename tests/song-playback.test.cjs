@@ -7,7 +7,7 @@ require.extensions['.ts'] = (loadedModule, filename) => loadedModule._compile(ts
   compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
 }).outputText,filename);
 const { createSongPlayback } = require('../src/utils/songPlayback.ts');
-const { groupChoirTracks, selectChoirTrack, selectSongPlaylist } = require('../src/utils/songPlaylistSelection.ts');
+const { groupChoirTracks, resolveChoirPart, restoreChoirPreference, selectChoirTrack, selectSongPlaylist } = require('../src/utils/songPlaylistSelection.ts');
 if(previousLoader)require.extensions['.ts']=previousLoader;else delete require.extensions['.ts'];
 
 const tracks = ['one','two','three'].map(key=>({key,audio:{audioUrl:`https://example.com/${key}.mp3`}}));
@@ -136,4 +136,26 @@ test('the choir queue chooses one exact voice per number and falls back only to 
   assert.deepEqual(selectSongPlaylist(allTracks, {
     scope: 'work', kind: 'all', visibleAuditionIds: [],
   }).map(({ key }) => key), ['solo']);
+});
+
+test('songs use the warmup voice by default and ask for a choir part when the saved voice has no guide', () => {
+  const choice = restoreChoirPreference(null);
+  for (const voice of ['bass', 'mezzo', 'soprano']) {
+    assert.equal(resolveChoirPart(choice, voice), voice);
+  }
+  for (const voice of ['baritone', 'tenor', 'alto']) {
+    assert.equal(resolveChoirPart(choice, voice), null);
+  }
+});
+
+test('an optional choir subdivision follows its warmup voice while previous explicit and per-song settings still work', () => {
+  const forVoice = (stored, voice) => resolveChoirPart(restoreChoirPreference(stored), voice);
+  assert.equal(forVoice('warmup:mezzo-2', 'mezzo'), 'mezzo-2');
+  assert.equal(forVoice('warmup:mezzo-2', 'bass'), 'bass');
+  assert.equal(forVoice('warmup:mezzo-2', 'tenor'), null);
+  assert.equal(forVoice('warmup:unknown', 'soprano'), 'soprano');
+  assert.equal(forVoice('bass-2', 'mezzo'), 'bass-2');
+  assert.equal(forVoice('all', 'mezzo'), 'all');
+  assert.equal(forVoice('', 'mezzo'), null);
+  assert.equal(forVoice('each-song', 'mezzo'), null);
 });

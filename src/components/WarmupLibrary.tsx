@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { validateWarmupCatalog } from '../../shared/warmupCatalog';
@@ -7,9 +6,10 @@ import { importPreparedWarmup } from '../api/preparedWarmup';
 import { useIsAdmin } from '../store/adminSession';
 import type { WarmupCatalog, WarmupExercise, WarmupPreferences, WarmupTrack } from '../types/warmup';
 import { createSongPlayback } from '../utils/songPlayback';
-import { exerciseSettings, noteName, planWarmupExercise, restoreWarmupPreferences, sourceClock, voicePreferences, WARMUP_VOICES } from '../utils/warmup';
+import { exerciseSettings, noteName, planWarmupExercise, sourceClock, voicePreferences, WARMUP_VOICES } from '../utils/warmup';
 import { Button, Chip, Disclosure, Icon, usePracticeTheme } from './PracticeUI';
 import { useWarmupAdvance } from '../hooks/useWarmupAdvance';
+import type { WarmupSettings } from '../hooks/useWarmupPreferences';
 import { vocalPractice } from '../store/vocalPractice';
 import { createWarmupPianoPreparation } from '../utils/warmupPiano';
 import { primeSongPracticeAudio } from '../utils/songPracticeAudio';
@@ -25,11 +25,13 @@ const NoteControl = ({ label, value, onChange, min = 36, max = 84, disabled = fa
   </View>;
 };
 
-export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, onComplete, onSkip }: {
+export const WarmupLibrary = ({ shareId, settings, onBeforePlay, createAudio, autoStart, onComplete, onSkip }: {
   shareId: string | null; onBeforePlay: () => void; createAudio?: () => HTMLAudioElement;
+  settings: WarmupSettings;
   autoStart?: number; onComplete?: () => void; onSkip?: () => void;
 }) => {
   const { ui, palette } = usePracticeTheme();
+  const { preferences, loaded, storageError, save } = settings;
   const isAdmin = useIsAdmin();
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState('');
@@ -37,9 +39,6 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [retry, setRetry] = useState(0);
-  const [preferences, setPreferences] = useState<WarmupPreferences>(() => voicePreferences('baritone'));
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  const [storageError, setStorageError] = useState('');
   const [details, setDetails] = useState(false);
   const [adjusting, setAdjusting] = useState<string | null>(null);
   const [exerciseOpen, setExerciseOpen] = useState<string | null>(null);
@@ -69,27 +68,11 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
   if (!preparation.current) preparation.current = createWarmupPianoPreparation();
   const preparationAbort = useRef<AbortController | null>(null);
   const getAudio = () => media.current ??= createAudio ? createAudio() : new Audio();
-  const saveChain = useRef(Promise.resolve());
-  const storageKey = shareId ? `@teatro_ia_warmup_v1:${shareId}` : null;
   const current = tracks.find(track => track.key === selectedKey);
   const autoStarted = useRef<number | undefined>(undefined);
   const startFull = useRef(() => {});
 
   useEffect(() => () => { preparationAbort.current?.abort(); player.current?.destroy(); player.current = null; preparation.current?.clear(); }, []);
-  useEffect(() => {
-    let cancelled = false;
-    player.current?.stop(); setTracks([]); setWorkout(null); setRest(false); setLoadedKey(null); setPreferences(voicePreferences('baritone'));
-    if (storageKey) void AsyncStorage.getItem(storageKey).then(value => {
-      if (!cancelled && value) setPreferences(restoreWarmupPreferences(JSON.parse(value)));
-    }).catch(() => { if (!cancelled) setStorageError('No se pudo recuperar tu ajuste de calentamiento.'); })
-      .finally(() => { if (!cancelled) setLoadedKey(storageKey); });
-    return () => { cancelled = true; };
-  }, [storageKey]);
-  useEffect(() => {
-    if (!storageKey || loadedKey !== storageKey) return;
-    // Serialize writes so a slow earlier save cannot replace the latest range.
-    saveChain.current = saveChain.current.catch(() => {}).then(() => AsyncStorage.setItem(storageKey, JSON.stringify(preferences))).catch(() => setStorageError('No se pudo guardar el ajuste en este dispositivo.'));
-  }, [loadedKey, preferences, storageKey]);
   useEffect(() => {
     const controller = new AbortController(); let cancelled = false;
     setLoading(Boolean(shareId)); setCatalog(null); setLoadError('');
@@ -107,7 +90,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
 
   const change = (next: WarmupPreferences) => {
     preparationAbort.current?.abort();
-    transition.current++; voice.releaseWarmupMicrophone(); player.current?.stop(); preparation.current?.clear(); setTracks([]); workoutRef.current = null; setWorkout(null); setRest(false); setRetryStep(null); setLaunching(false); setSkipping(false); setError(''); setPreferences(next);
+    transition.current++; voice.releaseWarmupMicrophone(); player.current?.stop(); preparation.current?.clear(); setTracks([]); workoutRef.current = null; setWorkout(null); setRest(false); setRetryStep(null); setLaunching(false); setSkipping(false); setError(''); save(next);
   };
   const adjust = (exercise: WarmupExercise, field: 'start' | 'low' | 'high', value: number) => change({
     ...preferences, exercises: { ...preferences.exercises, [exercise.id]: { ...preferences.exercises[exercise.id], [field]: value } },
@@ -196,9 +179,9 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
   };
   startFull.current = () => { if (catalog) start(catalog.exercises); };
   useEffect(() => {
-    if (autoStart === undefined || autoStarted.current === autoStart || loading || catalog?.status !== 'complete' || loadedKey !== storageKey) return;
+    if (autoStart === undefined || autoStarted.current === autoStart || loading || catalog?.status !== 'complete' || !loaded) return;
     autoStarted.current = autoStart; startFull.current();
-  }, [autoStart, catalog, loadedKey, loading, storageKey]);
+  }, [autoStart, catalog, loaded, loading]);
   useEffect(() => () => { transition.current++; }, []);
 
   return <View testID="warmup-library" style={{ gap: 14 }}>
@@ -220,7 +203,7 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
       <View style={[ui.card, { backgroundColor: palette.soft }]}>
         <Text style={ui.text}>{catalog.exercises.length} ejercicios · Explicación, piano y descanso</Text>
         {catalog.status === 'pilot' ? <Text style={ui.text}>Piloto para contrastar. El resto sigue en reconstrucción.</Text> : null}
-        <Button label="Hacer calentamiento completo" disabled={catalog.status !== 'complete' || loadedKey !== storageKey} onPress={() => start(catalog.exercises)} />
+        <Button label="Hacer calentamiento completo" disabled={catalog.status !== 'complete' || !loaded} onPress={() => start(catalog.exercises)} />
         <Text style={ui.text}>{voiceAdvance && voice.isSupported ? 'En los descansos, di «siguiente» o «adelante».' : 'En cada descanso, pulsa Siguiente ejercicio.'}</Text>
       </View>
       {rest && workout ? <View testID="warmup-rest" style={[ui.card, { backgroundColor: palette.soft }]}>
@@ -244,10 +227,10 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
         if (exercise) start([exercise], tracks[0]?.phase === 'explanation');
       }} /> : null}</View> : null}
       <View style={[ui.card, { padding: 16 }]}><Disclosure title="Tu voz y ajustes" summary={`${WARMUP_VOICES.find(voice => voice.id === preferences.voice)?.label || 'Rango personal'} · ${noteName(preferences.low)}–${noteName(preferences.high)}`}>
-        <View style={ui.wrap}>{WARMUP_VOICES.map(voice => <Chip key={voice.id} label={voice.label} selected={preferences.voice === voice.id} disabled={loadedKey !== storageKey} onPress={() => change(voicePreferences(voice.id))} />)}</View>
+        <View style={ui.wrap}>{WARMUP_VOICES.map(voice => <Chip key={voice.id} label={voice.label} selected={preferences.voice === voice.id} disabled={!loaded} onPress={() => change(voicePreferences(voice.id))} />)}</View>
         <Text style={ui.text}>Cada cuerda es un punto de partida editable. Elige las notas que te resulten cómodas; la etiqueta no determina tu rango personal. Al elegir otra cuerda se restablecen sus valores de partida.</Text>
-        <NoteControl label="Límite grave" value={preferences.low} disabled={loadedKey !== storageKey} onChange={low => change({ ...preferences, low })} />
-        <NoteControl label="Límite agudo" value={preferences.high} disabled={loadedKey !== storageKey} onChange={high => change({ ...preferences, high })} />
+        <NoteControl label="Límite grave" value={preferences.low} disabled={!loaded} onChange={low => change({ ...preferences, low })} />
+        <NoteControl label="Límite agudo" value={preferences.high} disabled={!loaded} onChange={high => change({ ...preferences, high })} />
         <Text style={ui.text}>Se recuerda en este dispositivo. Puedes ajustar por separado el inicio y los límites de cada ejercicio. Do4 = C4 = MIDI 60.</Text>
         <Chip label="Continuar por voz durante los descansos" selected={voiceAdvance} onPress={() => {
           if (voiceAdvance) voice.releaseWarmupMicrophone();
@@ -266,13 +249,13 @@ export const WarmupLibrary = ({ shareId, onBeforePlay, createAudio, autoStart, o
         return <View key={exercise.id} testID="warmup-exercise" style={[ui.card, { padding: 14 }, current?.exerciseId === exercise.id && { borderColor: palette.plum }]}>
           <View style={[ui.row, { gap: 8 }]}><Text style={ui.label}>{index + 1}</Text>
             <Text style={[ui.text, { flex: 1, color: palette.ink, fontWeight: '600' }]}>{exercise.title}</Text>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Escuchar explicación y piano · ${exercise.title}`} disabled={Boolean(problem) || loadedKey !== storageKey} onPress={() => start([exercise])} style={[ui.icon, { width: 44 }]}><Icon name="play-circle-outline" size={30} /></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Escuchar explicación y piano · ${exercise.title}`} disabled={Boolean(problem) || !loaded} onPress={() => start([exercise])} style={[ui.icon, { width: 44 }]}><Icon name="play-circle-outline" size={30} /></TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Opciones de ${exercise.title}`} accessibilityState={{ expanded: exerciseOpen === exercise.id }} onPress={() => setExerciseOpen(value => value === exercise.id ? null : exercise.id)} style={[ui.icon, { width: 44 }]}><Icon name={exerciseOpen === exercise.id ? 'chevron-up' : 'chevron-down'} size={22} /></TouchableOpacity>
           </View>
           {problem ? <Text accessibilityRole="alert" style={ui.error}>{problem}</Text> : null}
           {exerciseOpen === exercise.id ? <View style={{ gap: 12 }}>
           <Text style={ui.text}>Inicio: {noteName(settings.start)} · {summary || 'Rango pendiente de ajustar'}</Text>
-          <Button label={`Sólo piano · ${exercise.title}`} secondary disabled={Boolean(problem) || loadedKey !== storageKey} onPress={() => start([exercise], false)} />
+          <Button label={`Sólo piano · ${exercise.title}`} secondary disabled={Boolean(problem) || !loaded} onPress={() => start([exercise], false)} />
           <Chip label="Repetir ejercicio" selected={repeat} disabled={Boolean(workout && workout.exercises.length > 1)} onPress={() => setRepeat(value => !value)} />
           <Chip label={adjusting === exercise.id ? 'Cerrar ajuste del ejercicio' : 'Ajustar este ejercicio'} selected={adjusting === exercise.id} onPress={() => setAdjusting(value => value === exercise.id ? null : exercise.id)} />
           {adjusting === exercise.id ? <View style={{ gap: 8 }}>

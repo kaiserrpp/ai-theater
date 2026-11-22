@@ -1,7 +1,29 @@
 import type { PlaybackTrack } from './songPlayback';
-import { CHOIR_PARTS, type ChoirPart } from '../../shared/choirParts';
+import { CHOIR_PARTS, normalizeChoirPart, type ChoirPart } from '../../shared/choirParts';
 
 export type SongPlaylistKind = 'all' | 'vocal_guide' | 'karaoke';
+export type ChoirPreference = 'warmup' | 'each-song' | ChoirPart | `warmup:${ChoirPart}`;
+
+export const usesWarmupVoice = (preference: ChoirPreference) =>
+  preference === 'warmup' || preference.startsWith('warmup:');
+
+export const restoreChoirPreference = (stored: string | null): ChoirPreference => {
+  if (stored === '' || stored === 'each-song') return 'each-song';
+  const storedPart = normalizeChoirPart(stored);
+  if (storedPart) return storedPart;
+  if (stored?.startsWith('warmup:')) {
+    const subdivision = normalizeChoirPart(stored.slice('warmup:'.length));
+    if (subdivision?.includes('-')) return `warmup:${subdivision}`;
+  }
+  return 'warmup';
+};
+
+export const resolveChoirPart = (preference: ChoirPreference, warmupVoice: string): ChoirPart | null => {
+  if (!usesWarmupVoice(preference)) return normalizeChoirPart(preference);
+  const subdivision = normalizeChoirPart(preference.slice('warmup:'.length));
+  return subdivision?.startsWith(`${warmupVoice}-`) ? subdivision : normalizeChoirPart(warmupVoice);
+};
+
 interface LibraryTrack extends PlaybackTrack {
   auditionId?: string;
   musicalNumberId?: string;
