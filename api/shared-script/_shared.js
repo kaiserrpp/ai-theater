@@ -2,6 +2,7 @@ const sharedStorage = require('../../server/shared-storage');
 const { head, list, put } = sharedStorage.selectStorage(require('@vercel/blob'));
 const { normalizeAuditionScenes } = require('../../shared/auditionScenes');
 const { normalizeMusicalAuditions } = require('../../shared/musicalAuditions');
+const { normalizeNumberDetails, normalizeNumberAudioDetails } = require('../../shared/musicalNumbers');
 const { normalizeChoirPart } = require('../../shared/choirParts');
 const adminSession = require('../../server/admin-session');
 const { normalizeSharedAppearance } = require('../../shared/workAppearance');
@@ -131,6 +132,7 @@ const normalizeSongAudio = (value, fallbackIndex = 0) => {
     kind,
     guideRoles,
     ...(choirPart ? { choirPart } : {}),
+    ...normalizeNumberAudioDetails(value),
     audioUrl: value.audioUrl.trim(),
     audioFileName:
       typeof value.audioFileName === 'string' && value.audioFileName.trim()
@@ -293,6 +295,7 @@ const normalizeMusicalNumbers = (value, songs = EMPTY_SONGS, options = {}) => {
       return {
         id: musicalNumber.id.trim(),
         title: musicalNumber.title.trim() || 'Numero musical',
+        ...normalizeNumberDetails(musicalNumber),
         sceneTitle: shouldKeepUnlinked ? rawSceneTitle : rawSceneTitle ?? resolvedIndexes.sceneTitle,
         startLineIndex:
           normalizedRange.startLineIndex >= 0

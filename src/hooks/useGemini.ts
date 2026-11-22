@@ -83,17 +83,17 @@ export const useGemini = () => {
   }, [loadPendingJob]);
 
   const analyzeInStages = useCallback(
-    async (localUri: string | null, resumeData?: PendingAnalysisJob | null, documentName?: string | null) => {
+    async (localUri: string | null, resumeData?: PendingAnalysisJob | null, documentName?: string | null, preview = false) => {
       setLoading(true);
       setError(null);
       setStatusText('');
       setSceneTitles(resumeData?.totalChunks ?? []);
       setCurrentChunkIndex(resumeData?.index ?? -1);
-      setScriptData(resumeData?.data ?? null);
+      if (!preview) setScriptData(resumeData?.data ?? null);
 
       try {
         if (Platform.OS === 'web' && localUri && !resumeData) {
-          await clearCheckpoint();
+          if (!preview) await clearCheckpoint();
 
           const finalScript = await analyzeScriptLocally(localUri, {
             callbacks: {
@@ -104,8 +104,8 @@ export const useGemini = () => {
             documentName,
           });
 
-          setScriptData(finalScript);
-          return;
+          if (!preview) setScriptData(finalScript);
+          return finalScript;
         }
 
         const finalScript = await runScriptAnalysis({
@@ -117,14 +117,18 @@ export const useGemini = () => {
             onScenesReady: setSceneTitles,
             onSceneStart: (index) => setCurrentChunkIndex(index),
             onSceneComplete: async (updatedScript, checkpoint) => {
+              if (preview) return;
               setScriptData({ ...updatedScript });
               await persistCheckpoint(checkpoint);
             },
           },
         });
 
-        setScriptData(finalScript);
-        await clearCheckpoint();
+        if (!preview) {
+          setScriptData(finalScript);
+          await clearCheckpoint();
+        }
+        return finalScript;
       } catch (analysisError) {
         const message = analysisError instanceof Error ? analysisError.message : 'Error desconocido.';
         setError(`Error de lectura: ${getFriendlyAnalysisError(message)}`);

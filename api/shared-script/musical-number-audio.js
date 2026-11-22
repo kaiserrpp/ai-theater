@@ -1,5 +1,6 @@
 const { hasSharedStorage } = require('../../server/shared-storage');
 const { normalizeChoirPart } = require('../../shared/choirParts');
+const { normalizeRoles } = require('../../shared/musicalAuditions');
 const {
   hasSongAdminPasswordConfigured,
   isAuthorizedSongAdminRequest,
@@ -9,16 +10,6 @@ const {
 } = require('./_shared');
 
 const AUDIO_KINDS = new Set(['karaoke', 'vocal_guide']);
-
-const normalizeGuideRoles = (value) => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(value.filter((role) => typeof role === 'string' && role.trim()))
-  );
-};
 
 const normalizeTimelineCues = (value) => {
   if (!Array.isArray(value)) {
@@ -172,18 +163,28 @@ const readAudioAssignment = (payload, kind, allowEmptyGuideRoles, existingAudio)
   const requestedPart = payload.choirPart === undefined ? existingAudio?.choirPart : payload.choirPart;
   const choirPart = normalizeChoirPart(requestedPart);
   const guideRoles = Array.isArray(payload.guideRoles)
-    ? normalizeGuideRoles(payload.guideRoles)
+    ? normalizeRoles(payload.guideRoles)
     : existingAudio?.guideRoles ?? [];
+  const audibleRoles = Array.isArray(payload.audibleRoles)
+    ? normalizeRoles(payload.audibleRoles)
+    : payload.audibleRoles === null ? null : existingAudio?.audibleRoles;
 
   if (requestedPart != null && !choirPart) return { error: 'Selecciona una cuerda vocal válida.' };
   if (choirPart && (kind !== 'vocal_guide' || guideRoles.length)) {
     return { error: 'Una pista de coro debe ser una guía con una cuerda vocal.' };
   }
-  if (!choirPart && !allowEmptyGuideRoles && !guideRoles.length) {
+  if (!choirPart && !allowEmptyGuideRoles && !guideRoles.length && payload.audibleRoles === undefined && !existingAudio) {
     return { error: 'Selecciona al menos un personaje para este audio.' };
   }
-  return { guideRoles, choirPart };
+  return { guideRoles, choirPart, audibleRoles };
 };
+
+const areCuesInRange = (cues, number, guion) => cues.every((cue) => {
+  const line = guion[cue.targetLineIndex];
+  return number.startLineIndex >= 0 && cue.targetLineIndex >= number.startLineIndex &&
+    cue.targetLineIndex <= number.endLineIndex && line && line.p !== 'ESCENA_SISTEMA' &&
+    cue.targetKind === (line.p === 'CANCION_SISTEMA' || line.k === 'song' ? 'song' : 'dialogue');
+});
 
 const ensureConfigured = (response) => {
   if (!hasSharedStorage()) {
@@ -265,7 +266,7 @@ module.exports = async (request, response) => {
         return;
       }
 
-      const { guideRoles, choirPart } = assignment;
+      const { guideRoles, choirPart, audibleRoles } = assignment;
       if (choirPart && musicalNumber.audios.some((audio) => audio.choirPart === choirPart && audio.audioUrl === audioUrl)) {
         response.status(200).json(manifest);
         return;
@@ -277,6 +278,7 @@ module.exports = async (request, response) => {
         kind,
         guideRoles,
         ...(choirPart ? { choirPart } : {}),
+        audibleRoles,
         audioUrl,
         audioFileName:
           typeof payload.audioFileName === 'string' && payload.audioFileName.trim()
@@ -290,6 +292,9 @@ module.exports = async (request, response) => {
         timelineCues: normalizeTimelineCues(payload.timelineCues),
         updatedAt: now,
       };
+      if (!areCuesInRange(nextAudio.timelineCues, musicalNumber, manifest.scriptData.guion)) {
+        return response.status(400).json({ error: 'Las marcas deben apuntar a bloques del tramo elegido.' });
+      }
 
       const updatedManifest = await writeManifest({
         ...manifest,
@@ -329,6 +334,7 @@ module.exports = async (request, response) => {
             ? {
                 ...candidate,
                 audios: candidate.audios.filter((audio) => audio.id !== audioId),
+                referenceAudioId: candidate.referenceAudioId === audioId ? undefined : candidate.referenceAudioId,
                 updatedAt: now,
               }
             : candidate
@@ -354,6 +360,15 @@ module.exports = async (request, response) => {
       return;
     }
 
+    const nextAudioUrl = typeof payload.audioUrl === 'string' && payload.audioUrl.trim() ? payload.audioUrl.trim() : existingAudio.audioUrl;
+    const savesTimeline = Array.isArray(payload.timelineCues);
+    const timelineCues = savesTimeline ? normalizeTimelineCues(payload.timelineCues) : existingAudio.timelineCues || [];
+    if (savesTimeline && !areCuesInRange(timelineCues, musicalNumber, manifest.scriptData.guion)) {
+      return response.status(400).json({ error: 'Las marcas deben apuntar a bloques del tramo elegido.' });
+    }
+    const timelineNeedsReview = timelineCues.length > 0 &&
+      (nextAudioUrl !== existingAudio.audioUrl || (!savesTimeline && existingAudio.timelineNeedsReview));
+
     const updatedManifest = await writeManifest({
       ...manifest,
       musicalNumbers: (manifest.musicalNumbers || []).map((candidate) =>
@@ -368,10 +383,8 @@ module.exports = async (request, response) => {
                       kind,
                       guideRoles: assignment.guideRoles,
                       choirPart: assignment.choirPart,
-                      audioUrl:
-                        typeof payload.audioUrl === 'string' && payload.audioUrl.trim()
-                          ? payload.audioUrl.trim()
-                          : existingAudio.audioUrl,
+                      audibleRoles: assignment.audibleRoles,
+                      audioUrl: nextAudioUrl,
                       audioFileName:
                         typeof payload.audioFileName === 'string' && payload.audioFileName.trim()
                           ? payload.audioFileName.trim()
@@ -381,9 +394,8 @@ module.exports = async (request, response) => {
                           ? payload.contentType.trim()
                           : existingAudio.contentType,
                       size: typeof payload.size === 'number' ? payload.size : existingAudio.size,
-                      timelineCues: Array.isArray(payload.timelineCues)
-                        ? normalizeTimelineCues(payload.timelineCues)
-                        : existingAudio.timelineCues || [],
+                      timelineCues,
+                      timelineNeedsReview,
                       updatedAt: now,
                     }
                   : audio

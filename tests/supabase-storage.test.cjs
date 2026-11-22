@@ -183,6 +183,66 @@ test('a choir upload registers once, survives older metadata edits and republish
   assert.deepEqual(roleGuide.guideRoles, ['ANA']);
 }));
 
+test('attaching a script and editing a musical number preserve recordings and invalidate stale cue timing', async () => fixture(async () => {
+  const work = structuredClone(snapshot.works.d92b33981047.manifest);
+  work.shareId = 'number-plan-qa';
+  const original = work.musicalNumbers.find((item) => item.title === 'In The Heights');
+  assert.ok(original.audios.length);
+  await shared.writeManifest(work);
+  const request = async (name, method, payload) => {
+    const result = response();
+    await require('../api/shared-script/' + name)({ method, headers: {},
+      body: { shareId: work.shareId, password: 'test-admin', ...payload } }, result);
+    return result;
+  };
+  const script = { obra: work.scriptData.obra, personajes: ['ANA', 'LUIS'], guion: [
+    { p: 'ESCENA_SISTEMA', t: 'La plaza' }, { p: 'CANCION_SISTEMA', t: 'Primera estrofa' },
+    { p: 'LUIS', t: 'Ya estamos aquí.' }, { p: 'CANCION_SISTEMA', t: 'Segunda estrofa' },
+    { p: 'ANA', t: 'Hasta mañana.' }, { p: 'ESCENA_SISTEMA', t: 'La casa' }, { p: 'ANA', t: 'Ya llegué.' },
+  ] };
+  const attached = await request('publish', 'POST', { scriptData: script, attachInitialScript: true });
+  assert.equal(attached.statusCode, 200);
+  assert.deepEqual(attached.body.manifest.musicalNumbers, work.musicalNumbers);
+  assert.deepEqual(attached.body.manifest.musicalAuditions, work.musicalAuditions);
+  assert.equal((await request('publish', 'POST', { scriptData: script, attachInitialScript: true })).statusCode, 409);
+  const base = { musicalNumberId: original.id, title: original.title, sceneTitle: 'La plaza', startLineIndex: 1, endLineIndex: 3 };
+  assert.equal((await request('musical-number', 'PATCH', { ...base, endLineIndex: 6 })).statusCode, 400);
+  const linked = await request('musical-number', 'PATCH', {
+    ...base, roles: ['ANA', 'LUIS'], lyrics: 'Letra común', referenceAudioId: original.audios[0].id,
+  });
+  assert.equal(linked.statusCode, 200);
+  const choose = (manifest) => manifest.musicalNumbers.find(({ id }) => id === original.id);
+  assert.deepEqual(choose(linked.body).roles, ['ANA', 'LUIS']);
+  assert.equal(choose(linked.body).lyrics, 'Letra común');
+  assert.deepEqual(choose(linked.body).audios, original.audios);
+  const track = { musicalNumberId: original.id, label: 'Parte de Luis', kind: 'vocal_guide',
+    audioUrl: 'https://fixture.supabase.co/luis.m4a', guideRoles: ['LUIS'], audibleRoles: ['LUIS'] };
+  const marks = [
+    { id: 'dialogue', atMs: 3000, targetLineIndex: 2, targetKind: 'dialogue' },
+    { id: 'song', atMs: 5500, targetLineIndex: 3, targetKind: 'song' },
+  ];
+  const registered = await request('musical-number-audio', 'POST', { ...track, timelineCues: marks });
+  assert.equal(registered.statusCode, 200);
+  const audioId = choose(registered.body).audios[0].id;
+  const retaken = await request('musical-number-audio', 'PATCH', { ...track, audioId, audioUrl: track.audioUrl + '?replacement' });
+  assert.equal(choose(retaken.body).audios[0].timelineNeedsReview, true);
+  assert.deepEqual(choose(retaken.body).audios[0].audibleRoles, ['LUIS']);
+  const synchronized = await request('musical-number-audio', 'PATCH', {
+    musicalNumberId: original.id, audioId, label: track.label, timelineCues: marks,
+  });
+  assert.equal(choose(synchronized.body).audios[0].timelineNeedsReview, undefined);
+  const longer = await request('musical-number', 'PATCH', { ...base, endLineIndex: 4 });
+  assert.equal(choose(longer.body).audios[0].timelineNeedsReview, true);
+  const reordered = { ...script, guion: [script.guion[0], { p: 'ANA', t: 'Una introducción.' }, ...script.guion.slice(1)] };
+  const republished = await request('publish', 'POST', { scriptData: reordered, musicalNumbers: work.musicalNumbers });
+  const detached = choose(republished.body.manifest);
+  assert.equal(detached.startLineIndex, -1);
+  assert.equal(detached.referenceAudioId, original.audios[0].id);
+  assert.equal(detached.lyrics, 'Letra común');
+  assert.equal(detached.audios[0].id, audioId);
+  assert.equal(detached.audios[0].timelineNeedsReview, true);
+}));
+
 test('musical-number changes and rehearsal reports use the new private store and retain the original materials', async () => fixture(async state => {
   const work = structuredClone(snapshot.works.d92b33981047.manifest);
   // A separate scriptless work exercises adding the next musical number.

@@ -1,5 +1,5 @@
 import { Dialogue, SCENE_SYSTEM_SPEAKER, SONG_SYSTEM_SPEAKER } from '../types/script';
-import { SharedSongAsset } from '../types/sharedScript';
+import { SharedMusicalNumberAsset, SharedSongAsset } from '../types/sharedScript';
 
 export const isSceneMarker = (line?: Dialogue | null) => line?.p === SCENE_SYSTEM_SPEAKER;
 export const isSongCue = (line?: Dialogue | null) => line?.p === SONG_SYSTEM_SPEAKER || line?.k === 'song';
@@ -56,7 +56,8 @@ const songMatchesRoles = (
 export const getScenesForRolesAndSongs = (
   guion: Dialogue[],
   myRoles: string[],
-  sharedSongs: SharedSongAsset[] = []
+  sharedSongs: SharedSongAsset[] = [],
+  musicalNumbers: SharedMusicalNumberAsset[] = [],
 ) => {
   const selectedRoles = new Set(myRoles);
   const matchingScenes = new Map<string, boolean>();
@@ -85,6 +86,12 @@ export const getScenesForRolesAndSongs = (
       matchingScenes.set(currentScene, true);
     }
   });
+
+  for (const number of musicalNumbers) {
+    if (!number.sceneTitle || number.startLineIndex < 0 || !matchingScenes.has(number.sceneTitle)) continue;
+    const roles = number.roles ?? number.audios.filter((audio) => !audio.choirPart).flatMap((audio) => audio.guideRoles);
+    if (roles.some((role) => selectedRoles.has(role))) matchingScenes.set(number.sceneTitle, true);
+  }
 
   return Array.from(matchingScenes.entries())
     .filter(([, hasMatchingRole]) => hasMatchingRole)

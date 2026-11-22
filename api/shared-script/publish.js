@@ -1,4 +1,5 @@
 const { hasSharedStorage } = require('../../server/shared-storage');
+const { isRangeInScene, markTimelinesForReview } = require('../../shared/musicalNumbers');
 const {
   MANIFEST_VERSION,
   buildShareUrl,
@@ -54,22 +55,34 @@ module.exports = async (request, response) => {
 
     if (payload.shareId) {
       previousManifest = await readManifest(shareId);
+      if (payload.attachInitialScript === true && previousManifest.scriptData.guion.length) {
+        return response.status(409).json({ error: 'La obra ya tiene un guion. Vuelve a abrirla.' });
+      }
       createdAt = typeof previousManifest.createdAt === 'string' ? previousManifest.createdAt : now;
     }
 
     const normalizedSongs = normalizeSongs(payload.songs);
     const normalizedNumbers = normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs, { allowUnlinked: true });
-    const auditionNumberIds = new Set((previousManifest?.musicalAuditions || []).map((cut) => cut.musicalNumberId));
     const previousNumbers = previousManifest?.musicalNumbers || [];
-    const musicalNumbers = normalizedNumbers.map((number) => {
-      const choirAudios = previousNumbers.find((previous) => previous.id === number.id)?.audios.filter((audio) => audio.choirPart) ?? [];
-      if (!choirAudios.length) return number;
-      const choirAudioIds = new Set(choirAudios.map((audio) => audio.id));
-      return { ...number, audios: [...choirAudios, ...number.audios.filter((audio) => !choirAudioIds.has(audio.id))] };
+    const previousIds = new Set(previousNumbers.map((number) => number.id));
+    // Number details and tracks are edited by their own endpoints. A script
+    // publish can carry data from an earlier client or an earlier read.
+    const musicalNumbers = previousNumbers.map((number) => {
+      if (number.startLineIndex < 0) return number;
+      const { sceneTitle, startLineIndex, endLineIndex } = number;
+      const oldLines = previousManifest.scriptData.guion.slice(startLineIndex, endLineIndex + 1);
+      const newLines = payload.scriptData.guion.slice(startLineIndex, endLineIndex + 1);
+      if (isRangeInScene(payload.scriptData.guion, sceneTitle, startLineIndex, endLineIndex) &&
+          JSON.stringify(oldLines) === JSON.stringify(newLines)) return number;
+      return {
+        ...number,
+        startLineIndex: -1,
+        endLineIndex: -1,
+        songIds: [],
+        audios: markTimelinesForReview(number.audios),
+        updatedAt: now,
+      };
     });
-    const missingNumbers = previousNumbers.filter((number) =>
-      (auditionNumberIds.has(number.id) || number.audios.some((audio) => audio.choirPart))
-      && !musicalNumbers.some((candidate) => candidate.id === number.id));
 
     const manifest = {
       version: MANIFEST_VERSION,
@@ -81,7 +94,7 @@ module.exports = async (request, response) => {
       scriptData: payload.scriptData,
       mergeMap: normalizeMergeMap(payload.mergeMap),
       songs: normalizedSongs,
-      musicalNumbers: [...musicalNumbers, ...missingNumbers],
+      musicalNumbers: [...musicalNumbers, ...normalizedNumbers.filter((number) => !previousIds.has(number.id))],
       // Only the dedicated scene endpoint edits this collection. In particular,
       // publishing from an older client must not erase existing audition scenes.
       auditionScenes: previousManifest?.auditionScenes || [],

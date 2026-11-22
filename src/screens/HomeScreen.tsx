@@ -15,7 +15,8 @@ import { AdminAccessPanel } from '../components/AdminAccessPanel';
 import { AuditionScenesPanel } from '../components/AuditionScenesPanel';
 import { useIsAdmin } from '../store/adminSession';
 import { normalizeAuditionScenes } from '../../shared/auditionScenes';
-import { normalizeMusicalAuditions } from '../../shared/musicalAuditions';
+import { normalizeMusicalAuditions, normalizeRoles } from '../../shared/musicalAuditions';
+import { useNumberKaraokeChoices } from '../hooks/useNumberKaraokeChoices';
 import { ScreenWrapper } from '../components/ScreenWrapper';
 import { SongManagerPanel } from '../components/SongManagerPanel';
 import { VersionBadge } from '../components/VersionBadge';
@@ -37,6 +38,7 @@ import { LAST_WORK_STORAGE_KEY } from '../store/storageKeys';
 import { parsePreferredWork, resolveStartupWork, type PreferredWork } from '../utils/preferredWork';
 import { AppearanceProvider } from '../store/appearance';
 import { appearanceWorkKey } from '../store/workAppearances';
+import { getNumberAudios, getNumberCharacters, getNumberRoles } from '../utils/musicalNumberPractice';
 
 const createEmptyRehearsalCheckpoints = (): RehearsalCheckpointMap => ({
   ALL: null,
@@ -186,6 +188,9 @@ export const HomeScreen = () => {
   const [isManagingSongs, setIsManagingSongs] = useState(false);
   const [pendingResumeMode, setPendingResumeMode] = useState<RehearsalMode | null>(null);
   const [sharedScript, setSharedScript] = useState<SharedScriptManifest | null>(null);
+  const activeWorkRef = useRef<string | null>(null);
+  activeWorkRef.current = sharedScript?.shareId ?? null;
+  const karaokeChoices = useNumberKaraokeChoices(sharedScript?.shareId ?? null);
   const [sharedStatusText, setSharedStatusText] = useState('');
   const [sharedError, setSharedError] = useState<string | null>(null);
   const [isSharingScript, setIsSharingScript] = useState(false);
@@ -212,6 +217,10 @@ export const HomeScreen = () => {
   } : undefined);
 
   const displayScriptData = mergedScriptData ?? scriptData;
+  const workCharacters = useMemo(() => normalizeRoles(normalizeRoleSelection([
+    ...(displayScriptData?.personajes ?? []),
+    ...(sharedScript?.musicalNumbers.flatMap((number) => getNumberRoles(number, getNumberAudios(number, sharedScript.songs))) ?? []),
+  ], mergeMap)), [displayScriptData?.personajes, sharedScript, mergeMap]);
   const effectiveError = sharedError ?? error;
   const effectiveLoading = loading || isLoadingSharedScript || isSharingScript;
   const songLaunchCount = sharedScript
@@ -312,11 +321,11 @@ export const HomeScreen = () => {
     }
 
     if (pendingResumeMode === 'MINE') {
-      return getScenesForRolesAndSongs(displayScriptData.guion, myRoles, sharedScript?.songs ?? []);
+      return getScenesForRolesAndSongs(displayScriptData.guion, myRoles, sharedScript?.songs ?? [], sharedScript?.musicalNumbers ?? []);
     }
 
     return selectedScenes;
-  }, [displayScriptData, myRoles, pendingResumeMode, selectedScenes, sharedScript?.songs]);
+  }, [displayScriptData, myRoles, pendingResumeMode, selectedScenes, sharedScript?.songs, sharedScript?.musicalNumbers]);
 
   const pendingResumeTotalLines = useMemo(() => {
     if (!displayScriptData || pendingResumeScenes.length === 0) {
@@ -341,7 +350,7 @@ export const HomeScreen = () => {
     }
 
     setMyRoles((previousRoles) =>
-      previousRoles.filter((role) => displayScriptData.personajes.includes(role))
+      normalizeRoles(previousRoles.flatMap((role) => getNumberCharacters([role], workCharacters)))
     );
     setSelectedScenes((previousScenes) =>
       previousScenes.filter((sceneTitle) => currentSceneTitles.includes(sceneTitle))
@@ -349,7 +358,7 @@ export const HomeScreen = () => {
     setActiveRehearsalScenes((previousScenes) =>
       previousScenes.filter((sceneTitle) => currentSceneTitles.includes(sceneTitle))
     );
-  }, [currentSceneTitles, displayScriptData]);
+  }, [currentSceneTitles, displayScriptData, workCharacters]);
 
   useEffect(() => {
     if (mergeSource && !mergeSourceCandidates.includes(mergeSource)) {
@@ -399,12 +408,12 @@ export const HomeScreen = () => {
       }
 
       if (mode === 'MINE') {
-        return getScenesForRolesAndSongs(displayScriptData.guion, myRoles, sharedScript?.songs ?? []);
+        return getScenesForRolesAndSongs(displayScriptData.guion, myRoles, sharedScript?.songs ?? [], sharedScript?.musicalNumbers ?? []);
       }
 
       return selectedScenes;
     },
-    [displayScriptData, myRoles, selectedScenes, sharedScript?.songs]
+    [displayScriptData, myRoles, selectedScenes, sharedScript?.songs, sharedScript?.musicalNumbers]
   );
 
   const sortScenesByScriptOrder = useCallback(
@@ -624,6 +633,44 @@ export const HomeScreen = () => {
       setIsSharingScript(false);
     }
   }, [isAdmin, currentScriptFileName, mergeMap, scriptData, sharedScript]);
+
+  const handleAttachScriptToWork = async () => {
+    if (!isAdmin || !sharedScript || sharedScript.scriptData.guion.length || effectiveLoading) return;
+    const { shareId } = sharedScript;
+    let selectedUri: string | undefined;
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', base64: false });
+      const file = picked.assets?.[0];
+      selectedUri = file?.uri;
+      if (!file || activeWorkRef.current !== shareId) return;
+      setSharedError(null);
+      setIsSharingScript(true);
+      setSharedStatusText('Leyendo el guion de la obra…');
+      const parsed = await analyzeInStages(file.uri, undefined, file.name, true);
+      if (!parsed || activeWorkRef.current !== shareId) return;
+      if (!parsed.guion.length) throw new Error('El PDF no contiene un guion que se pueda cargar.');
+      const freshest = await fetchSharedScript(shareId);
+      if (activeWorkRef.current !== shareId) return;
+      const script = { ...parsed, obra: freshest.scriptData.obra };
+      setSharedStatusText('Guardando el guion en esta obra…');
+      const { manifest } = await publishSharedScript({
+        shareId, attachInitialScript: true, fileName: file.name,
+        scriptData: script, mergeMap: freshest.mergeMap,
+        songs: syncSharedSongsWithScript(script.guion, freshest.songs),
+        musicalNumbers: freshest.musicalNumbers,
+      });
+      if (activeWorkRef.current !== shareId) return;
+      handleSharedScriptManifestUpdate(manifest);
+      setCurrentScriptFileName(manifest.fileName);
+      loadSavedScript(manifest.scriptData);
+      setSharedStatusText('Guion cargado. Ya puedes vincular el tramo de cada número.');
+    } catch (cause) {
+      if (activeWorkRef.current === shareId) setSharedError(cause instanceof Error ? cause.message : 'No se pudo cargar el guion.');
+    } finally {
+      if (selectedUri?.startsWith('blob:')) URL.revokeObjectURL(selectedUri);
+      if (selectedUri) setIsSharingScript(false);
+    }
+  };
 
   const handleCreateScriptlessSharedScript = async () => {
     if (!isAdmin) return;
@@ -921,6 +968,7 @@ export const HomeScreen = () => {
           filterScenes={activeRehearsalScenes}
           sharedSongs={sharedScript?.songs ?? []}
           musicalNumbers={sharedScript?.musicalNumbers ?? []}
+          karaokeChoices={karaokeChoices}
           scriptId={getScriptIdentity(displayScriptData)}
           scriptTitle={displayScriptData.obra}
           shareId={sharedScript?.shareId ?? null}
@@ -937,6 +985,7 @@ export const HomeScreen = () => {
   if (!isManagingWorkspace && !isManagingSongs) {
     return <ScreenWrapper><PracticeHome script={displayScriptData} manifest={sharedScript}
       myRoles={myRoles} onRolesChange={setMyRoles} sceneTitles={currentSceneTitles}
+      workCharacters={workCharacters} karaokeChoices={karaokeChoices}
       homeVoiceReady={homeVoiceReady} onStartDirect={() => { setVoiceRehearsalStart(true); launchRehearsal(lastRehearsalMode && getScenesForMode(lastRehearsalMode).length ? lastRehearsalMode : 'MINE', 0); }}
       onStart={(mode) => { setVoiceRehearsalStart(false); requestRehearsalStart(mode); }} onStartScene={(scene) => {
         setVoiceRehearsalStart(false);
@@ -961,6 +1010,10 @@ export const HomeScreen = () => {
     <ScreenWrapper>
       <ManagementHeader onBack={() => { setIsManagingWorkspace(false); setIsManagingSongs(false); }} />
       <ScrollView contentContainerStyle={styles.container}>
+        {isManagingWorkspace && isAdmin && sharedScript && !sharedScript.scriptData.guion.length ? <View style={styles.section}>
+          <Button label="Cargar guion PDF en esta obra" disabled={effectiveLoading} onPress={() => void handleAttachScriptToWork()} />
+          {effectiveLoading && progressText ? <Text style={styles.selectionPreview}>{progressText}</Text> : null}
+        </View> : null}
         <View style={styles.titlePanel}>
           <Text style={styles.title}>AI-Theatre</Text>
         </View>

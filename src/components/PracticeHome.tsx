@@ -18,10 +18,15 @@ import { SongPracticeLibrary } from './SongPracticeLibrary';
 import { VersionBadge } from './VersionBadge';
 import { HomeVoiceStart } from './HomeVoiceStart';
 import { feedbackOutbox, useFeedbackOutbox } from '../store/feedbackOutbox';
+import type { NumberKaraokeChoices } from '../hooks/useNumberKaraokeChoices';
+import type { NumberRehearsalRequest } from '../utils/musicalNumberPractice';
+import { getScriptIdentity } from '../utils/scriptIdentity';
+import { RehearsalView } from './RehearsalView';
 
 interface Props {
   script: ScriptData | null; manifest: SharedScriptManifest | null;
   myRoles: string[]; onRolesChange: (roles: string[]) => void; sceneTitles: string[];
+  workCharacters: string[]; karaokeChoices: NumberKaraokeChoices;
   onStart: (mode: RehearsalMode) => void; onStartScene: (scene: string) => void;
   resumeMode: RehearsalMode | null; onResume: () => void; resumeChoice: React.ReactNode;
   sharedWorks: SharedScriptListItem[]; savedWorks: SavedScript[];
@@ -43,6 +48,8 @@ export const PracticeHome = (props: Props) => {
   const [scope, setScope] = useState<'auditions' | 'work'>('auditions');
   const [mine, setMine] = useState(true);
   const [inRehearsal, setInRehearsal] = useState(false);
+  const [numberSession, setNumberSession] = useState<NumberRehearsalRequest | null>(null);
+  const practicingNumber = Boolean(numberSession && props.script && props.manifest?.musicalNumbers.some((number) => number.id === numberSession.numberId));
   const [lastAudition, setLastAudition] = useState<{ id: string; mode: AuditionRehearsalMode } | null>(null);
   const [canResumeAudition, setCanResumeAudition] = useState(false);
   const [initialAudition, setInitialAudition] = useState<string | null>(null);
@@ -84,7 +91,7 @@ export const PracticeHome = (props: Props) => {
   }, [sheet]);
   useEffect(() => {
     let cancelled = false;
-    setLastAudition(null); setInitialAudition(null); setInRehearsal(false);
+    setLastAudition(null); setInitialAudition(null); setInRehearsal(false); setNumberSession(null);
     if (shareId) void AsyncStorage.getItem(`@teatro_ia_last_audition:${shareId}`).then((stored) => {
       const value = stored ? JSON.parse(stored) : null;
       if (!cancelled && value && typeof value.id === 'string' && (value.mode === 'MINE' || value.mode === 'ALL')) setLastAudition(value);
@@ -108,7 +115,8 @@ export const PracticeHome = (props: Props) => {
     return () => { cancelled = true; };
   }, [inRehearsal, lastAudition, lastScene, shareId, tab]);
   const openAuditions = (id: string | null = null) => { setDirectAuditionRequest(0); setScope('auditions'); setInitialAudition(id); setTab('scenes'); };
-  const workScenes = mine ? getScenesForRolesAndSongs(props.script?.guion ?? [], props.myRoles, props.manifest?.songs ?? []) : props.sceneTitles;
+  const workScenes = mine ? getScenesForRolesAndSongs(props.script?.guion ?? [], props.myRoles,
+    props.manifest?.songs ?? [], props.manifest?.musicalNumbers ?? []) : props.sceneTitles;
   const canResume = Boolean(canResumeAudition || props.resumeMode);
   const openMaterials = (action: () => void) => { setSheet(null); action(); };
   const startByVoice = () => {
@@ -119,7 +127,7 @@ export const PracticeHome = (props: Props) => {
   };
 
   return <View style={{ flex: 1 }}>
-    {!inRehearsal ? <View style={ui.header}>
+    {!inRehearsal && !practicingNumber ? <View style={ui.header}>
       <View style={{ flex: 1, gap: 3 }}><View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><Text style={[ui.label, { fontSize: 11, letterSpacing: 2 }]}>AI · THEATRE</Text><VersionBadge compact /></View><Text numberOfLines={1} style={{ fontSize: 16, color: palette.ink, fontWeight: '600' }}>{props.script?.obra || 'Tu espacio de ensayo'}</Text></View>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Más opciones" onPress={() => setSheet('menu')} style={ui.icon}><Icon name="dots-horizontal" size={28} /></TouchableOpacity>
     </View> : null}
@@ -161,11 +169,18 @@ export const PracticeHome = (props: Props) => {
       </ScrollView>}
     </View> : null}
 
-    {!inRehearsal ? <SongPracticeLibrary manifest={props.manifest} active={tab === 'songs'} defaultRoles={props.myRoles}
-      onActivityChange={setMusicBusy}
+    {!inRehearsal ? <SongPracticeLibrary manifest={props.manifest} active={tab === 'songs' && !practicingNumber}
+      guion={props.script?.guion ?? []} defaultRoles={props.myRoles} karaokeChoices={props.karaokeChoices}
+      onChooseWorkRoles={() => setSheet('roles')} onRehearseNumber={setNumberSession} onActivityChange={setMusicBusy}
       onUpdated={props.onManifestUpdated} onManageWork={props.onSongMaterials} onOpen={() => setTab('songs')} openEditorRequest={auditionUploadRequest} /> : null}
-    {!inRehearsal ? <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: palette.rule, backgroundColor: palette.surface, paddingTop: 6, paddingBottom: 10 }}>
-      {([['home', 'Inicio', 'home-outline'], ['scenes', 'Escenas', 'drama-masks'], ['songs', 'Canciones', 'music-note-outline']] as const).map(([value, label, icon]) => <TouchableOpacity key={value} accessibilityRole="tab" aria-selected={tab === value} accessibilityState={{ selected: tab === value }} onPress={() => chooseTab(value)} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 4 }}><Icon name={icon} color={tab === value ? palette.plum : palette.sub} /><Text style={{ fontSize: 12, fontWeight: tab === value ? '700' : '500', color: tab === value ? palette.plum : palette.sub }}>{label}</Text></TouchableOpacity>)}
+    {practicingNumber && numberSession && props.script && props.manifest ? <RehearsalView
+      key={numberSession.numberId} guion={props.script.guion} myRoles={numberSession.character ? [numberSession.character] : []}
+      filterScenes={[]} numberSession={numberSession} karaokeChoices={props.karaokeChoices}
+      sharedSongs={props.manifest.songs} musicalNumbers={props.manifest.musicalNumbers}
+      scriptId={getScriptIdentity(props.script)} scriptTitle={props.script.obra} shareId={props.manifest.shareId}
+      onExit={() => setNumberSession(null)} onCompleted={() => setNumberSession(null)} /> : null}
+    {!inRehearsal && !practicingNumber ? <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: palette.rule, backgroundColor: palette.surface, paddingTop: 6, paddingBottom: 10 }}>
+      {([['home', 'Inicio', 'home-outline'], ['scenes', 'Escenas', 'drama-masks'], ['songs', 'Canciones', 'music-note-outline']] as const).map(([value, label, icon]) => <TouchableOpacity key={value} accessibilityRole="tab" accessibilityLabel={label} aria-selected={tab === value} accessibilityState={{ selected: tab === value }} onPress={() => chooseTab(value)} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 4 }}><Icon name={icon} color={tab === value ? palette.plum : palette.sub} /><Text style={{ fontSize: 12, fontWeight: tab === value ? '700' : '500', color: tab === value ? palette.plum : palette.sub }}>{label}</Text></TouchableOpacity>)}
     </View> : null}
 
     <Sheet title="Más opciones" visible={sheet === 'menu'} onClose={() => setSheet(null)}>
@@ -206,7 +221,10 @@ export const PracticeHome = (props: Props) => {
       <Button label="Crear o importar una obra" secondary onPress={() => openMaterials(props.onMaterials)} />
     </Sheet>
     <Sheet title="Mis personajes" visible={sheet === 'roles'} onClose={() => setSheet(null)}>
-      <Text style={ui.text}>Elige uno o varios. Tu selección se recuerda para esta obra.</Text><View style={ui.wrap}>{props.script?.personajes.map((role) => <Chip key={role} label={role} selected={props.myRoles.includes(role)} onPress={() => props.onRolesChange(props.myRoles.includes(role) ? props.myRoles.filter((item) => item !== role) : [...props.myRoles, role])} />)}</View><Button label="Listo" onPress={() => setSheet(null)} />
+      <Text style={ui.text}>El primer personaje elegido será el predeterminado para los números musicales.</Text>
+      <View style={ui.wrap}>{props.workCharacters.map((role) => <Chip key={role} label={role} selected={props.myRoles.includes(role)} onPress={() => props.onRolesChange(props.myRoles.includes(role) ? props.myRoles.filter((item) => item !== role) : [...props.myRoles, role])} />)}</View>
+      {props.myRoles.length ? <Text style={ui.text}>Personaje predeterminado · {props.myRoles[0]}</Text> : null}
+      <Button label="Listo" onPress={() => setSheet(null)} />
     </Sheet>
     <Sheet title="Compartir obra" visible={sheet === 'share'} onClose={() => setSheet(null)}>
       <Text style={ui.text}>Envía este enlace al grupo para que puedan abrir los materiales y ensayar.</Text>

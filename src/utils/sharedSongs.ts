@@ -1,4 +1,5 @@
 import { normalizeChoirPart } from '../../shared/choirParts';
+import { normalizeNumberDetails, normalizeNumberAudioDetails } from '../../shared/musicalNumbers';
 import { Dialogue } from '../types/script';
 import {
   MusicalTimelineCue,
@@ -97,6 +98,7 @@ const normalizeSongAudios = (song: unknown): SharedSongAudioAsset[] => {
           kind,
           guideRoles,
           ...(choirPart ? { choirPart } : {}),
+          ...normalizeNumberAudioDetails(audio),
           audioUrl: typeof audio.audioUrl === 'string' ? audio.audioUrl : '',
           audioFileName:
             typeof audio.audioFileName === 'string' && audio.audioFileName.trim().length > 0
@@ -343,6 +345,7 @@ export const syncSharedMusicalNumbersWithScript = (
           typeof musicalNumber.title === 'string' && musicalNumber.title.trim().length > 0
             ? musicalNumber.title.trim()
             : 'Numero musical',
+        ...normalizeNumberDetails(musicalNumber),
         sceneTitle: shouldKeepUnlinked ? sceneTitle : sceneTitle ?? linkedSongs[0]?.sceneTitle ?? null,
         startLineIndex: normalizedRange.startLineIndex,
         endLineIndex: normalizedRange.endLineIndex,

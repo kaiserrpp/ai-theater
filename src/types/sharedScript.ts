@@ -18,12 +18,14 @@ export interface SharedSongAudioAsset {
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
+  audibleRoles?: string[] | null;
   choirPart?: ChoirPart;
   audioUrl: string;
   audioFileName: string | null;
   contentType: string | null;
   size: number | null;
   timelineCues: MusicalTimelineCue[];
+  timelineNeedsReview?: boolean;
   updatedAt: string;
 }
 
@@ -40,6 +42,9 @@ export interface SharedSongAsset {
 export interface SharedMusicalNumberAsset {
   id: string;
   title: string;
+  roles?: string[];
+  lyrics?: string;
+  referenceAudioId?: string;
   sceneTitle: string | null;
   startLineIndex: number;
   endLineIndex: number;
@@ -117,6 +122,7 @@ export interface SharedScriptListItem {
 export interface SharedScriptPublishInput {
   password?: string;
   shareId?: string | null;
+  attachInitialScript?: boolean;
   fileName: string;
   scriptData: ScriptData;
   mergeMap: CharacterMergeMap;
@@ -164,6 +170,8 @@ export interface SharedMusicalNumberCreateInput {
   shareId: string;
   password?: string;
   title: string;
+  roles?: string[];
+  lyrics?: string;
   sceneTitle: string;
   startLineIndex: number;
   endLineIndex: number;
@@ -174,6 +182,9 @@ export interface SharedMusicalNumberUpdateInput {
   musicalNumberId: string;
   password?: string;
   title: string;
+  roles?: string[];
+  lyrics?: string;
+  referenceAudioId?: string | null;
   sceneTitle: string;
   startLineIndex: number;
   endLineIndex: number;
@@ -197,6 +208,7 @@ export interface SharedMusicalNumberAudioRegistrationInput {
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
+  audibleRoles?: string[] | null;
   choirPart?: ChoirPart | null;
   audioUrl: string;
   audioFileName?: string | null;
@@ -218,6 +230,7 @@ export interface SharedMusicalNumberAudioUpdateInput {
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
+  audibleRoles?: string[] | null;
   choirPart?: ChoirPart | null;
   audioUrl?: string | null;
   audioFileName?: string | null;
