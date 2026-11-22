@@ -20,11 +20,23 @@ const fixture = async action => {
     assert.equal(headers.get('apikey'), 'test-server-only-key');
     state.calls.push({ pathname, method, body });
     if (state.fail) return json({ message: 'Service unavailable', statusCode: '503' }, 503);
+    if (pathname === 'bucket' && method === 'GET') return json([...state.buckets.values()]);
     if (pathname === 'bucket' && method === 'POST') {
       const value = JSON.parse(body); state.buckets.set(value.id, { id: value.id, public: value.public, file_size_limit: value.file_size_limit }); return json(value);
     }
     if (pathname.startsWith('bucket/')) return state.buckets.has(pathname.slice(7)) ? json(state.buckets.get(pathname.slice(7))) : json({ message: 'Missing bucket', statusCode: '404' }, 404);
     if (pathname.startsWith('object/upload/sign/')) return json({ url: '/' + pathname + '?token=path-limited-test-token' });
+    if (pathname.startsWith('object/list-v2/')) {
+      const root = pathname.slice('object/list-v2/'.length) + '/';
+      const matching = [...state.objects].filter(([key]) => key.startsWith(root));
+      const offset = Number(JSON.parse(body).cursor || 0);
+      const hasNext = matching.length > offset + 1;
+      return json({ folders: [], hasNext, nextCursor: hasNext ? String(offset + 1) : null,
+        objects: matching.slice(offset, offset + 1).map(([key, value]) => ({
+          id: key, name: key.slice(root.length), metadata: { size: Buffer.byteLength(value) },
+        })),
+      });
+    }
     if (pathname.startsWith('object/list/')) {
       const query = JSON.parse(body), prefix = query.prefix ? query.prefix + '/' : '', result = new Map();
       for (const [key, text] of state.objects) {
@@ -98,6 +110,77 @@ test('provisioning is authenticated and idempotent, keeps JSON private and never
   const changed = JSON.parse(state.objects.get(key)); changed.scriptData.obra = 'Later edit'; state.objects.set(key, JSON.stringify(changed));
   const second = response(); await setup(req, second); assert.equal(second.statusCode, 200); assert.equal(second.body.seeded, 0);
   assert.equal(JSON.parse(state.objects.get(key)).scriptData.obra, 'Later edit'); assert.equal(second.body.mediaFilesCopied, 0);
+}));
+
+test('administrative storage usage counts file bytes across pages and buckets without fetching their contents', async () => fixture(async state => {
+  const setup = require('../server/storage-setup');
+  const request = { method: 'POST', query: { action: 'usage' }, headers: {} };
+  const denied = response();
+  await setup(request, denied);
+  assert.equal(denied.statusCode, 401);
+  assert.equal(state.calls.length, 0);
+  state.buckets.set('theatre-media', { id: 'theatre-media', public: true });
+  state.buckets.set('theatre-data', { id: 'theatre-data', public: false });
+  state.objects.set('theatre-media/shared-scripts/production/work/track.m4a', 'music');
+  state.objects.set('theatre-data/shared-scripts/production/work/manifest.json', 'á');
+  state.objects.set('theatre-data/shared-scripts/production/work/report.json', 'report');
+  const reported = response();
+  await setup({ ...request, headers: { 'x-song-admin-password': 'test-admin' } }, reported);
+  assert.equal(reported.statusCode, 200);
+  assert.deepEqual(reported.body, { bytes: 13, buckets: [
+    { bucket: 'theatre-media', bytes: 5, objects: 1 }, { bucket: 'theatre-data', bytes: 8, objects: 2 },
+  ] });
+  assert.ok(state.calls.every(({ pathname }) => pathname === 'bucket' || pathname.startsWith('object/list-v2/')));
+}));
+
+test('a choir upload registers once, survives older metadata edits and republishing, and retains other audio', async () => fixture(async state => {
+  const work = structuredClone(snapshot.works.d92b33981047.manifest);
+  const number = work.musicalNumbers.find((candidate) => candidate.audios.length);
+  assert.ok(number);
+  work.shareId = 'choir-qa';
+  await shared.writeManifest(work);
+  const handler = require('../api/shared-script/musical-number-audio');
+  const input = { shareId: work.shareId, musicalNumberId: number.id, password: 'test-admin',
+    kind: 'vocal_guide', label: 'Mezzo 1', guideRoles: [], choirPart: 'mezzo-1',
+    audioUrl: 'https://fixture.supabase.co/storage/v1/object/public/theatre-media/choir.m4a',
+  };
+  const apply = async (method, payload) => {
+    const result = response();
+    await handler({ method, headers: {}, body: payload }, result);
+    return result;
+  };
+  const writes = () => state.calls.filter(({ method, pathname }) => method === 'POST' && pathname.endsWith('/manifest.json')).length;
+  for (const invalid of [{ choirPart: 'mezzo-0' }, { guideRoles: ['ANA'] }, { kind: 'karaoke' }]) {
+    assert.equal((await apply('POST', { ...input, ...invalid })).statusCode, 400);
+  }
+  assert.equal(writes(), 1);
+  const saved = await apply('POST', input);
+  assert.equal(saved.statusCode, 200);
+  const savedNumber = saved.body.musicalNumbers.find(({ id }) => id === number.id);
+  const [guide, ...existing] = savedNumber.audios;
+  assert.equal(guide.choirPart, 'mezzo-1');
+  assert.deepEqual(existing, number.audios);
+  assert.deepEqual((await apply('POST', input)).body, saved.body);
+  assert.equal(writes(), 2);
+
+  const { choirPart: _oldClientOmission, ...olderInput } = input;
+  const edited = await apply('PATCH', { ...olderInput, audioId: guide.id, label: 'Mezzo 1 · Ensayo' });
+  assert.equal(edited.statusCode, 200);
+  const updated = edited.body.musicalNumbers.find(({ id }) => id === number.id).audios[0];
+  assert.equal(updated.choirPart, 'mezzo-1');
+  assert.equal(updated.label, 'Mezzo 1 · Ensayo');
+
+  const republished = response();
+  await require('../api/shared-script/publish')({ method: 'POST', headers: {}, body: { ...work, password: 'test-admin' } }, republished);
+  assert.equal(republished.statusCode, 200);
+  assert.deepEqual(republished.body.manifest.musicalNumbers.find(({ id }) => id === number.id).audios, [updated, ...existing]);
+  assert.deepEqual(republished.body.manifest.musicalAuditions, work.musicalAuditions);
+
+  const reassigned = await apply('PATCH', { ...input, audioId: guide.id, choirPart: null, guideRoles: ['ANA'] });
+  assert.equal(reassigned.statusCode, 200);
+  const [roleGuide] = reassigned.body.musicalNumbers.find(({ id }) => id === number.id).audios;
+  assert.equal(roleGuide.choirPart, undefined);
+  assert.deepEqual(roleGuide.guideRoles, ['ANA']);
 }));
 
 test('musical-number changes and rehearsal reports use the new private store and retain the original materials', async () => fixture(async state => {

@@ -1,6 +1,7 @@
 import { ScriptData } from './script';
 import type { CharacterMergeMap } from '../utils/scriptRoleMerges';
 import type { SharedWorkAppearance } from '../../shared/workAppearance';
+import type { ChoirPart } from '../../shared/choirParts';
 
 export type SharedSongAudioKind = 'karaoke' | 'vocal_guide';
 export type MusicalTimelineCueTargetKind = 'dialogue' | 'song';
@@ -17,6 +18,7 @@ export interface SharedSongAudioAsset {
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
+  choirPart?: ChoirPart;
   audioUrl: string;
   audioFileName: string | null;
   contentType: string | null;
@@ -195,6 +197,7 @@ export interface SharedMusicalNumberAudioRegistrationInput {
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
+  choirPart?: ChoirPart | null;
   audioUrl: string;
   audioFileName?: string | null;
   contentType?: string | null;
@@ -215,6 +218,7 @@ export interface SharedMusicalNumberAudioUpdateInput {
   label: string;
   kind: SharedSongAudioKind;
   guideRoles: string[];
+  choirPart?: ChoirPart | null;
   audioUrl?: string | null;
   audioFileName?: string | null;
   contentType?: string | null;

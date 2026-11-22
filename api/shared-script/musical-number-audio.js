@@ -1,4 +1,5 @@
 const { hasSharedStorage } = require('../../server/shared-storage');
+const { normalizeChoirPart } = require('../../shared/choirParts');
 const {
   hasSongAdminPasswordConfigured,
   isAuthorizedSongAdminRequest,
@@ -167,6 +168,23 @@ const resolveMusicalNumber = (manifest, payload) => {
 const resolveKind = (value, fallbackKind = 'karaoke') =>
   AUDIO_KINDS.has(value) ? value : fallbackKind;
 
+const readAudioAssignment = (payload, kind, allowEmptyGuideRoles, existingAudio) => {
+  const requestedPart = payload.choirPart === undefined ? existingAudio?.choirPart : payload.choirPart;
+  const choirPart = normalizeChoirPart(requestedPart);
+  const guideRoles = Array.isArray(payload.guideRoles)
+    ? normalizeGuideRoles(payload.guideRoles)
+    : existingAudio?.guideRoles ?? [];
+
+  if (requestedPart != null && !choirPart) return { error: 'Selecciona una cuerda vocal válida.' };
+  if (choirPart && (kind !== 'vocal_guide' || guideRoles.length)) {
+    return { error: 'Una pista de coro debe ser una guía con una cuerda vocal.' };
+  }
+  if (!choirPart && !allowEmptyGuideRoles && !guideRoles.length) {
+    return { error: 'Selecciona al menos un personaje para este audio.' };
+  }
+  return { guideRoles, choirPart };
+};
+
 const ensureConfigured = (response) => {
   if (!hasSharedStorage()) {
     response.status(500).json({ error: 'Falta configurar BLOB_READ_WRITE_TOKEN en Vercel.' });
@@ -236,15 +254,20 @@ module.exports = async (request, response) => {
       const kind = resolveKind(payload.kind);
       const label =
         typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : '';
-      const guideRoles = normalizeGuideRoles(payload.guideRoles);
-
       if (!label) {
         response.status(400).json({ error: 'Pon un nombre al audio antes de guardarlo.' });
         return;
       }
 
-      if (!allowEmptyGuideRoles && guideRoles.length === 0) {
-        response.status(400).json({ error: 'Selecciona al menos un personaje para este audio.' });
+      const assignment = readAudioAssignment(payload, kind, allowEmptyGuideRoles);
+      if (assignment.error) {
+        response.status(400).json({ error: assignment.error });
+        return;
+      }
+
+      const { guideRoles, choirPart } = assignment;
+      if (choirPart && musicalNumber.audios.some((audio) => audio.choirPart === choirPart && audio.audioUrl === audioUrl)) {
+        response.status(200).json(manifest);
         return;
       }
 
@@ -253,6 +276,7 @@ module.exports = async (request, response) => {
         label: resolveLabel(label, kind),
         kind,
         guideRoles,
+        ...(choirPart ? { choirPart } : {}),
         audioUrl,
         audioFileName:
           typeof payload.audioFileName === 'string' && payload.audioFileName.trim()
@@ -319,17 +343,14 @@ module.exports = async (request, response) => {
     const kind = resolveKind(payload.kind, existingAudio.kind);
     const nextLabel =
       typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : '';
-    const nextGuideRoles = Array.isArray(payload.guideRoles)
-      ? normalizeGuideRoles(payload.guideRoles)
-      : existingAudio.guideRoles;
-
     if (!nextLabel) {
       response.status(400).json({ error: 'Pon un nombre al audio antes de guardarlo.' });
       return;
     }
 
-    if (!allowEmptyGuideRoles && nextGuideRoles.length === 0) {
-      response.status(400).json({ error: 'Selecciona al menos un personaje para este audio.' });
+    const assignment = readAudioAssignment(payload, kind, allowEmptyGuideRoles, existingAudio);
+    if (assignment.error) {
+      response.status(400).json({ error: assignment.error });
       return;
     }
 
@@ -345,7 +366,8 @@ module.exports = async (request, response) => {
                       ...audio,
                       label: resolveLabel(nextLabel, kind, existingAudio.label),
                       kind,
-                      guideRoles: nextGuideRoles,
+                      guideRoles: assignment.guideRoles,
+                      choirPart: assignment.choirPart,
                       audioUrl:
                         typeof payload.audioUrl === 'string' && payload.audioUrl.trim()
                           ? payload.audioUrl.trim()

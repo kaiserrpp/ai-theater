@@ -1,3 +1,4 @@
+import { normalizeChoirPart } from '../../shared/choirParts';
 import { Dialogue } from '../types/script';
 import {
   MusicalTimelineCue,
@@ -78,35 +79,41 @@ const normalizeSongAudios = (song: unknown): SharedSongAudioAsset[] => {
   if (Array.isArray(candidate.audios)) {
     return candidate.audios
       .filter((audio): audio is SharedSongAudioAsset => Boolean(audio) && typeof audio === 'object')
-      .map((audio, index) => ({
-        id:
-          typeof audio.id === 'string' && audio.id.trim().length > 0
-            ? audio.id
-            : `audio-${index + 1}`,
-        label:
-          typeof audio.label === 'string' && audio.label.trim().length > 0
-            ? audio.label.trim()
-            : normalizeSongAudioKind(audio.kind) === 'vocal_guide'
-              ? 'Vocal guide'
-              : 'Karaoke',
-        kind: normalizeSongAudioKind(audio.kind),
-        guideRoles: normalizeGuideRoles(audio.guideRoles),
-        audioUrl: typeof audio.audioUrl === 'string' ? audio.audioUrl : '',
-        audioFileName:
-          typeof audio.audioFileName === 'string' && audio.audioFileName.trim().length > 0
-            ? audio.audioFileName
-            : null,
-        contentType:
-          typeof audio.contentType === 'string' && audio.contentType.trim().length > 0
-            ? audio.contentType
-            : null,
-        size: typeof audio.size === 'number' ? audio.size : null,
-        timelineCues: normalizeTimelineCues(audio.timelineCues),
-        updatedAt:
-          typeof audio.updatedAt === 'string' && audio.updatedAt.trim().length > 0
-            ? audio.updatedAt
-            : new Date().toISOString(),
-      }))
+      .map((audio, index) => {
+        const kind = normalizeSongAudioKind(audio.kind);
+        const guideRoles = normalizeGuideRoles(audio.guideRoles);
+        const choirPart = kind === 'vocal_guide' && !guideRoles.length ? normalizeChoirPart(audio.choirPart) : null;
+        return {
+          id:
+            typeof audio.id === 'string' && audio.id.trim().length > 0
+              ? audio.id
+              : `audio-${index + 1}`,
+          label:
+            typeof audio.label === 'string' && audio.label.trim().length > 0
+              ? audio.label.trim()
+              : kind === 'vocal_guide'
+                ? 'Vocal guide'
+                : 'Karaoke',
+          kind,
+          guideRoles,
+          ...(choirPart ? { choirPart } : {}),
+          audioUrl: typeof audio.audioUrl === 'string' ? audio.audioUrl : '',
+          audioFileName:
+            typeof audio.audioFileName === 'string' && audio.audioFileName.trim().length > 0
+              ? audio.audioFileName
+              : null,
+          contentType:
+            typeof audio.contentType === 'string' && audio.contentType.trim().length > 0
+              ? audio.contentType
+              : null,
+          size: typeof audio.size === 'number' ? audio.size : null,
+          timelineCues: normalizeTimelineCues(audio.timelineCues),
+          updatedAt:
+            typeof audio.updatedAt === 'string' && audio.updatedAt.trim().length > 0
+              ? audio.updatedAt
+              : new Date().toISOString(),
+        };
+      })
       .filter((audio) => audio.audioUrl.length > 0);
   }
 

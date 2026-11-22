@@ -37,10 +37,10 @@ export const Icon = ({ name, size = 24, color }: { name: React.ComponentProps<ty
   const { palette } = useAppearance();
   return <MaterialCommunityIcons name={name} size={size} color={color ?? palette.plum} />;
 };
-export const Button = ({ label, onPress, secondary, disabled }: { label: string; onPress: () => void; secondary?: boolean; disabled?: boolean }) => {
+export const Button = ({ label, onPress, secondary, disabled, accessibilityLabel }: { label: string; onPress: () => void; secondary?: boolean; disabled?: boolean; accessibilityLabel?: string }) => {
   const { ui } = usePracticeTheme();
   return (
-  <TouchableOpacity accessibilityRole="button" disabled={disabled} onPress={onPress} style={[ui.button, secondary && ui.secondary, disabled && { opacity: 0.4 }]}>
+  <TouchableOpacity accessibilityRole="button" accessibilityLabel={accessibilityLabel} disabled={disabled} onPress={onPress} style={[ui.button, secondary && ui.secondary, disabled && { opacity: 0.4 }]}>
     <Text style={[ui.buttonText, secondary && ui.secondaryText]}>{label}</Text>
   </TouchableOpacity>
   );

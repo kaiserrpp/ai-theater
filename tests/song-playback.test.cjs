@@ -7,7 +7,7 @@ require.extensions['.ts'] = (loadedModule, filename) => loadedModule._compile(ts
   compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
 }).outputText,filename);
 const { createSongPlayback } = require('../src/utils/songPlayback.ts');
-const { selectSongPlaylist } = require('../src/utils/songPlaylistSelection.ts');
+const { groupChoirTracks, selectChoirTrack, selectSongPlaylist } = require('../src/utils/songPlaylistSelection.ts');
 if(previousLoader)require.extensions['.ts']=previousLoader;else delete require.extensions['.ts'];
 
 const tracks = ['one','two','three'].map(key=>({key,audio:{audioUrl:`https://example.com/${key}.mp3`}}));
@@ -107,4 +107,33 @@ test('explicit all, vocal-guide and karaoke groups keep their order and never mi
   assert.deepEqual(select('auditions','vocal_guide'),['cut-ana-guide']);assert.deepEqual(select('auditions','karaoke'),['cut-ana-karaoke']);
   assert.deepEqual(select('auditions','vocal_guide',['ana','luis']),['cut-ana-guide','cut-luis-guide']);
   assert.deepEqual(select('auditions','all',[]),[]);
+});
+
+test('the choir queue chooses one exact voice per number and falls back only to its undivided part', () => {
+  const makeTrack = (musicalNumberId, choirPart, auditionId) => ({
+    key: `${musicalNumberId}-${choirPart}`, musicalNumberId, auditionId,
+    audio: { kind: 'vocal_guide', choirPart },
+  });
+  const allTracks = [
+    makeTrack('one', 'soprano'),
+    makeTrack('one', 'soprano-1'),
+    makeTrack('one', 'soprano-2'),
+    makeTrack('two', 'soprano'),
+    makeTrack('two', 'all'),
+    makeTrack('three', 'soprano-2'),
+    makeTrack('three', 'mezzo-1'),
+    makeTrack('four', 'soprano-1', 'audition-four'),
+    { key: 'solo', musicalNumberId: 'one', audio: { kind: 'vocal_guide', guideRoles: ['ANA'] } },
+  ];
+  const groups = groupChoirTracks(allTracks);
+  const choirQueue = (part) => groups.map(({ versions }) => selectChoirTrack(versions, part)?.key);
+  assert.deepEqual(groups.map(({ id }) => id), ['one', 'two', 'three']);
+  assert.deepEqual(choirQueue('soprano-1'), ['one-soprano-1', 'two-soprano', undefined]);
+  assert.deepEqual(choirQueue('soprano-2'), ['one-soprano-2', 'two-soprano', 'three-soprano-2']);
+  assert.deepEqual(choirQueue('soprano'), ['one-soprano', 'two-soprano', undefined]);
+  assert.deepEqual(choirQueue('all'), [undefined, 'two-all', undefined]);
+  assert.deepEqual(choirQueue(null), [undefined, undefined, undefined]);
+  assert.deepEqual(selectSongPlaylist(allTracks, {
+    scope: 'work', kind: 'all', visibleAuditionIds: [],
+  }).map(({ key }) => key), ['solo']);
 });

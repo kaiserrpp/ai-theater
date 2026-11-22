@@ -2,6 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { CHOIR_PART_LABELS, CHOIR_PARTS, type ChoirPart } from '../../shared/choirParts';
 import {
   Alert,
   type GestureResponderEvent,
@@ -56,6 +57,10 @@ interface Props {
 }
 
 const DEFAULT_UPLOAD_KIND: SharedSongAudioKind = 'karaoke';
+const MUSICAL_NUMBER_AUDIO_TYPES = ['karaoke', 'vocal_guide', 'choir'] as const;
+type MusicalNumberAudioType = typeof MUSICAL_NUMBER_AUDIO_TYPES[number];
+const formatNumberAudioKind = (audio: SharedSongAudioAsset) =>
+  audio.choirPart ? `Coro · ${CHOIR_PART_LABELS[audio.choirPart]}` : formatSongAudioKind(audio.kind);
 type SongManagerViewMode = 'menu' | 'my-songs' | 'all-songs' | 'manage';
 type SongPlaybackMode = SharedSongAudioKind | 'all';
 type ManageSection = 'song-blocks' | 'musical-numbers';
@@ -379,8 +384,9 @@ export const SongManagerPanel: React.FC<Props> = ({
   const [isSavingMusicalNumber, setIsSavingMusicalNumber] = useState(false);
   const [deletingMusicalNumberId, setDeletingMusicalNumberId] = useState<string | null>(null);
   const [musicalNumberAudioLabel, setMusicalNumberAudioLabel] = useState('');
-  const [musicalNumberAudioKind, setMusicalNumberAudioKind] =
-    useState<SharedSongAudioKind>(DEFAULT_UPLOAD_KIND);
+  const [musicalNumberAudioType, setMusicalNumberAudioType] =
+    useState<MusicalNumberAudioType>(DEFAULT_UPLOAD_KIND);
+  const [musicalNumberChoirPart, setMusicalNumberChoirPart] = useState<ChoirPart | null>(null);
   const [musicalNumberGuideRoles, setMusicalNumberGuideRoles] = useState<string[]>([]);
   const [isMusicalNumberUploading, setIsMusicalNumberUploading] = useState(false);
   const [musicalNumberUploadProgress, setMusicalNumberUploadProgress] = useState<number | null>(null);
@@ -408,6 +414,7 @@ export const SongManagerPanel: React.FC<Props> = ({
   const sharedSongs = useMemo(() => sharedScript?.songs ?? [], [sharedScript]);
   const musicalNumbers = useMemo(() => sharedScript?.musicalNumbers ?? [], [sharedScript]);
   const isScriptlessLibrary = (sharedScript?.scriptData.guion.length ?? 0) === 0;
+  const isChoirAudio = musicalNumberAudioType === 'choir';
   const orderedMusicalNumbers = useMemo(
     () =>
       [...musicalNumbers].sort((leftNumber, rightNumber) => {
@@ -597,7 +604,8 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   useEffect(() => {
     setMusicalNumberAudioLabel('');
-    setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberAudioType(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberChoirPart(null);
     setMusicalNumberGuideRoles([]);
     setMusicalNumberUploadProgress(null);
     setUploadStatusMessage(null);
@@ -1363,7 +1371,8 @@ export const SongManagerPanel: React.FC<Props> = ({
 
   const resetMusicalNumberAudioForm = useCallback(() => {
     setMusicalNumberAudioLabel('');
-    setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberAudioType(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberChoirPart(null);
     setMusicalNumberGuideRoles([]);
     setMusicalNumberUploadProgress(null);
     setEditingMusicalNumberAudioId(null);
@@ -1825,7 +1834,8 @@ export const SongManagerPanel: React.FC<Props> = ({
   const startEditingMusicalNumberAudio = (audio: SharedSongAudioAsset) => {
     setEditingMusicalNumberAudioId(audio.id);
     setMusicalNumberAudioLabel(audio.label);
-    setMusicalNumberAudioKind(audio.kind);
+    setMusicalNumberAudioType(audio.choirPart ? 'choir' : audio.kind);
+    setMusicalNumberChoirPart(audio.choirPart ?? null);
     setMusicalNumberGuideRoles(audio.guideRoles);
     setMusicalNumberUploadProgress(null);
     setUploadStatusMessage(null);
@@ -1833,17 +1843,24 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsMusicalNumberAudioFormVisible(true);
   };
 
+  const choirPart = isChoirAudio ? musicalNumberChoirPart : null;
+  const musicalNumberAudioMetadata = {
+    label: musicalNumberAudioLabel.trim() || (choirPart ? CHOIR_PART_LABELS[choirPart] : ''),
+    kind: musicalNumberAudioType === 'choir' ? 'vocal_guide' as const : musicalNumberAudioType,
+    guideRoles: isChoirAudio ? [] : musicalNumberGuideRoles,
+    choirPart,
+  };
+  const validateMusicalNumberAudio = () =>
+    isChoirAudio && !choirPart
+      ? 'Selecciona la cuerda vocal de esta pista.'
+      : validateAudioMetadata({ ...musicalNumberAudioMetadata, requireGuideRoles: !isScriptlessLibrary && !isChoirAudio });
+
   const handleUploadMusicalNumberAudio = async () => {
     if (!sharedScript || !selectedMusicalNumber) {
       return;
     }
 
-    const nextLabel = musicalNumberAudioLabel.trim();
-    const validationError = validateAudioMetadata({
-      label: nextLabel,
-      guideRoles: musicalNumberGuideRoles,
-      requireGuideRoles: !isScriptlessLibrary,
-    });
+    const validationError = validateMusicalNumberAudio();
     if (validationError) {
       setManagerError(validationError);
       return;
@@ -1869,9 +1886,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         startLineIndex: selectedMusicalNumber.startLineIndex,
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
-        label: nextLabel,
-        kind: musicalNumberAudioKind,
-        guideRoles: musicalNumberGuideRoles,
+        ...musicalNumberAudioMetadata,
         audioUrl: uploadedAudio.url,
         audioFileName: uploadedAudio.fileName,
         contentType: uploadedAudio.contentType,
@@ -1894,12 +1909,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
-    const nextLabel = musicalNumberAudioLabel.trim();
-    const validationError = validateAudioMetadata({
-      label: nextLabel,
-      guideRoles: musicalNumberGuideRoles,
-      requireGuideRoles: !isScriptlessLibrary,
-    });
+    const validationError = validateMusicalNumberAudio();
     if (validationError) {
       setManagerError(validationError);
       return;
@@ -1919,9 +1929,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
-        label: nextLabel,
-        kind: musicalNumberAudioKind,
-        guideRoles: musicalNumberGuideRoles,
+        ...musicalNumberAudioMetadata,
       });
 
       await refreshSharedManifest(manifest);
@@ -1940,12 +1948,7 @@ export const SongManagerPanel: React.FC<Props> = ({
       return;
     }
 
-    const nextLabel = musicalNumberAudioLabel.trim();
-    const validationError = validateAudioMetadata({
-      label: nextLabel,
-      guideRoles: musicalNumberGuideRoles,
-      requireGuideRoles: !isScriptlessLibrary,
-    });
+    const validationError = validateMusicalNumberAudio();
     if (validationError) {
       setManagerError(validationError);
       return;
@@ -1971,9 +1974,7 @@ export const SongManagerPanel: React.FC<Props> = ({
         endLineIndex: selectedMusicalNumber.endLineIndex,
         songIds: selectedMusicalNumber.songIds,
         audioId: editingMusicalNumberAudio.id,
-        label: nextLabel,
-        kind: musicalNumberAudioKind,
-        guideRoles: musicalNumberGuideRoles,
+        ...musicalNumberAudioMetadata,
         audioUrl: uploadedAudio.url,
         audioFileName: uploadedAudio.fileName,
         contentType: uploadedAudio.contentType,
@@ -2231,7 +2232,8 @@ export const SongManagerPanel: React.FC<Props> = ({
     setIsMusicalNumberAudioFormVisible(false);
     setEditingMusicalNumberAudioId(null);
     setMusicalNumberAudioLabel('');
-    setMusicalNumberAudioKind(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberAudioType(DEFAULT_UPLOAD_KIND);
+    setMusicalNumberChoirPart(null);
     setMusicalNumberGuideRoles([]);
     setMusicalNumberUploadProgress(null);
     setSyncingMusicalNumberAudioId(null);
@@ -2401,7 +2403,7 @@ export const SongManagerPanel: React.FC<Props> = ({
                 <View key={audio.id} style={styles.audioChip}>
                   <Text style={styles.audioChipTitle}>{audio.label}</Text>
                   <Text style={styles.audioChipMeta}>
-                    {formatSongAudioKind(audio.kind)}
+                    {formatNumberAudioKind(audio)}
                     {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
                   </Text>
                   {audio.audioFileName ? (
@@ -2896,7 +2898,7 @@ export const SongManagerPanel: React.FC<Props> = ({
               <View key={audio.id} style={styles.audioChip}>
                 <Text style={styles.audioChipTitle}>{audio.label}</Text>
                 <Text style={styles.audioChipMeta}>
-                  {formatSongAudioKind(audio.kind)}
+                  {formatNumberAudioKind(audio)}
                   {audio.guideRoles.length > 0 ? ` · ${audio.guideRoles.join(', ')}` : ''}
                 </Text>
                 {audio.audioFileName ? (
@@ -2996,37 +2998,59 @@ export const SongManagerPanel: React.FC<Props> = ({
             </Text>
             <Text style={styles.formLabel}>Tipo de audio</Text>
             <View style={styles.kindActions}>
-              {(['karaoke', 'vocal_guide'] as SharedSongAudioKind[]).map((kind) => (
+              {MUSICAL_NUMBER_AUDIO_TYPES.map((type) => (
                 <TouchableOpacity
-                  key={`number-audio-kind-inline-${kind}`}
+                  key={type}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: musicalNumberAudioType === type }}
                   style={[
                     styles.kindButton,
-                    musicalNumberAudioKind === kind && styles.kindButtonSelected,
+                    musicalNumberAudioType === type && styles.kindButtonSelected,
                   ]}
-                  onPress={() => setMusicalNumberAudioKind(kind)}
+                  onPress={() => setMusicalNumberAudioType(type)}
                 >
                   <Text
                     style={[
                       styles.kindButtonText,
-                      musicalNumberAudioKind === kind && styles.kindButtonTextSelected,
+                      musicalNumberAudioType === type && styles.kindButtonTextSelected,
                     ]}
                   >
-                    {formatSongAudioKind(kind)}
+                    {type === 'choir' ? 'Coro por cuerda' : formatSongAudioKind(type)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {isChoirAudio ? (
+              <>
+                <Text style={styles.formLabel}>Cuerda vocal</Text>
+                <View style={styles.roleTags}>
+                  {CHOIR_PARTS.map((part) => (
+                    <TouchableOpacity
+                      key={part}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: choirPart === part }}
+                      style={[styles.roleTag, choirPart === part && styles.roleTagSelected]}
+                      onPress={() => setMusicalNumberChoirPart(part)}
+                    >
+                      <Text style={[styles.roleTagText, choirPart === part && styles.roleTagTextSelected]}>
+                        {CHOIR_PART_LABELS[part]}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            ) : null}
             <Text style={styles.formLabel}>Etiqueta</Text>
             <TextInput
+              accessibilityLabel="Etiqueta del audio"
               value={musicalNumberAudioLabel}
               onChangeText={setMusicalNumberAudioLabel}
-              placeholder={buildDefaultAudioLabel(
-                musicalNumberAudioKind,
-                musicalNumberGuideRoles
-              )}
+              placeholder={isChoirAudio
+                ? choirPart ? CHOIR_PART_LABELS[choirPart] : 'Nombre de la versión'
+                : buildDefaultAudioLabel(musicalNumberAudioMetadata.kind, musicalNumberGuideRoles)}
               style={styles.textInput}
             />
-            {!isScriptlessLibrary ? (
+            {!isScriptlessLibrary && !isChoirAudio ? (
               <>
                 <Text style={styles.formLabel}>Personajes que cantan en este audio</Text>
                 <View style={styles.roleTags}>

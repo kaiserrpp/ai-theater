@@ -2,6 +2,7 @@ const sharedStorage = require('../../server/shared-storage');
 const { head, list, put } = sharedStorage.selectStorage(require('@vercel/blob'));
 const { normalizeAuditionScenes } = require('../../shared/auditionScenes');
 const { normalizeMusicalAuditions } = require('../../shared/musicalAuditions');
+const { normalizeChoirPart } = require('../../shared/choirParts');
 const adminSession = require('../../server/admin-session');
 const { normalizeSharedAppearance } = require('../../shared/workAppearance');
 const { getProtectedLibrary, getPublishedLibrary, assertStorageWritable } = require('../../server/library-rescue');
@@ -111,6 +112,10 @@ const normalizeSongAudio = (value, fallbackIndex = 0) => {
   }
 
   const kind = normalizeSongAudioKind(value.kind);
+  const guideRoles = normalizeGuideRoles(value.guideRoles);
+  const choirPart = kind === 'vocal_guide' && !guideRoles.length
+    ? normalizeChoirPart(value.choirPart)
+    : null;
 
   return {
     id:
@@ -124,7 +129,8 @@ const normalizeSongAudio = (value, fallbackIndex = 0) => {
           ? 'Vocal guide'
           : 'Karaoke',
     kind,
-    guideRoles: normalizeGuideRoles(value.guideRoles),
+    guideRoles,
+    ...(choirPart ? { choirPart } : {}),
     audioUrl: value.audioUrl.trim(),
     audioFileName:
       typeof value.audioFileName === 'string' && value.audioFileName.trim()

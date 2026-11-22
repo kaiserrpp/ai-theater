@@ -60,8 +60,16 @@ module.exports = async (request, response) => {
     const normalizedSongs = normalizeSongs(payload.songs);
     const normalizedNumbers = normalizeMusicalNumbers(payload.musicalNumbers, normalizedSongs, { allowUnlinked: true });
     const auditionNumberIds = new Set((previousManifest?.musicalAuditions || []).map((cut) => cut.musicalNumberId));
-    const missingAuditionNumbers = (previousManifest?.musicalNumbers || []).filter((number) =>
-      auditionNumberIds.has(number.id) && !normalizedNumbers.some((candidate) => candidate.id === number.id));
+    const previousNumbers = previousManifest?.musicalNumbers || [];
+    const musicalNumbers = normalizedNumbers.map((number) => {
+      const choirAudios = previousNumbers.find((previous) => previous.id === number.id)?.audios.filter((audio) => audio.choirPart) ?? [];
+      if (!choirAudios.length) return number;
+      const choirAudioIds = new Set(choirAudios.map((audio) => audio.id));
+      return { ...number, audios: [...choirAudios, ...number.audios.filter((audio) => !choirAudioIds.has(audio.id))] };
+    });
+    const missingNumbers = previousNumbers.filter((number) =>
+      (auditionNumberIds.has(number.id) || number.audios.some((audio) => audio.choirPart))
+      && !musicalNumbers.some((candidate) => candidate.id === number.id));
 
     const manifest = {
       version: MANIFEST_VERSION,
@@ -73,7 +81,7 @@ module.exports = async (request, response) => {
       scriptData: payload.scriptData,
       mergeMap: normalizeMergeMap(payload.mergeMap),
       songs: normalizedSongs,
-      musicalNumbers: [...normalizedNumbers, ...missingAuditionNumbers],
+      musicalNumbers: [...musicalNumbers, ...missingNumbers],
       // Only the dedicated scene endpoint edits this collection. In particular,
       // publishing from an older client must not erase existing audition scenes.
       auditionScenes: previousManifest?.auditionScenes || [],

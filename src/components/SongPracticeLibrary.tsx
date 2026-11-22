@@ -1,11 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CHOIR_PART_LABELS, CHOIR_PARTS, normalizeChoirPart, type ChoirPart } from '../../shared/choirParts';
 import { normalizeRoles } from '../../shared/musicalAuditions';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SharedMusicalAudition, SharedScriptManifest, SharedSongAudioAsset } from '../types/sharedScript';
 import { useIsAdmin } from '../store/adminSession';
 import { createSongPlayback, type SongPlaybackMode, type SongRepeatMode } from '../utils/songPlayback';
-import { selectSongPlaylist, type SongPlaylistKind } from '../utils/songPlaylistSelection';
+import { groupChoirTracks, selectChoirTrack, selectSongPlaylist, type SongPlaylistKind } from '../utils/songPlaylistSelection';
 import { MusicalAuditionEditor } from './MusicalAuditionEditor';
 import { Button, Chip, Disclosure, Icon, Sheet, usePracticeTheme } from './PracticeUI';
 import { WarmupLibrary } from './WarmupLibrary';
@@ -13,9 +14,10 @@ import { useVocalPractice, vocalPractice } from '../store/vocalPractice';
 import { primeSongPracticeAudio } from '../utils/songPracticeAudio';
 import { auditionAudioLabel } from '../utils/saveMusicalAudition';
 
-type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudioAsset; auditionId?: string; numberTitle?: string };
+type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudioAsset; auditionId?: string; numberTitle?: string; musicalNumberId?: string };
 type SingingRequest = { id: number; trackKey: string; queueKeys: string[]; mode: SongPlaybackMode; position: number; repeat?: SongRepeatMode };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+const trackLabel = (audio: SharedSongAudioAsset) => audio.choirPart ? `Coro · ${audio.label}` : auditionAudioLabel(audio);
 
 export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork, onOpen, defaultRoles, openEditorRequest = 0, onActivityChange }: {
   manifest: SharedScriptManifest | null; active: boolean; defaultRoles: string[]; openEditorRequest?: number;
@@ -54,6 +56,8 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   const [musicRoles, setMusicRoles] = useState<string[]>([]);
   const [loadedRolesKey, setLoadedRolesKey] = useState<string | null>(null);
   const [rolesOpen, setRolesOpen] = useState(false);
+  const [choirOpen, setChoirOpen] = useState(false);
+  const [choirPreference, setChoirPreference] = useState<{ key: string; part: ChoirPart | null } | null>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [editor, setEditor] = useState<{ initial: SharedMusicalAudition | null; key: number } | null>(null);
   const [query, setQuery] = useState('');
@@ -73,6 +77,18 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   useEffect(() => {
     if (rolesKey && loadedRolesKey === rolesKey) void AsyncStorage.setItem(rolesKey, JSON.stringify(musicRoles)).catch(() => {});
   }, [loadedRolesKey, musicRoles, rolesKey]);
+  const choirKey = manifest ? `@teatro_ia_choir_part:${manifest.shareId}` : null;
+  const choirPart = choirPreference?.key === choirKey ? choirPreference.part : null;
+  useEffect(() => {
+    let cancelled = false;
+    setChoirOpen(false);
+    if (choirKey) {
+      void AsyncStorage.getItem(choirKey).catch(() => null).then((stored) => {
+        if (!cancelled) setChoirPreference({ key: choirKey, part: normalizeChoirPart(stored) });
+      });
+    }
+    return () => { cancelled = true; };
+  }, [choirKey]);
   useEffect(() => {
     if (manifest && openEditorRequest > handledEditorRequest.current) {
       handledEditorRequest.current = openEditorRequest; setScope('auditions'); setWarmupOpen(false);
@@ -95,10 +111,11 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     manifest?.musicalNumbers.forEach((number) => {
       const songs = manifest.songs.filter((song) => number.songIds.includes(song.id));
       const audios = [...number.audios, ...songs.flatMap((song) => song.audios)];
+      const lyrics = songs.map((song) => song.lyrics).filter(Boolean).join('\n\n');
       audios.forEach((audio) => {
         if (used.has(audio.id)) return;
         used.add(audio.id);
-        result.push({ key: audio.id, title: number.title, lyrics: songs.map((song) => song.lyrics).filter(Boolean).join('\n\n'), audio });
+        result.push({ key: audio.id, title: number.title, lyrics, audio, musicalNumberId: number.id });
       });
     });
     manifest?.songs.forEach((song) => song.audios.forEach((audio) => {
@@ -130,6 +147,10 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     scope: playlistScope, kind: playlistKind, visibleAuditionIds: visibleCuts.map((cut) => cut.id),
   });
   const visibleTracks = playlist(kind, 'work');
+  const choirGroups = useMemo(() => groupChoirTracks(tracks), [tracks]);
+  const choirSelections = choirGroups.map((group) => ({ ...group, preferred: selectChoirTrack(group.versions, choirPart) }));
+  const choirQueue = choirSelections.flatMap(({ preferred }) => preferred ? [preferred] : []);
+  const choirParts = new Set(choirGroups.flatMap(({ versions }) => versions.map((track) => track.audio.choirPart)));
   const tracksRef = useRef(tracks); tracksRef.current = tracks;
 
   useEffect(() => () => {
@@ -205,6 +226,20 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     const queue = track.auditionId ? playlist(track.audio.kind, 'auditions') : visibleTracks;
     requestSong(track, queue, 'single');
   };
+  const playChoir = (track: Track, queue: Track[], mode: SongPlaybackMode) => {
+    if (selectedKey === track.key && playing && mode === 'single') player.current?.pause();
+    else requestSong(track, queue, mode);
+    scroll.current?.scrollTo({ y: 0, animated: true });
+  };
+  const chooseChoirPart = (part: ChoirPart | null) => {
+    if (!choirKey) return;
+    setChoirOpen(false);
+    if (part === choirPart) return;
+    requestVersion.current++;
+    setChoirPreference({ key: choirKey, part });
+    void AsyncStorage.setItem(choirKey, part ?? '').catch(() => {});
+    if (selected?.audio.choirPart) player.current?.stop();
+  };
   const playGroup = (value: SongPlaylistKind) => {
     const queue = playlist(value);
     if (!queue.length) return;
@@ -239,7 +274,7 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
   </View>;
 
   if (!active) return selected ? <View style={[ui.header, { backgroundColor: palette.soft, gap: 6, paddingHorizontal: 16 }]}>
-    <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text><Text numberOfLines={1} style={ui.text}>{auditionAudioLabel(selected.audio)}</Text></View>
+    <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text><Text numberOfLines={1} style={ui.text}>{trackLabel(selected.audio)}</Text></View>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" /></TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={ui.icon}><Icon name={playing ? 'pause' : 'play'} /></TouchableOpacity>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" /></TouchableOpacity>
@@ -257,13 +292,16 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
       <View style={ui.wrap}><Chip label="Todas" selected={!mine} onPress={() => setMine(false)} /><Chip label="Mis personajes" selected={mine} onPress={() => { setMine(true); if (!musicRoles.length) setRolesOpen(true); }} /><TouchableOpacity accessibilityRole="button" accessibilityLabel="Elegir personajes" onPress={() => setRolesOpen(true)} style={ui.icon}><Icon name="account-cog-outline" /></TouchableOpacity></View>
       {mine && musicRoles.length ? <Text style={ui.text}>{musicRoles.join(' · ')}</Text> : null}
       {(manifest?.musicalAuditions?.length || 0) > 4 ? <TextInput accessibilityLabel="Buscar audición musical" placeholder="Buscar canción, fragmento o personaje" placeholderTextColor={palette.sub} value={query} onChangeText={setQuery} style={{ padding: 12, fontSize: 16, borderRadius: 12, borderWidth: 1, borderColor: palette.rule, color: palette.ink }} /> : null}
-    </> : null}
-    <View testID="song-playlist-actions"><Disclosure title="Reproducir grupo" summary={kind === 'karaoke' ? 'Karaoke' : kind === 'vocal_guide' ? 'Con voz' : undefined}><View style={ui.wrap}>
+    </> : choirGroups.length ? <View style={ui.wrap}>
+      <Chip label={choirPart ? `Mi cuerda · ${CHOIR_PART_LABELS[choirPart]}` : 'Elegir cuerda vocal'} disabled={choirPreference?.key !== choirKey} onPress={() => setChoirOpen(true)} />
+      {choirPart ? <Chip label="▶ Reproducir mi cuerda" accessibilityLabel="Reproducir mi cuerda" disabled={!choirQueue.length} onPress={() => playChoir(choirQueue[0], choirQueue, 'queue')} /> : null}
+    </View> : null}
+    {scope === 'auditions' || playlist('all', 'work').length > 0 ? <View testID="song-playlist-actions"><Disclosure title="Reproducir grupo" summary={kind === 'karaoke' ? 'Karaoke' : kind === 'vocal_guide' ? 'Con voz' : undefined}><View style={ui.wrap}>
       {([['all', 'Todas', 'Reproducir todas las canciones'], ['vocal_guide', 'Vocal guide', 'Reproducir vocal guides'], ['karaoke', 'Karaoke', 'Reproducir karaokes']] as const).map(([value, label, accessibilityLabel]) => <Chip key={value} label={`▶ ${label}`} accessibilityLabel={accessibilityLabel} selected={Boolean(selected) && kind === value && playbackMode === 'queue' && (selected?.auditionId ? 'auditions' : 'work') === scope} disabled={!playlist(value).length} onPress={() => playGroup(value)} />)}
-    </View></Disclosure></View>
+    </View></Disclosure></View> : null}
 
     {selected ? <View style={[ui.card, { backgroundColor: palette.soft, borderColor: palette.soft }]}>
-      <View style={ui.row}><Text style={[ui.subtitle, { flex: 1 }]}>{selected.title}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{auditionAudioLabel(selected.audio)}</Text>
+      <View style={ui.row}><Text style={[ui.subtitle, { flex: 1 }]}>{selected.title}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{trackLabel(selected.audio)}</Text>
       <Text testID="song-queue-status" accessibilityLiveRegion="polite" style={ui.text}>{queueInfo.index + 1} de {queueInfo.total} · {playbackMode === 'single' ? 'Solo esta canción' : repeatMode === 'queue' ? 'Cola en bucle' : repeatMode === 'track' ? 'Una canción en bucle' : 'La cola termina al llegar al final'}</Text>
       {selected.auditionId ? versionButtons(selected.auditionId) : null}
       <View style={[ui.row, { justifyContent: 'space-between', gap: 0 }]}>
@@ -297,13 +335,30 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
         {!cut.audios.length ? <Text style={ui.text}>Fragmento preparado. Todavía faltan los audios.</Text> : null}
       </View>)}
     </> : <>
-    {!visibleTracks.length ? <View style={ui.card}><Icon name="music-note-outline" size={32} /><Text style={ui.subtitle}>No hay audios {kind === 'karaoke' ? 'de karaoke' : kind === 'vocal_guide' ? 'con voz' : 'todavía'}</Text><Text style={ui.text}>Los materiales que se añadan a esta obra aparecerán aquí.</Text></View> : null}
+    {choirSelections.map(({ id, versions, preferred }) => {
+      const title = versions[0].title;
+      const others = versions.filter((track) => track !== preferred);
+      return <View key={id} style={ui.card}>
+        <Text style={ui.subtitle}>{title}</Text>
+        {preferred ? <Button label={`▶ ${preferred.audio.label}`} accessibilityLabel={`Escuchar ${title}, ${preferred.audio.label}`} onPress={() => playChoir(preferred, choirQueue, 'single')} /> : null}
+        {choirPart && !preferred ? <Text style={ui.text}>Elige una de las versiones disponibles para esta canción.</Text> : null}
+        {others.length ? <Disclosure title={preferred ? 'Otras versiones del coro' : 'Versiones del coro'}>
+          <View style={ui.wrap}>{others.map((track) =>
+            <Chip key={track.key} label={track.audio.label} accessibilityLabel={`Escuchar ${title}, ${track.audio.label}`} selected={selectedKey === track.key} onPress={() => playChoir(track, [track], 'single')} />
+          )}</View>
+        </Disclosure> : null}
+      </View>;
+    })}
+    {!visibleTracks.length && !choirGroups.length ? <View style={ui.card}><Icon name="music-note-outline" size={32} /><Text style={ui.subtitle}>No hay audios {kind === 'karaoke' ? 'de karaoke' : kind === 'vocal_guide' ? 'con voz' : 'todavía'}</Text><Text style={ui.text}>Los materiales que se añadan a esta obra aparecerán aquí.</Text></View> : null}
     {visibleTracks.map((track) => <TouchableOpacity key={track.key} accessibilityRole="button" accessibilityLabel={`Escuchar ${track.title}, ${auditionAudioLabel(track.audio)}`} onPress={() => play(track)} style={[ui.card, ui.row, { padding: 16 }, selectedKey === track.key && { borderColor: palette.plum }]}>
       <Icon name={selectedKey === track.key && playing ? 'volume-high' : 'play-circle-outline'} size={30} />
       <View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 17 }]}>{track.title}</Text><Text style={ui.text}>{auditionAudioLabel(track.audio)}{track.audio.guideRoles.length ? ` · ${track.audio.guideRoles.join(', ')}` : ''}</Text></View>
     </TouchableOpacity>)}
     </>}
-    {selected && error ? <Button label="Reintentar audio" secondary onPress={() => play(selected)} /> : null}
+    {selected && error ? <Button label="Reintentar audio" secondary onPress={() => {
+      if (selected.audio.choirPart) requestSong(selected, activeQueue.current, playbackMode, position, repeatMode);
+      else play(selected);
+    }} /> : null}
     </>}
     </ScrollView>
     <Sheet title="Opciones de canciones" visible={optionsOpen} onClose={() => setOptionsOpen(false)}>
@@ -316,6 +371,13 @@ export const SongPracticeLibrary = ({ manifest, active, onUpdated, onManageWork,
     <Sheet title="Mis personajes · Canciones" visible={rolesOpen} onClose={() => setRolesOpen(false)}>
       <Text style={ui.text}>Esta selección se recuerda para las canciones de esta obra en este dispositivo.</Text><View style={ui.wrap}>{availableRoles.map((role) => <Chip key={role} label={role} selected={musicRoles.includes(role)} onPress={() => setMusicRoles((previous) => previous.includes(role) ? previous.filter((value) => value !== role) : [...previous,role])} />)}</View>
       {!availableRoles.length ? <Text style={ui.text}>Los personajes aparecerán al añadir los fragmentos.</Text> : null}<Button label="Listo" onPress={() => setRolesOpen(false)} />
+    </Sheet>
+    <Sheet title="Mi cuerda vocal" visible={choirOpen} onClose={() => setChoirOpen(false)}>
+      <Text style={ui.text}>TeatroIA recuerda tu cuerda para esta obra en este dispositivo.</Text>
+      <View style={ui.wrap}>
+        {CHOIR_PARTS.filter((part) => choirParts.has(part)).map((part) => <Chip key={part} label={CHOIR_PART_LABELS[part]} selected={part === choirPart} onPress={() => chooseChoirPart(part)} />)}
+        <Chip label="Elegir en cada canción" selected={!choirPart} onPress={() => chooseChoirPart(null)} />
+      </View>
     </Sheet>
     {editor && manifest ? <MusicalAuditionEditor key={editor.key} manifest={manifest} initial={editor.initial} onUpdated={onUpdated} onClose={() => setEditor(null)} onSaved={() => { setMine(false); setQuery(''); setNotice('Audición guardada.'); }} /> : null}
   </>;
