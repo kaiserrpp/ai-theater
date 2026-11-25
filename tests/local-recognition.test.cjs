@@ -67,6 +67,22 @@ test('local word recognition releases capture immediately and never waits for a 
   assert.equal(Date.now(), 0, 'even a pending AudioContext.close must not delay the reply');
 });
 
+test('unchanged Vosk output does not flood the app with text events, while corrections and finals still propagate', async t => {
+  const f = fixture(t);
+  f.recognition.configure(options());
+  await settle();
+  const decoder = f.decoders[0];
+  for (let i = 0; i < 200; i++) decoder.partial('Qué pasó');
+  assert.equal(f.recognition.getDiagnostics().textEventCount, 1);
+  decoder.partial('Qué pasó aquí');
+  decoder.partial('');
+  assert.equal(f.recognition.getSnapshot().transcript, '');
+  decoder.final('Qué pasó');
+  for (let i = 0; i < 200; i++) decoder.partial('');
+  assert.equal(f.recognition.getDiagnostics().textEventCount, 3);
+  assert.equal(f.recognition.getSnapshot().finalTranscript, 'Qué pasó');
+});
+
 test('local recognition accepts a strong score with extra words inside the ending', async (t) => {
   const f = fixture(t);
   f.recognition.configure(options()); await settle();

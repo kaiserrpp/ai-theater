@@ -20,29 +20,6 @@ export const getAutomaticRehearsalTargetIndex = (
 
 export const isSceneAdvanceCommand = (text: string) => normalizeSpeechText(text) === 'adelante';
 
-export const getSceneAdvanceRecognitionAction = ({
-  finalTranscript, interimTranscript, acceptInterim = false, lastUtterance,
-}: {
-  finalTranscript: string;
-  interimTranscript: string;
-  acceptInterim?: boolean;
-  lastUtterance?: { text: string; isFinal: boolean } | null;
-}): 'start' | 'discard' | 'wait' => {
-  if (lastUtterance) {
-    if (!lastUtterance.isFinal && !acceptInterim) return 'wait';
-    return isSceneAdvanceCommand(lastUtterance.text) ? 'start' : lastUtterance.isFinal ? 'discard' : 'wait';
-  }
-  // Whisper's growing audio window can remain provisional for 20 seconds.
-  // The explicit word is enough; committing that window is not a command.
-  const text = acceptInterim
-    ? [finalTranscript, interimTranscript].filter(Boolean).join(' ')
-    : finalTranscript;
-  if (isSceneAdvanceCommand(text)) return 'start';
-  // Never discard a partial segment: its next update replaces the same result.
-  if (finalTranscript.trim() && !interimTranscript.trim()) return 'discard';
-  return 'wait';
-};
-
 type AnnouncementOptions = {
   title: string;
   releaseInput: () => Promise<void>;

@@ -11,11 +11,12 @@ const { nativeBridgeBootstrap } = require('../src/nativePrototype/bridgeBootstra
 const { parseBridgeCommand, isPrototypeUrl } = require('../src/nativePrototype/protocol.ts');
 const { createSpeechRecognitionSession } = require('../src/utils/speechRecognitionSession.ts');
 const { isHomeRehearsalCommand } = require('../src/utils/voiceAdvance.ts');
-const { getSceneAdvanceRecognitionAction } = require('../src/utils/rehearsalSceneTransition.ts');
+const { isSceneAdvanceCommand } = require('../src/utils/rehearsalSceneTransition.ts');
 if (previous) require.extensions['.ts'] = previous; else delete require.extensions['.ts'];
 const command = (type, id, extra = {}) => ({ channel: 'ai-theatre-native', protocol: 1, type, id, ...extra });
 const deferred = () => { let resolve;const promise=new Promise(done=>{resolve=done});return{promise,resolve}; };
 const flush = async () => { await settle();await settle(); };
+const sceneCommandReady = ({ lastUtterance }) => Boolean(lastUtterance?.isFinal && isSceneAdvanceCommand(lastUtterance.text));
 
 const fixture = (t, extra = {}) => {
   const events=[], starts=[], spoken=[], calls=[];
@@ -34,6 +35,7 @@ const fixture = (t, extra = {}) => {
   const snapshots=[];
   const session=createSpeechRecognitionSession(window.SpeechRecognition,s=>snapshots.push(s),{
     controlledEnd:true,prepareRestart:()=>{throw Error('Native recognition must not require the Safari speech cue')},
+    recoverNativeInput: extra.recoverNativeInput, getCommand: extra.getCommand,
   });
   window.addEventListener('ai-theatre-native-visibility',()=>session.setPageVisible(window.__AI_THEATRE_NATIVE_V1__.foreground));
   t.after(()=>{session.dispose();controller.dispose()});
@@ -128,14 +130,108 @@ test('iPhone commands settle a whole utterance without accepting a provisional c
   f.session.stop();assert.equal(await f.session.waitForEnd(),true);
   f.session.configure({enabled:true,lang:'es-ES',lineKey:'scene:1',continuous:false});await flush();
   f.words('adelante');
-  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'wait');
+  assert.equal(sceneCommandReady(f.session.getSnapshot()),false);
   f.words('adelante con la prueba');f.end();
-  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'discard');
+  assert.equal(sceneCommandReady(f.session.getSnapshot()),false);
   f.session.resetTranscript();t.mock.timers.tick(0);await flush();
   f.words('¡Adelante!');f.end();
-  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'start');
+  assert.equal(sceneCommandReady(f.session.getSnapshot()),true);
   f.session.stop();t.mock.timers.tick(10000);await flush();
   assert.equal(f.starts.length,4,'a consumed command must not reopen capture');
+});
+
+test('a settled iPhone command is consumed once even when the SDK immediately sends an empty final result', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  let starts = 0;
+  const f = fixture(t, { getCommand: key => key === 'home:ensayo' ? {
+    accepts: isHomeRehearsalCommand, onRecognized: () => starts++,
+  } : undefined });
+  f.session.configure({ enabled: true, lang: 'es-ES', lineKey: 'home:ensayo', continuous: false });
+  await flush();
+  f.words('ensayo');
+  f.words('ensayo mañana');
+  f.end();
+  t.mock.timers.tick(0);
+  await flush();
+  assert.equal(starts, 0);
+  f.words('¡Ensayo!', true);
+  f.words('', true);
+  f.end();
+  t.mock.timers.tick(2500);
+  await flush();
+  assert.equal(starts, 1);
+  assert.equal(f.starts.length, 2, 'the recognised command must not open a new microphone');
+});
+
+test('rapid no-speech ends back off and a productive session listens through a long pause', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  const f = fixture(t, { recoverNativeInput: true });
+  await f.open();
+  for (const delay of [250, 500, 1000, 2000, 2000]) {
+    const count = f.starts.length;
+    f.controller.recognitionEvent('error', { error: 'no-speech' });
+    f.end();
+    t.mock.timers.tick(delay - 1);
+    await flush();
+    assert.equal(f.starts.length, count);
+    t.mock.timers.tick(1);
+    await flush();
+    assert.equal(f.starts.length, count + 1);
+  }
+  assert.equal(f.session.getDiagnostics().noSpeechCount, 5);
+  f.words('No quiero estar solo con');
+  t.mock.timers.tick(20000);
+  await flush();
+  assert.equal(f.starts.length, 6);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.session.getSnapshot().interimTranscript, 'No quiero estar solo con');
+  f.words('No quiero estar solo con mis cristales rotos');
+  assert.match(f.session.getSnapshot().transcript, /cristales rotos$/);
+});
+
+test('input that stays open without any text gets one automatic restart after confirmed closure', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  const f = fixture(t, { recoverNativeInput: true });
+  await f.open();
+  t.mock.timers.tick(15000);
+  assert.deepEqual(f.calls, ['abort']);
+  assert.equal(f.session.getSnapshot().status, 'finishing');
+  t.mock.timers.tick(3000);
+  await flush();
+  assert.equal(f.starts.length, 1);
+  f.end();
+  t.mock.timers.tick(500);
+  await flush();
+  assert.equal(f.starts.length, 2);
+  t.mock.timers.tick(30000);
+  assert.deepEqual(f.calls, ['abort']);
+  f.words('Ya está la réplica', true);
+  assert.equal(f.session.getSnapshot().transcript, 'Ya está la réplica');
+  assert.equal(f.session.getDiagnostics().retryCount, 1);
+});
+
+test('a foreground iPhone interruption auto-recovers once and cannot promote a retired command', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  let advances = 0;
+  const f = fixture(t, { recoverNativeInput: true, getCommand: () => ({
+    accepts: isSceneAdvanceCommand, onRecognized: () => advances++,
+  }) });
+  f.session.configure({ enabled: true, lang: 'es-ES', lineKey: 'scene:2', continuous: false });
+  await flush();
+  f.words('adelante');
+  f.controller.recognitionEvent('error', { error: 'interrupted' });
+  f.words('adelante', true);
+  f.end();
+  t.mock.timers.tick(500);
+  await flush();
+  assert.equal(f.starts.length, 2);
+  assert.equal(advances, 0);
+  f.controller.recognitionEvent('error', { error: 'interrupted' });
+  f.end();
+  t.mock.timers.tick(15000);
+  await flush();
+  assert.equal(f.starts.length, 2);
+  assert.equal(f.session.getSnapshot().errorCode, 'interrupted');
 });
 
 test('switching between a command and a continuous actor turn waits for native closure and keeps long pauses',async t=>{
@@ -155,7 +251,7 @@ test('switching between a command and a continuous actor turn waits for native c
   assert.equal(f.starts.length,2);f.end();t.mock.timers.tick(0);await flush();
   assert.equal(f.starts.length,3);assert.equal(f.starts[2].continuous,false);
   f.words('no adelante');f.end();
-  assert.equal(getSceneAdvanceRecognitionAction({...f.session.getSnapshot()}),'discard');
+  assert.equal(sceneCommandReady(f.session.getSnapshot()),false);
 });
 
 test('a settled native command survives automatic rearming until a new utterance or explicit reset',async t=>{
@@ -251,10 +347,10 @@ test('an interruption from the installed legacy bridge waits for a real foregrou
   await flush();
   assert.equal(f.starts.length, 2);
   assert.equal(f.session.getSnapshot().error, null);
-  assert.notEqual(getSceneAdvanceRecognitionAction(f.session.getSnapshot()), 'start');
+  assert.equal(sceneCommandReady(f.session.getSnapshot()), false);
   f.words('adelante');
   f.end();
-  assert.equal(getSceneAdvanceRecognitionAction(f.session.getSnapshot()), 'start');
+  assert.equal(sceneCommandReady(f.session.getSnapshot()), true);
 });
 
 test('cancelling a pending permission cannot open a microphone after the user eventually grants it',async t=>{

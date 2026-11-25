@@ -49,6 +49,20 @@ test('a new complete final utterance can replace an unsuccessful attempt on that
   assert.equal(repeated.source, 'latest_utterance');
 });
 
+test('a complete new iPhone segment can recover independently while its recognition is still provisional', () => {
+  const expected = 'Reconoces esto?';
+  const compare = (prefix, text, interimTranscript = text) => attempt(input(expected, `${prefix} ${text}`, {
+    allowLatestInterim: true, interimTranscript, lastUtterance: { text, isFinal: false, lineKey: 'line-one' },
+  }));
+  const previous = 'La puerta abierta con la mesa del salón después siguen las otras cinco personas cuando quieran empezar';
+  const retry = compare(previous, 'Reconoces esto');
+  assert.equal(retry.source, 'latest_utterance');
+  assert.equal(retry.match.score, 1);
+  assert.equal(compare('No', 'Reconoces esto').source, 'accumulated');
+  assert.equal(compare('Esto esto', 'Esto').source, 'accumulated');
+  assert.equal(compare(previous, 'Reconoces esto', `${previous} Reconoces esto`).source, 'accumulated');
+});
+
 test('a pause or a fragmented continuation retains the accumulated line, including its negation', () => {
   const expected = 'No quiero salir de casa y prefiero terminar la escena aquí';
   const raw = 'No quiero salir de casa y prefiero terminar la escena aquí';

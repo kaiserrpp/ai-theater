@@ -95,6 +95,40 @@ test('consecutive completed lines and idle effect cleanups never reset the speec
   assert.deepEqual(f.events.filter((event) => event.kind === 'speak').map((event) => event.at), [0, 0, 0]);
 });
 
+test('a voice that starts without ending replays the same line once and ignores stale completion', t => {
+  const f = fixture(t);
+  let started = 0, completed = 0;
+  speak('Hola.', { onStart: () => started++, onDone: () => completed++ });
+  const staleDone = f.utterances[0].onend;
+  t.mock.timers.tick(4499);
+  assert.equal(f.utterances.length, 1);
+  t.mock.timers.tick(1);
+  assert.equal(f.count('cancel'), 1);
+  t.mock.timers.tick(250);
+  assert.deepEqual(f.utterances.map(utterance => utterance.text), ['Hola.', 'Hola.']);
+  staleDone();
+  assert.equal(completed, 0);
+  f.finish();
+  assert.equal(started, 1);
+  assert.equal(completed, 1);
+});
+
+test('two stalled attempts stop without advancing, and leaving cancels a queued retry', t => {
+  const f = fixture(t);
+  const errors = [];
+  speak('Hola.', { onError: error => errors.push(error.message), onDone: () => assert.fail('stalled speech cannot advance') });
+  t.mock.timers.tick(4500);
+  t.mock.timers.tick(250);
+  t.mock.timers.tick(4500);
+  assert.deepEqual(errors, ['speech-playback-timeout']);
+  speak('Nueva.', {});
+  t.mock.timers.tick(4500);
+  stop();
+  t.mock.timers.tick(20000);
+  assert.equal(f.utterances.length, 3);
+  assert.equal(f.synth.speaking, false);
+});
+
 test('preparing and cancelling an obsolete line never interrupts the current speech or starts it later', (t) => {
   const f = fixture(t);
   speak('La frase actual.', {});

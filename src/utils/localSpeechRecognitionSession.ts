@@ -82,9 +82,14 @@ export const createLocalSpeechRecognitionConstructor = (dependencies: Dependenci
       const generation = ++this.generation;
       const isCurrent = () => this.active && this.generation === generation;
       this.finals = [];
+      let emittedFinals = 0;
+      let emittedPartial = '';
       const emit = (partial = '') => {
-        if (!isCurrent()) return;
-        this.onresult?.({ results: [
+        if (!isCurrent() || (emittedFinals === this.finals.length && emittedPartial === partial)) return;
+        const resultIndex = emittedFinals;
+        emittedFinals = this.finals.length;
+        emittedPartial = partial;
+        this.onresult?.({ resultIndex, results: [
           ...this.finals.map((text) => ({ isFinal: true, 0: { transcript: text } })),
           ...(partial ? [{ isFinal: false, 0: { transcript: partial } }] : []),
         ] });

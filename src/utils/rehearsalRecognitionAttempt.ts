@@ -1,4 +1,4 @@
-import { getAutomaticLineMatchReason, normalizeSpeechText, scoreLineMatch } from './lineMatching';
+import { getAutomaticLineAdvanceDelay, getAutomaticLineMatchReason, normalizeSpeechText, scoreLineMatch } from './lineMatching';
 
 export type RehearsalRecognitionAttemptSource = 'accumulated' | 'latest_utterance' | 'repeated_line';
 const words = (value: string) => Array.from(value.matchAll(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu), match => ({
@@ -13,12 +13,14 @@ export const getRehearsalRecognitionAttempt = (input: {
   expectedText: string; transcript: string; acceptedVariants?: string[]; lineKey: string | null;
   interimTranscript?: string;
   allowRepeatedInterim?: boolean;
+  allowLatestInterim?: boolean;
   lastUtterance?: { text: string; isFinal: boolean; lineKey: string | null } | null;
 }) => {
   const { expectedText, transcript, acceptedVariants = [], lastUtterance } = input;
   const accumulated = { text: transcript, source: 'accumulated' as RehearsalRecognitionAttemptSource,
     match: scoreLineMatch(expectedText, transcript, acceptedVariants) };
-  if (!input.lineKey || getAutomaticLineMatchReason(expectedText, transcript, accumulated.match)) return accumulated;
+  if (!input.lineKey || getAutomaticLineAdvanceDelay(expectedText, transcript, input.interimTranscript ?? '',
+    accumulated.match, input.allowLatestInterim) !== null) return accumulated;
   const references = [expectedText, ...acceptedVariants].map(reference => words(reference).map(word => word.value)).filter(reference => reference.length);
   const prefixHasNegation = (prefix: string) => {
     let tokens = words(prefix).map(word => word.value);
@@ -41,9 +43,10 @@ export const getRehearsalRecognitionAttempt = (input: {
       !getAutomaticLineMatchReason(expectedText, text, match)) return null;
     return { text, source, match };
   };
-  if (input.lineKey && lastUtterance?.lineKey === input.lineKey && lastUtterance.isFinal && lastUtterance.text.trim()) {
+  if (lastUtterance?.lineKey === input.lineKey && lastUtterance.text.trim() &&
+      (lastUtterance.isFinal || input.allowLatestInterim && input.interimTranscript?.trim() === lastUtterance.text.trim())) {
     const text = lastUtterance.text.trim(), raw = transcript.trimEnd();
-    if (raw.endsWith(text) && raw.length > text.length) {
+    if (raw.endsWith(` ${text}`)) {
       const selected = completeAttempt(text, raw.slice(0, -text.length), 'latest_utterance');
       if (selected) return selected;
     }

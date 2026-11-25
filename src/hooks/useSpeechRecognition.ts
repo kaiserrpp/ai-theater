@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSpeechRecognitionSession,
+  type SpeechRecognitionCommand,
   type SpeechRecognitionConstructor,
   type SpeechRecognitionSnapshot,
 } from '../utils/speechRecognitionSession';
@@ -12,6 +13,7 @@ import { getWhisperSpeechRecognitionConstructor, preloadWhisperSpeechRecognition
 import { usesWhisperRecognition, type RecognitionEngine, type ScriptRecognitionContext } from '../utils/scriptRecognitionContext';
 import type { RecognitionProcessingTiming } from '../types/sharedScript';
 import type { RecognitionHints } from '../nativePrototype/recognitionHints';
+import { getNativePrototypeInfo } from '../utils/nativePrototype';
 
 type UseSpeechRecognitionOptions = {
   enabled: boolean;
@@ -21,6 +23,7 @@ type UseSpeechRecognitionOptions = {
   engine?: RecognitionEngine;
   localConstructor?: SpeechRecognitionConstructor | null;
   continuous?: boolean;
+  command?: SpeechRecognitionCommand;
   context?: ScriptRecognitionContext;
   nativeHints?: RecognitionHints;
   whisperLanguage?: 'auto' | 'spanish' | 'english';
@@ -37,8 +40,9 @@ const getSpeechRecognitionConstructor = () => {
   return scopedWindow.SpeechRecognition ?? scopedWindow.webkitSpeechRecognition ?? null;
 };
 
-export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = false, engine = 'native', localConstructor, continuous, context, nativeHints, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
+export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = false, engine = 'native', localConstructor, continuous, command, context, nativeHints, whisperLanguage = 'auto', whisperMicrophoneCheck = false, whisperSpeechThreshold = 0.0001 }: UseSpeechRecognitionOptions) => {
   const contextRef = useRef(context); contextRef.current = context;
+  const commandRef = useRef({ enabled, lineKey, command }); commandRef.current = { enabled, lineKey, command };
   const nativeHintsRef = useRef(nativeHints); nativeHintsRef.current = nativeHints;
   const whisperLanguageRef = useRef(whisperLanguage); whisperLanguageRef.current = whisperLanguage;
   const microphoneCheckRef = useRef(whisperMicrophoneCheck); microphoneCheckRef.current = whisperMicrophoneCheck;
@@ -51,16 +55,18 @@ export const useSpeechRecognition = ({ enabled, lang, lineKey, prepareLocal = fa
   const Constructor = engine === 'native' ? NativeConstructor : LocalConstructor;
   const isLocal = Boolean(LocalConstructor);
   const controlledEnd = Constructor?.controlledInputEnd === true;
+  const recoverNativeInput = controlledEnd && getNativePrototypeInfo()?.platform === 'ios';
   const naturalEnd = useMemo(() => !isLocal && !controlledEnd && needsNaturalRecognitionEnd(typeof navigator === 'undefined' ? null : navigator), [isLocal, controlledEnd]);
   const [snapshot, setSnapshot] = useState<SpeechRecognitionSnapshot>({
     status: Constructor ? 'idle' : 'unsupported', transcript: '', finalTranscript: '',
     interimTranscript: '', isAudioActive: false, hasReceivedTranscript: false, error: null, errorCode: null, errorDetail: null,
   });
   const session = useMemo(() => createSpeechRecognitionSession(Constructor, setSnapshot, {
-    naturalEnd, controlledEnd, prepareRestart: isLocal || controlledEnd ? undefined : prepareRecognitionRestart,
+    naturalEnd, controlledEnd, recoverNativeInput, prepareRestart: isLocal || controlledEnd ? undefined : prepareRecognitionRestart,
     pageVisible: isPageVisible(), startTimeoutMs: isLocal ? 120000 : 15000,
     getNativeHints: () => nativeHintsRef.current,
-  }), [Constructor, naturalEnd, controlledEnd, isLocal]);
+    getCommand: key => commandRef.current.enabled && commandRef.current.lineKey === key ? commandRef.current.command : undefined,
+  }), [Constructor, naturalEnd, controlledEnd, recoverNativeInput, isLocal]);
   const getNativeRecognitionInfo = useCallback(() => session.getSnapshot().nativeRecognition || null, [session]);
   const getRecognitionDiagnostics = useCallback(() => session.getDiagnostics(), [session]);
 

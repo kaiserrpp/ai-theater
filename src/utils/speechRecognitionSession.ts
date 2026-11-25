@@ -20,13 +20,18 @@ export type SpeechRecognitionHandle = {
   onspeechend: (() => void) | null;
   onend: (() => void) | null;
   onerror: ((event: { error?: string; message?: string }) => void) | null;
-  onresult: ((event: { results: { readonly length: number; [index: number]: RecognitionResult | undefined } }) => void) | null;
+  onresult: ((event: { results: { readonly length: number; [index: number]: RecognitionResult | undefined }; resultIndex?: number }) => void) | null;
   start: () => void;
   abort: () => void;
   finishInput?: () => boolean;
 };
 
 export type SpeechRecognitionConstructor = { new (): SpeechRecognitionHandle; controlledInputEnd?: boolean };
+export type SpeechRecognitionCommand = {
+  accepts: (text: string) => boolean;
+  onRecognized: () => void;
+  acceptInterim?: boolean;
+};
 export type SpeechRecognitionSnapshot = {
   status: SpeechRecognitionStatus;
   transcript: string;
@@ -47,14 +52,18 @@ type RecognitionOptions = {
   // Only the installed prototype owns native capture and can explicitly stop
   // it. Browser Safari keeps its existing natural-end protection.
   controlledEnd?: boolean;
+  recoverNativeInput?: boolean;
   startTimeoutMs?: number;
   pageVisible?: boolean;
   prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
   usage?: { started: boolean };
   getNativeHints?: () => RecognitionHints | undefined;
+  getCommand?: (lineKey: string | null) => SpeechRecognitionCommand | undefined;
   now?: () => number;
 };
 const documentRecognitionUsage = { started: false };
+const NATIVE_TEXT_TIMEOUT_MS = 15000;
+const NATIVE_RECOVERY_DELAY_MS = 500;
 
 const recognitionErrorMessage = (code?: string, detail = '') => {
   switch (code) {
@@ -109,6 +118,9 @@ export const createSpeechRecognitionSession = (
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let startTimer: ReturnType<typeof setTimeout> | null = null;
   let evidenceTimer: ReturnType<typeof setTimeout> | null = null;
+  let nativeRecoveryUsed = false;
+  let nativeRecoveryPending = false;
+  let consecutiveFastEmptyEnds = 0;
   const usage = options.usage || documentRecognitionUsage;
   let needsCue = Boolean(options.naturalEnd && usage.started);
   let closingForChange = false;
@@ -139,6 +151,7 @@ export const createSpeechRecognitionSession = (
   const inputHasEnded = () => audioEnded;
 
   const update = (change: Partial<SpeechRecognitionSnapshot>) => {
+    if ((Object.keys(change) as (keyof SpeechRecognitionSnapshot)[]).every(key => snapshot[key] === change[key])) return;
     snapshot = { ...snapshot, ...change };
     onChange(snapshot);
   };
@@ -187,6 +200,31 @@ export const createSpeechRecognitionSession = (
       requestControlledEnd();
     } else detach();
     update({ status: 'error', isAudioActive: false, error: message, errorCode: code, errorDetail: detail });
+  };
+  const recoverNativeInput = (code: string) => {
+    if (!options.recoverNativeInput || nativeRecoveryUsed || !enabled || !pageVisible || closingForChange) return false;
+    nativeRecoveryUsed = true;
+    nativeRecoveryPending = true;
+    recordError(code);
+    diagnostics.retryCount++;
+    clearTimers(); clearEvidence();
+    closingForChange = true;
+    update({ status: 'finishing', isAudioActive: false });
+    requestControlledEnd();
+    return true;
+  };
+  const resetNativeRecovery = () => {
+    nativeRecoveryUsed = nativeRecoveryPending = false;
+    consecutiveFastEmptyEnds = 0;
+  };
+  const acceptCommand = (utterance: SpeechRecognitionSnapshot['lastUtterance']) => {
+    if (!utterance || !enabled || !pageVisible || blocked || closingForChange) return;
+    const command = options.getCommand?.(utterance.lineKey);
+    if (!command || !(utterance.isFinal || command.acceptInterim) || !command.accepts(utterance.text)) return;
+    // Consume while handling the result. Another utterance can arrive before
+    // React commits a render, and automatic rearming must lose to the command.
+    stop();
+    command.onRecognized();
   };
   const resetTranscript = () => {
     committedTranscript = '';
@@ -249,6 +287,8 @@ export const createSpeechRecognitionSession = (
         };
       }
       let hadAudioInput = false;
+      let receivedText = false;
+      const openedAt = now();
       audioEnded = playbackCompletedAfterInput = false;
       inputIsFinishing = false;
       inputEndReason = null;
@@ -270,6 +310,13 @@ export const createSpeechRecognitionSession = (
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
         update({ status: 'listening', isAudioActive: true, error: null });
+        if (options.recoverNativeInput && !nativeRecoveryUsed && !receivedText && !options.getCommand?.(lineKey)) {
+          clearEvidence();
+          evidenceTimer = setTimeout(() => {
+            evidenceTimer = null;
+            if (recognition === current && !receivedText) recoverNativeInput('no-recognition-results');
+          }, NATIVE_TEXT_TIMEOUT_MS);
+        }
       };
       current.onaudioend = () => {
         if (recognition !== current) return;
@@ -286,7 +333,7 @@ export const createSpeechRecognitionSession = (
           // be repeated, including a provisional voice command.
           controlledStopRequested = true;
           resetTranscript();
-          fail(recognitionErrorMessage(event.error), event.error, event.message?.trim() || null);
+          if (!recoverNativeInput(event.error)) fail(recognitionErrorMessage(event.error), event.error, event.message?.trim() || null);
           return;
         }
         if (!pageVisible || /page.*(not visible|no longer visible|became invisible)/i.test(event.message ?? '')) {
@@ -299,6 +346,7 @@ export const createSpeechRecognitionSession = (
         }
         if (!enabled || closingForChange) return;
         if (event.error === 'no-speech') { diagnostics.noSpeechCount++; return; }
+        if (options.recoverNativeInput && event.error === 'network' && !receivedText && recoverNativeInput(event.error)) return;
         fail(recognitionErrorMessage(event.error, event.message), event.error ?? null, event.message?.trim() || null);
       };
       current.onresult = (event) => {
@@ -308,11 +356,15 @@ export const createSpeechRecognitionSession = (
         if (startTimer !== null) clearTimeout(startTimer);
         startTimer = null;
         latestResults = event.results;
-        const last = event.results[event.results.length - 1];
+        const lastIndex = event.results.length - 1;
+        const last = lastIndex >= ignoredResultCount && (event.resultIndex ?? lastIndex) <= lastIndex
+          ? event.results[lastIndex] : undefined;
+        const command = options.getCommand?.(lineKey);
+        const firstResultIndex = command ? last ? lastIndex : event.results.length : ignoredResultCount;
         const finals: string[] = [];
         const interims: string[] = [];
         const all: string[] = [];
-        for (let index = ignoredResultCount; index < event.results.length; index += 1) {
+        for (let index = firstResultIndex; index < event.results.length; index += 1) {
           const result = event.results[index];
           const text = result?.[0]?.transcript?.trim();
           if (!text) continue;
@@ -320,6 +372,7 @@ export const createSpeechRecognitionSession = (
           (result?.isFinal ? finals : interims).push(text);
         }
         if (all.length) {
+          receivedText = true;
           clearEvidence(); diagnostics.textEventCount++;
           diagnostics.firstTextMs ??= diagnosticOffset();
         }
@@ -329,45 +382,47 @@ export const createSpeechRecognitionSession = (
           snapshot.lastUtterance?.isFinal === utterance?.isFinal && snapshot.lastUtterance?.lineKey === utterance?.lineKey;
         update({
           status: 'listening', isAudioActive: !audioEnded, error: null,
-          transcript: [committedTranscript, ...all].filter(Boolean).join(' '),
-          finalTranscript: [committedTranscript, ...finals].filter(Boolean).join(' '),
+          transcript: [command ? '' : committedTranscript, ...all].filter(Boolean).join(' '),
+          finalTranscript: [command ? '' : committedTranscript, ...finals].filter(Boolean).join(' '),
           interimTranscript: interims.join(' '),
           hasReceivedTranscript: all.length > 0,
           lastUtterance: sameUtterance ? snapshot.lastUtterance : utterance,
         });
+        if (!sameUtterance) acceptCommand(utterance);
       };
       current.onend = () => {
         if (recognition !== current) return;
+        if (options.recoverNativeInput) clearEvidence();
         if (enabled && pageVisible && !closingForChange) diagnostics.endCount++;
         if (!pageVisible) {
           detach(false); closingForChange = false; needsCue = true;
           return;
         }
-        if (options.controlledEnd) {
-          committedTranscript = snapshot.transcript;
+        if (options.controlledEnd || options.naturalEnd) {
+          const command = options.getCommand?.(lineKey);
+          const maySettle = !closingForChange && receivedText;
+          const settled = snapshot.lastUtterance && (!command || maySettle)
+            ? { ...snapshot.lastUtterance, isFinal: true } : null;
+          let delay = options.naturalEnd ? 250 : 0;
+          if (nativeRecoveryPending) delay = NATIVE_RECOVERY_DELAY_MS;
+          else if (options.recoverNativeInput && !closingForChange) {
+            // Some native errors produce a rapid no-speech/end loop. An idle
+            // command ending normally (after its listening window) rearms at once.
+            const fastEmptyEnd = !receivedText && now() - openedAt < 1500;
+            consecutiveFastEmptyEnds = fastEmptyEnd ? consecutiveFastEmptyEnds + 1 : 0;
+            if (fastEmptyEnd) delay = 250 * 2 ** Math.min(consecutiveFastEmptyEnds - 1, 3);
+          }
+          nativeRecoveryPending = false;
+          committedTranscript = command ? '' : snapshot.transcript;
+          // A natural close can settle the last provisional result. It never
+          // promotes words from a cancelled command or a preceding window.
           detach(false); closingForChange = false;
+          if (options.naturalEnd) needsCue = !playbackCompletedAfterInput;
           if (blocked) return;
           update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false,
-            finalTranscript: committedTranscript, interimTranscript: '',
-            lastUtterance: snapshot.lastUtterance ? { ...snapshot.lastUtterance, isFinal: true } : null });
-          // React may observe the rearmed snapshot before its effects process
-          // the previous end. Keep the last settled command until new speech;
-          // manual retries, activation and cue changes still clear it.
-          if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(!continuous); }, 0);
-          return;
-        }
-        if (options.naturalEnd) {
-          // Calling abort() even after a normal end can poison later iOS runs.
-          committedTranscript = snapshot.transcript;
-          detach(false); closingForChange = false; needsCue = !playbackCompletedAfterInput;
-          if (blocked) return;
-          // Safari can end a one-shot session without marking its last result
-          // final. Those words can no longer change. Settle them now so the
-          // actor's completed line is evaluated before the restart cue runs.
-          update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false,
-            finalTranscript: committedTranscript, interimTranscript: '',
-            lastUtterance: snapshot.lastUtterance ? { ...snapshot.lastUtterance, isFinal: true } : null });
-          if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(); }, 250);
+            finalTranscript: command ? settled?.text ?? '' : committedTranscript, interimTranscript: '', lastUtterance: settled });
+          if (maySettle) acceptCommand(settled);
+          if (enabled) restartTimer = setTimeout(() => { restartTimer = null; start(Boolean(options.controlledEnd && !continuous)); }, delay);
           return;
         }
         if (!hadAudioInput) {
@@ -384,7 +439,9 @@ export const createSpeechRecognitionSession = (
       };
       // Some devices expose the service but never open the audio input.
       startTimer = setTimeout(() => {
-        if (recognition === current) fail('El reconocimiento no ha abierto el micrófono. Pulsa Activar micrófono para iniciar la escucha.');
+        if (recognition === current && !recoverNativeInput('recognition-start-timeout')) {
+          fail('El reconocimiento no ha abierto el micrófono. Pulsa Activar micrófono para iniciar la escucha.');
+        }
       }, options.startTimeoutMs ?? 15000);
       usage.started = true;
       current.start();
@@ -426,6 +483,7 @@ export const createSpeechRecognitionSession = (
       detach(false); closingForChange = false;
       needsCue = Boolean(options.naturalEnd && usage.started);
       if (snapshot.errorCode === 'interrupted') blocked = false;
+      resetNativeRecovery();
       if (!blocked) {
         update({ status: Constructor ? 'idle' : 'unsupported', isAudioActive: false, error: null, errorCode: null, errorDetail: null });
         start();
@@ -437,6 +495,7 @@ export const createSpeechRecognitionSession = (
       const nextContinuous = !options.naturalEnd && next.continuous !== false;
       const preserveTranscript = next.preserveTranscript === true && language === next.lang && lineKey === next.lineKey && continuous === nextContinuous;
       if (lineKey !== next.lineKey) resetDiagnostics();
+      resetNativeRecovery();
       diagnosticStartedAt ??= now();
       diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive);
       cancelCue(); clearEvidence();
@@ -467,13 +526,13 @@ export const createSpeechRecognitionSession = (
       // result index can hide the first words of the actor's next turn.
       const hadPartialResult = Array.from({ length: latestResults.length }, (_, index) => latestResults[index])
         .some((result) => result && !result.isFinal);
-      if (lineChanged) { resetDiagnostics(); resetTranscript(); clearEvidence(); }
+      if (lineChanged) { resetDiagnostics(); resetTranscript(); clearEvidence(); resetNativeRecovery(); }
       if (!next.enabled || !next.lineKey) { stop(); return; }
       diagnosticStartedAt ??= now();
       diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive && !languageChanged && !continuousChanged && !hadPartialResult);
       enabled = true;
       armEvidence();
-      if (languageChanged || continuousChanged || (lineChanged && hadPartialResult)) {
+      if (languageChanged || continuousChanged || (lineChanged && (hadPartialResult || options.getCommand?.(lineKey)))) {
         if ((options.naturalEnd || options.controlledEnd) && recognition) {
           closingForChange = true; update({ status: 'finishing' }); requestControlledEnd(); return;
         }
@@ -487,6 +546,7 @@ export const createSpeechRecognitionSession = (
       if (!enabled) return;
       diagnostics.retryCount++;
       blocked = false;
+      resetNativeRecovery();
       cancelCue(); clearEvidence();
       if ((options.naturalEnd || options.controlledEnd) && recognition) {
         closingForChange = true; needsCue = true;

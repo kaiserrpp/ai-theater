@@ -60,7 +60,7 @@ import { getRehearsalRecognitionAttempt } from '../utils/rehearsalRecognitionAtt
 import { getMicrophoneInputErrorMessage } from '../utils/microphoneInputHelp';
 import { getSpeechOutputErrorMessage, getSpeechOutputHelp } from '../utils/speechOutputHelp';
 import { getWhisperSegmentationThreshold } from '../utils/whisperSpeechActivity';
-import { getAutomaticRehearsalTargetIndex, getSceneAdvanceRecognitionAction, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
+import { getAutomaticRehearsalTargetIndex, isSceneAdvanceCommand, startRehearsalSceneAnnouncement } from '../utils/rehearsalSceneTransition';
 import { filterScriptByScenes, isSceneMarker, isSongCue, lineMatchesRoles } from '../utils/scriptScenes';
 import { findSharedSongForLine, formatSongAudioKind } from '../utils/sharedSongs';
 import type { NumberKaraokeChoices } from '../hooks/useNumberKaraokeChoices';
@@ -524,6 +524,8 @@ export const RehearsalView: React.FC<Props> = ({
   const [preferenceNotice, setPreferenceNotice] = useState('');
   const [temporarilySuspendingAutoListen, setTemporarilySuspendingAutoListen] = useState(false);
   const [speechStatusMessage, setSpeechStatusMessage] = useState<string | null>(null);
+  const [speechFailedAt, setSpeechFailedAt] = useState<string | null>(null);
+  const [speechRetry, setSpeechRetry] = useState(0);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
   const [isRehearsalMediaReady, setIsRehearsalMediaReady] = useState(false);
   const [isPreparingRehearsalMedia, setIsPreparingRehearsalMedia] = useState(false);
@@ -906,7 +908,7 @@ export const RehearsalView: React.FC<Props> = ({
     isCurrentMusicalSongBlock;
   const recognitionLineKey =
     isCheckingIntelligentRecognition ? recognitionPreparationKey :
-      currentLineVariantKey ?? (shouldKeepIntelligentRecognitionWarm ? `warm:${currentIndex}` : null);
+      currentSceneTransitionKey ?? currentLineVariantKey ?? (shouldKeepIntelligentRecognitionWarm ? `warm:${currentIndex}` : null);
 
   const isAutoplayBlockedError = useCallback((error: unknown) => {
     const errorName =
@@ -939,6 +941,13 @@ export const RehearsalView: React.FC<Props> = ({
     }
     setCurrentIndex((previous) => previous === currentIndex ? nextIndex : previous);
   }, [currentIndex, currentLineIndexInScript, currentMusicalNumber, filteredGuion, guion, hasNumberPlan]);
+
+  const startCurrentScene = useCallback(() => {
+    if (!isPageVisible()) return;
+    stopRehearsalSpeech();
+    setSceneCommandReadyKey(null);
+    setCurrentIndex(previous => previous === currentIndex && isSceneMarker(filteredGuion[previous]) ? previous + 1 : previous);
+  }, [currentIndex, filteredGuion]);
 
   const preferNativeLevelInput = Boolean(getNativeLevelInput()) && recognitionEngine === 'native' && listenModeSelection === 'intelligent';
 
@@ -1004,6 +1013,8 @@ export const RehearsalView: React.FC<Props> = ({
     lang: recognitionEngine === 'vosk' || isCheckingIntelligentRecognition ? 'es-ES' : intelligentRecognitionLanguage,
     lineKey: recognitionLineKey,
     continuous: shouldListenForSceneCommand && recognitionEngine === 'native' && getNativePrototypeInfo()?.platform === 'ios' ? false : undefined,
+    command: shouldListenForSceneCommand ? { accepts: isSceneAdvanceCommand, onRecognized: startCurrentScene,
+      acceptInterim: usesWhisperRecognition(recognitionEngine) } : undefined,
     prepareLocal: hasConfirmedRehearsalSetup && isIntelligentListenMode,
     engine: recognitionEngine,
     context: shouldUseIntelligentRecognition ? recognitionContext : undefined,
@@ -1062,47 +1073,19 @@ export const RehearsalView: React.FC<Props> = ({
     if ((result.completion === 'speech_end' || result.completion === 'button') && shouldUseRehearsalComparison && currentLineVariantKey === key && isPageVisible()) advanceLine();
   };
 
-  const startCurrentScene = useCallback(() => {
-    if (!isPageVisible()) return;
-    stopRehearsalSpeech();
-    resetSpeechRecognitionTranscript();
-    setSceneCommandReadyKey(null);
-    setCurrentIndex((previousIndex) =>
-      previousIndex === currentIndex && isSceneMarker(filteredGuion[previousIndex])
-        ? previousIndex + 1
-        : previousIndex
-    );
-  }, [currentIndex, filteredGuion, resetSpeechRecognitionTranscript]);
-
-  useEffect(() => {
-    if (!shouldListenForSceneCommand) return;
-    const action = getSceneAdvanceRecognitionAction({
-      finalTranscript: speechRecognitionFinalTranscript,
-      interimTranscript: speechRecognitionInterimTranscript,
-      acceptInterim: usesWhisperRecognition(recognitionEngine),
-      lastUtterance: speechRecognitionLastUtterance,
-    });
-    if (action === 'start') {
-      startCurrentScene();
-    } else if (action === 'discard') {
-      // Discard conversation while waiting, so a later "adelante" stands alone.
-      resetSpeechRecognitionTranscript();
-    }
-  }, [recognitionEngine, resetSpeechRecognitionTranscript, shouldListenForSceneCommand, speechRecognitionFinalTranscript,
-    speechRecognitionInterimTranscript, speechRecognitionLastUtterance, startCurrentScene]);
   const voiceSceneStarted = useRef(false);
   useEffect(() => {
     if (voiceStart && !voiceSceneStarted.current && hasCompletedRehearsalPreflight && currentIndex === 0 &&
       sceneCommandReadyKey && currentLine && isSceneMarker(currentLine)) {
-      voiceSceneStarted.current = true; startCurrentScene();
+      voiceSceneStarted.current = true; stopRecognition(); startCurrentScene();
     }
-  }, [voiceStart, hasCompletedRehearsalPreflight, currentIndex, sceneCommandReadyKey, currentLine, startCurrentScene]);
+  }, [voiceStart, hasCompletedRehearsalPreflight, currentIndex, sceneCommandReadyKey, currentLine, stopRecognition, startCurrentScene]);
 
   const continuousNativeInterim = recognitionEngine === 'native' && getNativePrototypeInfo()?.platform === 'ios';
-  const recognitionAttempt = useMemo(() => recognitionEngine === 'native' && isMyTurn && shouldUseIntelligentRecognition
+  const recognitionAttempt = useMemo(() => (recognitionEngine === 'native' || recognitionEngine === 'vosk') && isMyTurn && shouldUseIntelligentRecognition
     ? getRehearsalRecognitionAttempt({ expectedText: speakableLineText, transcript: speechRecognitionTranscript,
       acceptedVariants: currentAcceptedLineVariants, lineKey: recognitionLineKey,
-      allowRepeatedInterim: continuousNativeInterim,
+      allowRepeatedInterim: continuousNativeInterim, allowLatestInterim: continuousNativeInterim,
       interimTranscript: speechRecognitionInterimTranscript, lastUtterance: speechRecognitionLastUtterance })
     : { text: speechRecognitionTranscript, source: 'accumulated' as const,
       match: scoreLineMatch(speakableLineText, speechRecognitionTranscript, currentAcceptedLineVariants) },
@@ -2198,6 +2181,7 @@ export const RehearsalView: React.FC<Props> = ({
 
     stopRehearsalSpeech();
     stopStandaloneSongAudio();
+    setSpeechFailedAt(null);
     let isCancelled = false;
     let advanceTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -2270,19 +2254,27 @@ export const RehearsalView: React.FC<Props> = ({
           void waitForRecognitionEnd().then((ended) => {
             if (isCancelled) return;
             if (ended) finishLine();
-            else setSpeechStatusMessage('Safari no ha terminado la escucha anterior. Pulsa siguiente para continuar.');
+            else {
+              setSpeechStatusMessage('La escucha anterior sigue cerrándose.');
+              setSpeechFailedAt(currentDialogueKey);
+            }
           });
         } else finishLine();
       },
       onError: (error) => {
-        if (!isCancelled) setSpeechStatusMessage(`Siri ha fallado al reproducir esta linea (${error.message}).`);
+        if (isCancelled) return;
+        setSpeechStatusMessage(`Falló la reproducción de la réplica (${error.message}).`);
+        setSpeechFailedAt(currentDialogueKey);
       },
     });
 
     const playOtherLine = async () => {
       stopRecognition();
       if (!await waitForRecognitionInputEnd()) {
-        if (!isCancelled) setSpeechStatusMessage('Safari no ha indicado el final de la entrada anterior. Pulsa siguiente para continuar.');
+        if (!isCancelled) {
+          setSpeechStatusMessage('La escucha anterior sigue cerrándose.');
+          setSpeechFailedAt(currentDialogueKey);
+        }
         return;
       }
       if (isCancelled || !isPageVisible()) return;
@@ -2316,6 +2308,7 @@ export const RehearsalView: React.FC<Props> = ({
     advanceLine,
     autoListenEnabled,
     canRunRehearsalLinePlayback,
+    currentDialogueKey,
     currentLine,
     currentIndex,
     filteredGuion,
@@ -2328,6 +2321,7 @@ export const RehearsalView: React.FC<Props> = ({
     isMyTurn,
     getAdaptiveRehearsalSpeechRate,
     speakableLineText,
+    speechRetry,
     stopListening,
     releaseListeningInput,
     stopRecognition,
@@ -3458,16 +3452,13 @@ export const RehearsalView: React.FC<Props> = ({
         {renderHeader('Cambio de escena')}
         <View style={styles.intro}>
           <Text style={styles.introTitle}>Escena: {currentLine.t}</Text>
-          <Text style={ui.text}>{listenModeSelection === 'manual' || !isSpeechRecognitionSupported
-            ? 'Pulsa «Siguiente escena» cuando quieras empezar.'
-            : 'Di «adelante» o pulsa «Siguiente escena» cuando quieras empezar.'}</Text>
           {sceneAnnouncementError ? <Text style={ui.error}>{sceneAnnouncementError}</Text> : null}
-          {shouldListenForSceneCommand && isSpeechRecognitionSupported ? <>
-            <Text accessibilityLiveRegion="polite" style={ui.text}>{isRecognitionAudioActive
+          {listenModeSelection !== 'manual' && isSpeechRecognitionSupported ? <>
+            <Text accessibilityLiveRegion="polite" style={ui.text}>{shouldListenForSceneCommand && isRecognitionAudioActive
               ? 'Escuchando «adelante»…' : 'Preparando la escucha…'}</Text>
-            {!recognitionInterrupted ? renderRecognitionError(restartRecognition, 'Activar micrófono') : null}
+            {shouldListenForSceneCommand && !recognitionInterrupted ? renderRecognitionError(restartRecognition, 'Activar micrófono') : null}
           </> : null}
-          <Button label="Siguiente escena" disabled={!pageVisible} onPress={startCurrentScene} />
+          <Button label="Siguiente escena" disabled={!pageVisible} onPress={() => { stopRecognition(); startCurrentScene(); }} />
         </View>
       </View>
     );
@@ -3576,6 +3567,10 @@ export const RehearsalView: React.FC<Props> = ({
               </View>
             ) : null}
             {renderIntelligentLinePanel()}
+            {!isMyTurn && speechFailedAt !== null && speechFailedAt === currentDialogueKey && !isPaused ? <View style={{ gap: 8 }}>
+              <Text accessibilityRole="alert" style={ui.error}>No se ha podido completar la voz de esta réplica.</Text>
+              <Button label="Reintentar voz" secondary onPress={() => setSpeechRetry(attempt => attempt + 1)} />
+            </View> : null}
             {!isMyTurn && speechStatusMessage && showDiagnostics ? (
               <View style={styles.speechMonitor}>
                 <Text style={styles.speechMonitorText}>{speechStatusMessage}</Text>

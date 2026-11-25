@@ -21,7 +21,7 @@ type WindowWithSpeech = Window & typeof globalThis & {
   SpeechSynthesisUtterance?: typeof SpeechSynthesisUtterance;
 };
 
-let activeStartWatchdog: ReturnType<typeof setTimeout> | null = null;
+let activeSpeechWatchdog: ReturnType<typeof setTimeout> | null = null;
 let activeRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let speechRun = 0;
 let activeUtterance: SpeechSynthesisUtterance | null = null;
@@ -31,9 +31,9 @@ const detachUtterance = () => {
   activeUtterance = null;
 };
 const clearSpeechTimers = () => {
-  if (activeStartWatchdog) {
-    clearTimeout(activeStartWatchdog);
-    activeStartWatchdog = null;
+  if (activeSpeechWatchdog) {
+    clearTimeout(activeSpeechWatchdog);
+    activeSpeechWatchdog = null;
   }
 
   if (activeRetryTimer) {
@@ -154,23 +154,50 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
     return utterance;
   };
   const preparedUtterance = callbacks.resetBeforeStart ? null : createUtterance();
+  let notifiedStart = false;
 
   const attemptSpeak = (attempt: number) => {
     if (!isCurrent()) return;
     let started = false;
-    const utterance = attempt === 0 && preparedUtterance ? preparedUtterance : createUtterance(attempt > 0 && getSpeechOutputPlatform() === 'android');
+    const utterance = attempt === 0 && preparedUtterance ? preparedUtterance : createUtterance(attempt > 0 && getSpeechOutputPlatform() !== 'other');
     utterance.rate = speechRate;
     activeUtterance = utterance;
+    const isCurrentAttempt = () => isCurrent() && activeUtterance === utterance;
+
+    const recover = (error: Error) => {
+      if (!isCurrentAttempt()) return;
+      clearSpeechTimers();
+      detachUtterance();
+      try { synth.cancel(); }
+      catch {
+        finished = true;
+        callbacks.onError?.(error);
+        return;
+      }
+      if (attempt === 0) {
+        activeRetryTimer = setTimeout(() => attemptSpeak(1), 250);
+      } else {
+        finished = true;
+        callbacks.onError?.(error);
+      }
+    };
 
     utterance.onstart = () => {
-      if (!isCurrent()) return;
+      if (!isCurrentAttempt() || started) return;
       started = true;
       clearSpeechTimers();
-      callbacks.onStart?.();
+      // Allow slow voices and long lines. A start event alone does not mean
+      // that the synthesizer will eventually finish the utterance.
+      const playbackTimeout = Math.max(4500, 2500 + text.length * 150 / Math.max(0.3, speechRate));
+      activeSpeechWatchdog = setTimeout(() => recover(new Error('speech-playback-timeout')), playbackTimeout);
+      if (!notifiedStart) {
+        notifiedStart = true;
+        callbacks.onStart?.();
+      }
     };
 
     utterance.onend = () => {
-      if (!isCurrent()) return;
+      if (!isCurrentAttempt()) return;
       finished = true;
       clearSpeechTimers();
       detachUtterance();
@@ -178,45 +205,18 @@ export const prepareRehearsalSpeech = (text: string, callbacks: SpeechCallbacks)
     };
 
     utterance.onerror = (event) => {
-      if (!isCurrent()) return;
-      clearSpeechTimers();
-      detachUtterance();
-
-      if (!started && attempt === 0) {
-        activeRetryTimer = setTimeout(() => {
-          attemptSpeak(1);
-        }, 250);
-        return;
-      }
-
-      finished = true;
       const failure = event as { error?: string; message?: string } | undefined;
       const detail = failure?.message?.trim() || failure?.error?.trim();
-      callbacks.onError?.(new Error(detail || (started ? 'speech-playback-error' : 'speech-start-error')));
+      recover(new Error(detail || (started ? 'speech-playback-error' : 'speech-start-error')));
     };
 
-    activeStartWatchdog = setTimeout(() => {
-      if (!isCurrent() || started) {
-        return;
-      }
-
-      clearSpeechTimers();
-      detachUtterance();
-      synth.cancel();
-
-      if (attempt === 0) {
-        activeRetryTimer = setTimeout(() => {
-          attemptSpeak(1);
-        }, 250);
-        return;
-      }
-
-      finished = true;
-      callbacks.onError?.(new Error('speech-start-timeout'));
-    }, 1800);
-
-    synth.resume();
-    synth.speak(utterance);
+    activeSpeechWatchdog = setTimeout(() => recover(new Error('speech-start-timeout')), 1800);
+    try {
+      synth.resume();
+      synth.speak(utterance);
+    } catch (error) {
+      recover(error instanceof Error ? error : new Error('speech-start-error'));
+    }
   };
 
   return {

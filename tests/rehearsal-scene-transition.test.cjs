@@ -7,7 +7,6 @@ require.extensions['.ts'] = (loadedModule, filename) => loadedModule._compile(ts
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, filename);
 const { getAutomaticRehearsalTargetIndex: advance, isSceneAdvanceCommand: isCommand,
-  getSceneAdvanceRecognitionAction: commandAction,
   startRehearsalSceneAnnouncement: announce } = require('../src/utils/rehearsalSceneTransition.ts');
 const { createSpeechRecognitionSession } = require('../src/utils/speechRecognitionSession.ts');
 if (previousLoader) require.extensions['.ts'] = previousLoader;
@@ -50,60 +49,50 @@ test('only an explicit adelante command starts a scene; announcements and ordina
   }
 });
 
-test('Whisper starts on the recognized provisional adelante without waiting for its window to commit', () => {
-  const provisional = (text) => ({ finalTranscript: '', interimTranscript: text, acceptInterim: true });
-  assert.equal(commandAction(provisional('¡Adelante!')), 'start');
-  for (const text of ['', 'adel', 'Siguiente escena: Adelante', 'No adelante', 'Adelante con los ensayos']) {
-    assert.equal(commandAction(provisional(text)), 'wait', text);
-  }
-  assert.equal(commandAction({ finalTranscript: 'no', interimTranscript: 'adelante', acceptInterim: true }), 'wait');
-  assert.equal(commandAction({ finalTranscript: '¡Adelante!', interimTranscript: '', acceptInterim: true }), 'start');
-  // The native/Vosk path retains its existing final-result requirement.
-  assert.equal(commandAction({ finalTranscript: '', interimTranscript: 'adelante' }), 'wait');
-  assert.equal(commandAction({ finalTranscript: 'adelante', interimTranscript: '' }), 'start');
-});
-
-test('Whisper conversation is discarded only after commitment, then a fresh provisional command is accepted', () => {
-  let handle;
-  class Recognition {
-    constructor() { handle = this; }
-    start() {}
-    abort() {}
-  }
-  const session = createSpeechRecognitionSession(Recognition, () => {});
-  const result = (text, isFinal = false) => ({ isFinal, 0: { transcript: text } });
-  const action = () => commandAction({ ...session.getSnapshot(), acceptInterim: true });
+const result = (text, isFinal = true) => ({ isFinal, 0: { transcript: text } });
+const commandSession = (t, acceptInterim = false) => {
+  let handle, advances = 0;
+  class Recognition { constructor() { handle = this; } start() {} abort() { this.aborted = true; } }
+  const command = { accepts: isCommand, acceptInterim, onRecognized: () => {
+    assert.equal(handle.aborted, true, 'the listening window closes before entering the scene');
+    advances++;
+  } };
+  const session = createSpeechRecognitionSession(Recognition, () => {}, { getCommand: key => key === 'scene:3' ? command : undefined });
   session.activate({ lang: 'es-ES', lineKey: 'scene:3' });
   handle.onaudiostart();
-  handle.onresult({ results: [result('Espera un momento')] });
-  for (let pause = 0; pause < 10; pause++) assert.equal(action(), 'wait');
-  handle.onresult({ results: [result('Espera un momento', true)] });
-  assert.equal(action(), 'discard');
-  session.resetTranscript();
-  handle.onresult({ results: [result('Espera un momento', true), result('¡Adelante!')] });
-  assert.equal(session.getSnapshot().finalTranscript, '');
-  assert.equal(action(), 'start');
-  session.dispose();
+  t.after(session.dispose);
+  return { session, emit: handle.onresult, advances: () => advances };
+};
+
+test('a final command is consumed before a later update can replace it, with no carryover from conversation', t => {
+  const { session, emit, advances } = commandSession(t);
+  emit({ results: [result('Espera un momento')] });
+  emit({ results: [result('adelante', false)] });
+  emit({ results: [result('adelante con los ensayos')] });
+  emit({ results: [result('no adelante')] });
+  assert.equal(advances(), 0);
+  emit({ results: [result('no adelante'), result('¡Adelante!')] });
+  emit({ results: [result('otra conversación', false)] });
+  assert.equal(advances(), 1);
+  assert.equal(session.getSnapshot().transcript, '¡Adelante!');
 });
 
-test('an unrelated utterance cannot poison later commands, even when the service reuses its result slot', () => {
-  let handle;
-  class Recognition { constructor() { handle = this; } start() {} abort() {} }
-  const session = createSpeechRecognitionSession(Recognition, () => {});
-  session.activate({ lang: 'es-ES', lineKey: 'scene:3' }); handle.onaudiostart();
-  const emit = (texts) => handle.onresult({ results: texts.map(([text,isFinal]) => ({ isFinal, 0: { transcript: text } })) });
-  const action = () => commandAction(session.getSnapshot());
-  emit([['un momento',true]]); assert.equal(action(),'discard'); session.resetTranscript();
-  // Some services replace the last result rather than appending a new slot.
-  emit([['adelante',false]]); assert.equal(action(),'wait');
-  emit([['adelante',true]]); assert.equal(action(),'start');
-  session.resetTranscript();
-  emit([['no adelante',true]]); assert.equal(action(),'discard');
-  emit([['no adelante',true],['ahora voy a beber',true],['adelante',false]]); assert.equal(action(),'wait');
-  emit([['no adelante',true],['ahora voy a beber',true],['adelante',true]]); assert.equal(action(),'start');
-  // Actor transcript accumulation remains intact; command matching has its own boundary.
-  assert.match(session.getSnapshot().finalTranscript,/ahora voy a beber adelante/);
-  session.dispose();
+test('Whisper can use its standalone provisional command after a finalized unrelated utterance', t => {
+  const { emit, advances } = commandSession(t, true);
+  emit({ results: [result('No adelante', false)] });
+  emit({ results: [result('Espera un momento'), result('Adel', false)] });
+  assert.equal(advances(), 0);
+  emit({ results: [result('Espera un momento'), result('¡Adelante!', false)] });
+  assert.equal(advances(), 1);
+});
+
+test('a Vosk partial retraction does not replay the recognizer result history as a command', t => {
+  const { emit, advances } = commandSession(t);
+  emit({ results: [result('adelante'), result('un momento', false)], resultIndex: 1 });
+  emit({ results: [result('adelante')], resultIndex: 1 });
+  assert.equal(advances(), 0);
+  emit({ results: [result('adelante'), result('adelante')], resultIndex: 1 });
+  assert.equal(advances(), 1);
 });
 
 test('announcements release the silence detector first and finishing the voice leaves the scene waiting', async () => {
@@ -172,29 +161,4 @@ test('voice errors still permit an explicit command and report the problem only 
   assert.equal(errors.length, 1);
   assert.equal(errors[0].message, 'speech-synthesis-unavailable');
   cancel();
-});
-
-test('scene announcement echoes and conversation are discarded before a fresh adelante command', () => {
-  let handle;
-  class Recognition {
-    constructor() { handle = this; }
-    start() {}
-    abort() {}
-  }
-  const session = createSpeechRecognitionSession(Recognition, () => {});
-  const result = (text, isFinal = true) => ({ isFinal, 0: { transcript: text } });
-  session.activate({ lang: 'es-ES', lineKey: 'scene:3' });
-  handle.onaudiostart();
-  handle.onresult({ results: [result('Siguiente escena: Segunda', false)] });
-  session.resetTranscript(); // Announcement finished; arm the command.
-  handle.onresult({ results: [result('Siguiente escena: Segunda')] });
-  assert.equal(isCommand(session.getSnapshot().finalTranscript), false);
-  handle.onresult({ results: [result('Siguiente escena: Segunda'), result('Espera un momento')] });
-  assert.equal(isCommand(session.getSnapshot().finalTranscript), false);
-  session.resetTranscript();
-  handle.onresult({ results: [result('Siguiente escena: Segunda'), result('Espera un momento'), result('¡Adelante!', false)] });
-  assert.equal(isCommand(session.getSnapshot().finalTranscript), false);
-  handle.onresult({ results: [result('Siguiente escena: Segunda'), result('Espera un momento'), result('¡Adelante!')] });
-  assert.equal(isCommand(session.getSnapshot().finalTranscript), true);
-  session.dispose();
 });

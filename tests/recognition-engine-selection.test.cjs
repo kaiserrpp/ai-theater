@@ -46,6 +46,7 @@ const hookFixture = ({ engine, nativeAvailable = true, voskAvailable = true, ios
     '../utils/speechRecognitionCompatibility': { needsNaturalRecognitionEnd: () => ios },
     '../utils/rehearsalSpeech': { prepareRecognitionRestart: () => {} },
     '../utils/pageVisibility': { isPageVisible: () => true, observePageVisibility: () => () => {} },
+    '../utils/nativePrototype': { getNativePrototypeInfo: () => controlledEnd ? { platform: ios ? 'ios' : 'android' } : null },
     '../utils/localSpeechRecognition': {
       getLocalSpeechRecognitionConstructor: () => { calls.push('vosk:constructor'); return voskAvailable ? Vosk : null; },
       preloadLocalSpeechRecognition: async () => { calls.push('vosk:load'); },
@@ -72,6 +73,7 @@ test('default Safari uses the native session and retains the iPhone natural-end 
   assert.equal(f.configured.Constructor, f.Native);
   assert.equal(f.result.isLocal, false);
   assert.equal(f.configured.naturalEnd, true);
+  assert.equal(f.configured.recoverNativeInput, false);
   assert.equal(typeof f.configured.prepareRestart, 'function');
   assert(!f.calls.some(call => /:constructor|:load/.test(call)));
   f.dispose();
@@ -81,7 +83,11 @@ test('only the installed bridge owns explicit native closure and bypasses the Sa
   const f=hookFixture({controlledEnd:true});
   assert.equal(f.configured.Constructor,f.Native);assert.equal(f.configured.controlledEnd,true);
   assert.equal(f.configured.naturalEnd,false);assert.equal(f.configured.prepareRestart,undefined);
+  assert.equal(f.configured.recoverNativeInput,true);
   assert.equal(f.result.isLocal,false);f.dispose();
+  const android = hookFixture({ ios: false, controlledEnd: true });
+  assert.equal(android.configured.recoverNativeInput, false);
+  android.dispose();
 });
 
 test('explicit Vosk uses Vosk even outside iOS and never silently substitutes Safari', () => {

@@ -146,7 +146,7 @@ export const PracticeHome = (props: Props) => {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Abrir canciones" onPress={() => chooseTab('songs')} style={[ui.card, { padding: 18 }]}><View style={ui.row}><Icon name="music-note-outline" size={30} /><View style={{ flex: 1, gap: 4 }}><Text style={ui.subtitle}>Canciones</Text><Text style={ui.text}>Con voz y karaoke</Text></View><Icon name="arrow-right" /></View></TouchableOpacity>
       </>}
       {props.resumeChoice}
-      {props.script && !sheet && !musicBusy && (lastTarget === 'audition' ? Boolean(lastScene) : props.myRoles.length > 0) ? <HomeVoiceStart initiallyEnabled={voiceWanted} onStart={startByVoice} /> : null}
+      {props.script && !sheet && !musicBusy && (lastTarget === 'audition' ? Boolean(lastScene) : props.myRoles.length > 0) ? <HomeVoiceStart armed={voiceWanted} onArmedChange={setVoiceWanted} onStart={startByVoice} /> : null}
       {reportStatus.message ? <View testID="automatic-report-status">
         {reportStatus.pending ? <Disclosure title={`${reportStatus.pending} informe${reportStatus.pending === 1 ? '' : 's'} pendiente${reportStatus.pending === 1 ? '' : 's'}`}>
           <Text accessibilityLiveRegion="polite" style={ui.text}>{reportStatus.message}</Text><Button label="Reintentar informes pendientes" secondary onPress={() => void feedbackOutbox.flush()} />
