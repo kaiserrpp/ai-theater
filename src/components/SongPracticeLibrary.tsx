@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CHOIR_PART_LABELS, CHOIR_PARTS } from '../../shared/choirParts';
 import { normalizeRoles } from '../../shared/musicalAuditions';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Linking, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SharedMusicalAudition, SharedMusicalNumberAsset, SharedScriptManifest, SharedSongAudioAsset } from '../types/sharedScript';
 import { useIsAdmin } from '../store/adminSession';
 import { createSongPlayback, type SongPlaybackMode, type SongRepeatMode } from '../utils/songPlayback';
@@ -32,8 +32,10 @@ import {
   type NumberAudioMode, type NumberRehearsalRequest,
 } from '../utils/musicalNumberPractice';
 import { MusicalNumberCard } from './MusicalNumberCard';
+import { getGeniusSongId } from '../utils/geniusLyrics';
 
-type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudioAsset; auditionId?: string; numberTitle?: string; musicalNumberId?: string };
+type Track = { key: string; title: string; lyrics: string; audio: SharedSongAudioAsset; auditionId?: string; numberTitle?: string; musicalNumberId?: string; geniusId?: string };
+type SongRequestOptions = { position?: number; repeat?: SongRepeatMode; followChoir?: boolean; expandPlayer?: boolean };
 type SingingRequest = {
   id: number;
   trackKey: string;
@@ -42,6 +44,7 @@ type SingingRequest = {
   position: number;
   repeat?: SongRepeatMode;
   followChoir: boolean;
+  expandPlayer: boolean;
 };
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 const trackLabel = (audio: SharedSongAudioAsset) => audio.choirPart ? `Coro · ${audio.label}` : auditionAudioLabel(audio);
@@ -160,14 +163,15 @@ export const SongPracticeLibrary = ({
       number,
       audios: getNumberAudios(number, manifest.songs),
       lyrics: getNumberLyrics(number, manifest.songs),
+      geniusId: getGeniusSongId(manifest.shareId, number.id),
       managed: index < manifest.musicalNumbers.length,
     }));
   }, [manifest]);
   const tracks = useMemo(() => {
     const result: Track[] = [];
-    workNumbers.forEach(({ number, audios, lyrics }) => {
+    workNumbers.forEach(({ number, audios, lyrics, geniusId }) => {
       audios.forEach((audio) => result.push({
-        key: `number:${number.id}:${audio.id}`, title: number.title, lyrics, audio, musicalNumberId: number.id,
+        key: `number:${number.id}:${audio.id}`, title: number.title, lyrics, audio, musicalNumberId: number.id, geniusId,
       }));
     });
     manifest?.musicalAuditions?.forEach((cut) => cut.audios.forEach((audio) => result.push({
@@ -186,10 +190,13 @@ export const SongPracticeLibrary = ({
   const [repeatMode, setRepeatMode] = useState<SongRepeatMode>('queue');
   const [queueInfo, setQueueInfo] = useState({ index: -1, total: 0 });
   const [rate, setRate] = useState(1);
-  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [playerExpanded, setPlayerExpanded] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(true);
   const [error, setError] = useState('');
   const player = useRef<ReturnType<typeof createSongPlayback<Track>> | null>(null);
   const selected = tracks.find((track) => track.key === selectedKey) ?? null;
+  const selectedLyrics = selected?.lyrics.trim();
+  const hasLyrics = Boolean(selectedLyrics || selected?.geniusId);
   const isWorkFiltered = workFilter === null ? Boolean(defaultRoles.length || choirPart) : workFilter === 'mine';
   const listedNumbers = isWorkFiltered ? workNumbers.filter(({ number, audios }) =>
     getNumberCharacters(getNumberRoles(number, audios), defaultRoles).length || getNumberHarmonyChoices(audios, choirPart).length
@@ -234,7 +241,7 @@ export const SongPracticeLibrary = ({
   useEffect(() => { player.current?.setRepeat(repeatMode); player.current?.setRate(rate); }, [repeatMode, rate]);
   useEffect(() => {
     requestVersion.current++; pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false);
-    setExpandedNumberId(null); setWorkFilter(null);
+    setExpandedNumberId(null); setWorkFilter(null); setPlayerExpanded(false); setLyricsOpen(true);
     player.current?.stop(); setSelectedKey(null); setPlaying(false); setPosition(0); setDuration(0); setError('');
   }, [manifest?.shareId]);
   useEffect(() => {
@@ -276,6 +283,10 @@ export const SongPracticeLibrary = ({
       : null;
     activeChoirSelection.current = request.followChoir;
     const queue = request.followChoir ? choirQueue : request.queueKeys.flatMap(key => available.has(key) ? [available.get(key)!] : []);
+    if (request.expandPlayer) {
+      if (track.key !== selectedKey) setLyricsOpen(true);
+      setPlayerExpanded(true);
+    }
     startPlayback(track, queue, request.mode, request.repeat);
   };
   restorePosition.current = () => {
@@ -288,9 +299,10 @@ export const SongPracticeLibrary = ({
     pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false);
     if (request) startRequestedSong(request);
   };
-  const requestSong = (track: Track, queue: Track[], mode: SongPlaybackMode, at = 0, repeat?: SongRepeatMode, followChoir = false) => {
+  const requestSong = (track: Track, queue: Track[], mode: SongPlaybackMode,
+    { position: at = 0, repeat, followChoir = false, expandPlayer = false }: SongRequestOptions = {}) => {
     if (singing.current && sharedAudio.current && !sharedAudio.current.paused) vocalPractice.recordActivity(true);
-    const request: SingingRequest = { id: ++requestVersion.current, trackKey: track.key, queueKeys: queue.map(entry => entry.key), mode, position: at, repeat, followChoir };
+    const request: SingingRequest = { id: ++requestVersion.current, trackKey: track.key, queueKeys: queue.map(entry => entry.key), mode, position: at, repeat, followChoir, expandPlayer };
     const decide = () => {
       if (request.id !== requestVersion.current) return;
       if (!vocalPractice.due() || !manifest?.shareId) { startRequestedSong(request); return; }
@@ -306,23 +318,22 @@ export const SongPracticeLibrary = ({
     if (activity.loaded) decide(); else void vocalPractice.load().then(decide);
   };
   const play = (track: Track) => {
-    requestSong(track, track.auditionId ? playlist(track.audio.kind, 'auditions') : [track], 'single');
+    requestSong(track, track.auditionId ? playlist(track.audio.kind, 'auditions') : [track], 'single', { expandPlayer: true });
   };
   const playChoir = (track: Track, queue: Track[], mode: SongPlaybackMode, followChoir = false) => {
     if (selectedKey === track.key && playing && mode === 'single') player.current?.pause();
-    else requestSong(track, queue, mode, 0, undefined, followChoir);
+    else requestSong(track, queue, mode, { followChoir, expandPlayer: true });
     scroll.current?.scrollTo({ y: 0, animated: true });
   };
   const playNumber = (numberId: string, audio: SharedSongAudioAsset, mode: NumberAudioMode) => {
     const track = numberTrack(numberId, audio);
     if (!track) return;
-    setLyricsOpen(mode === 'reference');
     if (mode === 'harmony' && choirQueue.includes(track)) {
       playChoir(track, choirQueue, 'single', true);
       return;
     }
     const queue = mode === 'harmony' ? [track] : playlist(mode === 'reference' ? 'all' : mode, 'work');
-    requestSong(track, queue.includes(track) ? queue : [track], 'single');
+    requestSong(track, queue.includes(track) ? queue : [track], 'single', { expandPlayer: true });
     scroll.current?.scrollTo({ y: 0, animated: true });
   };
   const startNumberRehearsal = (request: NumberRehearsalRequest) => {
@@ -344,20 +355,36 @@ export const SongPracticeLibrary = ({
   const playGroup = (value: SongPlaylistKind) => {
     const queue = playlist(value);
     if (!queue.length) return;
-    setKind(value); requestSong(queue[0], queue, 'queue');
+    setKind(value); requestSong(queue[0], queue, 'queue', { expandPlayer: true });
     scroll.current?.scrollTo({ y: 0, animated: true });
   };
   const toggle = () => {
     if (playing) player.current?.pause();
     else if (selected) {
       if (activity.loaded && !vocalPractice.due() && player.current) player.current.resume();
-      else requestSong(selected, activeQueue.current, playbackMode, player.current && sharedAudio.current ? sharedAudio.current.currentTime : position, repeatMode, activeChoirSelection.current);
+      else requestSong(selected, activeQueue.current, playbackMode, {
+        position: player.current && sharedAudio.current ? sharedAudio.current.currentTime : position,
+        repeat: repeatMode, followChoir: activeChoirSelection.current,
+      });
     }
   };
   const navigate = (direction: 'previous' | 'next') => {
     if (!selected || activeQueue.current.length < 2) return;
     const queue = activeQueue.current, index = queue.findIndex(track => track.key === selected.key);
-    requestSong(queue[(index + (direction === 'next' ? 1 : -1) + queue.length) % queue.length], queue, playbackMode, 0, repeatMode, activeChoirSelection.current);
+    requestSong(queue[(index + (direction === 'next' ? 1 : -1) + queue.length) % queue.length], queue, playbackMode,
+      { repeat: repeatMode, followChoir: activeChoirSelection.current });
+  };
+  const closePlayer = () => {
+    requestVersion.current++;
+    seekWhenReady.current = null;
+    setPlayerExpanded(false);
+    setLyricsOpen(true);
+    player.current?.stop();
+    setSelectedKey(null);
+  };
+  const retryAudio = () => {
+    if (selected) requestSong(selected, activeQueue.current, playbackMode,
+      { position, repeat: repeatMode, followChoir: activeChoirSelection.current });
   };
   const showSongs = (nextScope: typeof scope) => {
     requestVersion.current++; pendingSingingRef.current = null; setPendingSinging(null); setWarmupOpen(false); setScope(nextScope);
@@ -374,13 +401,22 @@ export const SongPracticeLibrary = ({
     })}
   </View>;
 
-  if (!active) return selected ? <View style={[ui.header, { backgroundColor: palette.soft, gap: 6, paddingHorizontal: 16 }]}>
-    <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text><Text numberOfLines={1} style={ui.text}>{trackLabel(selected.audio)}</Text></View>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" /></TouchableOpacity>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={ui.icon}><Icon name={playing ? 'pause' : 'play'} /></TouchableOpacity>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, { width: 36 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" /></TouchableOpacity>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={[ui.icon, { width: 36 }]}><Icon name="close" /></TouchableOpacity>
+  const miniPlayer = selected && !warmupOpen ? <View testID="song-mini-player" style={[ui.header, { backgroundColor: palette.soft, gap: 0, paddingHorizontal: 10, paddingVertical: 4 }]}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ampliar reproductor" onPress={() => { setPlayerExpanded(true); onOpen?.(); }}
+      style={[ui.row, { flex: 1, minWidth: 0, minHeight: 44, gap: 4 }]}>
+      <Icon name="chevron-up" size={22} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={{ color: palette.ink, fontWeight: '600' }}>{selected.title}</Text>
+        <Text numberOfLines={1} style={[ui.text, { fontSize: 13, lineHeight: 18 }]}>{trackLabel(selected.audio)}</Text>
+      </View>
+    </TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 40 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" /></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={[ui.icon, { width: 40 }]}><Icon name={playing ? 'pause' : 'play'} /></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, { width: 40 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" /></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={closePlayer} style={[ui.icon, { width: 40 }]}><Icon name="close" size={22} /></TouchableOpacity>
   </View> : null;
+
+  if (!active) return miniPlayer;
 
   return <>
     <ScrollView ref={scroll} contentContainerStyle={[ui.page, { gap: 14, paddingTop: 14 }]}>
@@ -410,31 +446,6 @@ export const SongPracticeLibrary = ({
       {([['all', 'Todas', 'Reproducir todas las canciones'], ['vocal_guide', 'Vocal guide', 'Reproducir vocal guides'], ['karaoke', 'Karaoke', 'Reproducir karaokes']] as const).map(([value, label, accessibilityLabel]) => <Chip key={value} label={`▶ ${label}`} accessibilityLabel={accessibilityLabel} selected={Boolean(selected) && kind === value && playbackMode === 'queue' && (selected?.auditionId ? 'auditions' : 'work') === scope} disabled={!playlist(value).length} onPress={() => playGroup(value)} />)}
     </View></Disclosure></View> : null}
 
-    {selected ? <View style={[ui.card, { backgroundColor: palette.soft, borderColor: palette.soft }]}>
-      <View style={ui.row}><Text style={[ui.subtitle, { flex: 1 }]}>{selected.title}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={() => player.current?.stop()} style={ui.icon}><Icon name="close" size={20} /></TouchableOpacity></View><Text style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{trackLabel(selected.audio)}</Text>
-      <Text testID="song-queue-status" accessibilityLiveRegion="polite" style={ui.text}>{queueInfo.index + 1} de {queueInfo.total} · {playbackMode === 'single' ? 'Solo esta canción' : repeatMode === 'queue' ? 'Cola en bucle' : repeatMode === 'track' ? 'Una canción en bucle' : 'La cola termina al llegar al final'}</Text>
-      {selected.auditionId ? versionButtons(selected.auditionId) : null}
-      <View style={[ui.row, { justifyContent: 'space-between', gap: 0 }]}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, { width: 44 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" size={30} /></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retroceder diez segundos" style={[ui.icon, { width: 44 }]} onPress={() => player.current?.seek(position - 10)}><Icon name="rewind-10" size={26} /></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={[ui.icon, { width: 60, height: 60, backgroundColor: palette.button }]}><Icon name={playing ? 'pause' : 'play'} color={palette.onButton} size={32} /></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Avanzar diez segundos" style={[ui.icon, { width: 44 }]} onPress={() => player.current?.seek(position + 10)}><Icon name="fast-forward-10" size={26} /></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, { width: 44 }, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" size={30} /></TouchableOpacity>
-      </View>
-      {Platform.OS === 'web' ? <input aria-label="Posición de la canción" type="range" min={0} max={duration || 1} step={0.1} value={position} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={(event) => player.current?.seek(Number(event.target.value))} /> : null}
-      <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={ui.text}>{clock(position)}</Text><Text style={ui.text}>{clock(duration)}</Text></View>
-      <Disclosure title="Velocidad y repetición" summary={`${rate.toFixed(2).replace('.', ',')}×${repeatMode !== 'off' ? ' · Repetición activada' : ''}`}>
-      <View testID="song-speed-control" style={{ gap: 4 }}>
-        <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={ui.text}>Velocidad · {rate.toFixed(2).replace('.', ',')}×</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Restablecer velocidad normal" onPress={() => setRate(1)} style={[ui.icon, { width: 44 }]}><Text style={{ color: palette.plum, fontWeight: '700' }}>1×</Text></TouchableOpacity></View>
-        {Platform.OS === 'web' ? <input aria-label="Velocidad de reproducción" aria-valuetext={`${rate.toFixed(2).replace('.', ',')} veces la velocidad normal`} type="range" min={0.7} max={1} step={0.05} value={rate} style={{ width: '100%', accentColor: palette.plum, minHeight: 30 }} onChange={(event) => setRate(Number(event.target.value))} /> : null}
-        <View style={[ui.row, { justifyContent: 'space-between' }]}><Text style={[ui.text, { fontSize: 12 }]}>0,70× · Más despacio</Text><Text style={[ui.text, { fontSize: 12 }]}>1× · Normal</Text></View>
-      </View>
-      <View style={ui.wrap}>{playbackMode === 'queue' ? <Chip label="Repetir cola" selected={repeatMode === 'queue'} onPress={() => setRepeatMode(repeatMode === 'queue' ? 'off' : 'queue')} /> : null}<Chip label="Repetir canción" selected={repeatMode === 'track'} onPress={() => setRepeatMode(repeatMode === 'track' ? playbackMode === 'queue' ? 'queue' : 'off' : 'track')} /></View>
-      </Disclosure>
-      {selected.lyrics ? <Chip label={lyricsOpen ? 'Ocultar letra' : 'Ver letra'} selected={lyricsOpen} onPress={() => setLyricsOpen(!lyricsOpen)} /> : null}
-      {lyricsOpen && selected.lyrics ? <Text selectable style={[ui.text, { color: palette.ink }]}>{selected.lyrics}</Text> : null}
-      {error ? <Text accessibilityRole="alert" style={ui.error}>{error}</Text> : null}
-    </View> : null}
     {scope === 'auditions' ? <>
       {!visibleCuts.length ? <View style={ui.card}><Icon name="music-note-outline" size={32} /><Text style={ui.subtitle}>{mine ? 'No hay fragmentos para estos personajes' : 'Canciones para tus audiciones'}</Text><Text style={ui.text}>{mine ? 'Puedes cambiar tus personajes o ver todas las audiciones.' : 'Añade un fragmento, sus personajes y los audios con voz y karaoke. Aparecerán aquí para practicar.'}</Text></View> : null}
       {visibleCuts.map((cut) => <View key={cut.id} style={ui.card}>
@@ -445,8 +456,8 @@ export const SongPracticeLibrary = ({
         {!cut.audios.length ? <Text style={ui.text}>Fragmento preparado. Todavía faltan los audios.</Text> : null}
       </View>)}
     </> : <>
-    {listedNumbers.map(({ number, audios, lyrics, managed }) => <MusicalNumberCard key={number.id}
-      number={number} audios={audios} lyrics={lyrics} guion={guion} workRoles={defaultRoles} choirPart={choirPart}
+    {listedNumbers.map(({ number, audios, lyrics, geniusId, managed }) => <MusicalNumberCard key={number.id}
+      number={number} audios={audios} lyrics={lyrics} hasGeniusLyrics={Boolean(geniusId)} guion={guion} workRoles={defaultRoles} choirPart={choirPart}
       karaokeLoaded={karaokeChoices.loaded} expanded={expandedNumberId === number.id}
       rememberedKaraoke={(character) => karaokeChoices.entries[numberKaraokeKey(number.id, character)]}
       onRememberKaraoke={(character, audioId) => karaokeChoices.remember(number.id, character, audioId)}
@@ -458,11 +469,61 @@ export const SongPracticeLibrary = ({
       {workNumbers.length ? <Button label="Ver todos los números" secondary onPress={() => setWorkFilter('all')} /> : null}
     </View> : null}
     </>}
-    {selected && error ? <Button label="Reintentar audio" secondary onPress={() => {
-      requestSong(selected, activeQueue.current, playbackMode, position, repeatMode, activeChoirSelection.current);
-    }} /> : null}
+    {selected && error && !playerExpanded ? <Button label="Reintentar audio" secondary onPress={retryAudio} /> : null}
     </>}
     </ScrollView>
+    {!playerExpanded ? miniPlayer : null}
+    {selected && playerExpanded && !warmupOpen ? <Modal visible onRequestClose={() => setPlayerExpanded(false)}>
+      <View testID="song-full-player" style={{ flex: 1, backgroundColor: palette.surface }}>
+        <View style={{ flex: 1, minHeight: 0, width: '100%', maxWidth: 760, alignSelf: 'center' }}>
+          <View style={{ paddingHorizontal: 14, paddingTop: 6, paddingBottom: 6, gap: 4 }}>
+            <View style={[ui.row, { gap: 4 }]}>
+              <Text accessibilityRole="header" numberOfLines={2} style={[ui.subtitle, { flex: 1, minWidth: 0 }]}>{selected.title}</Text>
+              <Chip label="Minimizar" accessibilityLabel="Minimizar reproductor" onPress={() => setPlayerExpanded(false)} />
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar reproductor" onPress={closePlayer} style={ui.icon}><Icon name="close" size={22} /></TouchableOpacity>
+            </View>
+            <Text numberOfLines={1} style={ui.text}>{selected.numberTitle ? `${selected.numberTitle} · ` : ''}{trackLabel(selected.audio)}</Text>
+            <Text testID="song-queue-status" accessibilityLiveRegion="polite" style={[ui.text, { fontSize: 13, lineHeight: 19 }]}>{queueInfo.index + 1} de {queueInfo.total} · {playbackMode === 'single' ? 'Solo esta canción' : repeatMode === 'queue' ? 'Cola en bucle' : repeatMode === 'track' ? 'Una canción en bucle' : 'La cola termina al llegar al final'}</Text>
+            <View style={[ui.row, { justifyContent: 'space-between', gap: 0 }]}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción anterior" disabled={queueInfo.total < 2} onPress={() => navigate('previous')} style={[ui.icon, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-previous" size={28} /></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retroceder diez segundos" onPress={() => player.current?.seek(position - 10)} style={ui.icon}><Icon name="rewind-10" size={26} /></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={playing ? 'Pausar canción' : 'Reproducir canción'} onPress={toggle} style={[ui.icon, { width: 56, height: 56, borderRadius: 28, backgroundColor: palette.button }]}><Icon name={playing ? 'pause' : 'play'} color={palette.onButton} size={30} /></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Avanzar diez segundos" onPress={() => player.current?.seek(position + 10)} style={ui.icon}><Icon name="fast-forward-10" size={26} /></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Canción siguiente" disabled={queueInfo.total < 2} onPress={() => navigate('next')} style={[ui.icon, queueInfo.total < 2 && { opacity: 0.4 }]}><Icon name="skip-next" size={28} /></TouchableOpacity>
+            </View>
+            <View style={[ui.row, { gap: 8 }]}>
+              <Text style={[ui.text, { fontSize: 12 }]}>{clock(position)}</Text>
+              {Platform.OS === 'web' ? <input aria-label="Posición de la canción" type="range" min={0} max={duration || 1} step={0.1} value={position} style={{ flex: 1, minWidth: 0, accentColor: palette.plum, minHeight: 30 }} onChange={(event) => player.current?.seek(Number(event.target.value))} /> : null}
+              <Text style={[ui.text, { fontSize: 12 }]}>{clock(duration)}</Text>
+            </View>
+            <View style={[ui.row, { gap: 8, alignItems: 'flex-start' }]}>
+              {hasLyrics ? <Chip label={lyricsOpen ? 'Ocultar letra' : 'Ver letra'} selected={lyricsOpen} onPress={() => setLyricsOpen(!lyricsOpen)} /> : null}
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Disclosure title="Velocidad y repetición" summary={`${rate.toFixed(2).replace('.', ',')}×`}>
+                  <View testID="song-speed-control" style={ui.row}>
+                    {Platform.OS === 'web' ? <input aria-label="Velocidad de reproducción" aria-valuetext={`${rate.toFixed(2).replace('.', ',')} veces la velocidad normal`} type="range" min={0.7} max={1} step={0.05} value={rate} style={{ flex: 1, minWidth: 0, accentColor: palette.plum, minHeight: 30 }} onChange={(event) => setRate(Number(event.target.value))} /> : null}
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Restablecer velocidad normal" onPress={() => setRate(1)} style={ui.icon}><Text style={{ color: palette.plum, fontWeight: '700' }}>1×</Text></TouchableOpacity>
+                  </View>
+                  <View style={ui.wrap}>
+                    {playbackMode === 'queue' ? <Chip label="Repetir cola" selected={repeatMode === 'queue'} onPress={() => setRepeatMode(repeatMode === 'queue' ? 'off' : 'queue')} /> : null}
+                    <Chip label="Repetir canción" selected={repeatMode === 'track'} onPress={() => setRepeatMode(repeatMode === 'track' ? playbackMode === 'queue' ? 'queue' : 'off' : 'track')} />
+                  </View>
+                </Disclosure>
+              </View>
+            </View>
+            {selected.auditionId ? <Disclosure title="Versiones de la audición"><ScrollView style={{ maxHeight: 128 }}>{versionButtons(selected.auditionId)}</ScrollView></Disclosure> : null}
+            {error ? <><Text accessibilityRole="alert" style={ui.error}>{error}</Text><Button label="Reintentar audio" secondary onPress={retryAudio} /></> : null}
+          </View>
+          {lyricsOpen && hasLyrics ? <View style={{ flex: 1, minHeight: 0, borderTopWidth: 1, borderColor: palette.rule }}>
+            {selectedLyrics ? <ScrollView key={selected.auditionId ?? selected.musicalNumberId} contentContainerStyle={ui.page}>
+              <Text selectable style={[ui.text, { color: palette.ink, fontSize: 17, lineHeight: 27 }]}>{selected.lyrics}</Text>
+            </ScrollView> : Platform.OS === 'web' && selected.geniusId ? <iframe key={selected.geniusId} title={`Letra de ${selected.title} en Genius`}
+              src={`/letra-genius.html?cancion=${selected.geniusId}`} sandbox="allow-scripts allow-popups" referrerPolicy="no-referrer"
+              style={{ width: '100%', height: '100%', border: 0, display: 'block' }} /> : null}
+          </View> : null}
+        </View>
+      </View>
+    </Modal> : null}
     <Sheet title="Opciones de canciones" visible={optionsOpen} onClose={() => setOptionsOpen(false)}>
       <Chip label="Calentar antes de cantar" selected={activity.enabled} disabled={!activity.loaded} onPress={() => vocalPractice.setEnabled(!activity.enabled)} />
       <Text style={ui.text}>Calentamiento automático si llevas más de dos horas sin cantar. Siempre puedes omitirlo.</Text>

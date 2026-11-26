@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://genius.com; style-src 'unsafe-inline'; img-src https://genius.com https://*.genius.com data:; base-uri 'none'; form-action 'none'">
+  <title>Letra de Genius</title>
+  <style>
+    html, body { height: 100%; }
+    body { margin: 0; overflow: auto; color: #28212a; background: #fff; font: 16px/1.55 system-ui, sans-serif; }
+    #status { margin: 16px; }
+    #retry { margin: 0 16px; min-height: 44px; font: inherit; }
+  </style>
+</head>
+<body>
+  <p id="status" role="status">Cargando letra…</p>
+  <button id="retry" type="button" hidden>Reintentar letra</button>
+  <script>
+    const status = document.getElementById('status');
+    const retry = document.getElementById('retry');
+    const songId = new URLSearchParams(location.search).get('cancion') || '';
+    retry.onclick = () => location.reload();
+
+    const showUnavailable = () => {
+      status.textContent = 'No se ha podido cargar la letra de Genius.';
+      retry.hidden = false;
+    };
+    const finishLoading = () => {
+      clearTimeout(timeout);
+      if (document.getElementById('rg_embed_' + songId)) {
+        status.hidden = true;
+        retry.hidden = true;
+      } else showUnavailable();
+    };
+    let timeout;
+
+    if (window === window.top || window.origin !== 'null' || !/^\d{1,12}$/.test(songId)) {
+      status.textContent = 'Abre la letra desde el reproductor de AI-Theatre.';
+    } else {
+      try {
+        // Only the main app document should use the installed WebView's native bridge.
+        for (const name of ['ReactNativeWebView', 'webkit']) {
+          for (let object = window; object; object = Object.getPrototypeOf(object)) {
+            if (Object.prototype.hasOwnProperty.call(object, name)) {
+              Object.defineProperty(object, name, { value: undefined, writable: false, configurable: false });
+            }
+          }
+        }
+        if (window.ReactNativeWebView !== undefined || window.webkit?.messageHandlers) {
+          throw new Error('The native bridge must be inaccessible to the lyrics viewer.');
+        }
+
+        timeout = setTimeout(showUnavailable, 12000);
+        // The official Genius snippet runs while the frame's document is being parsed.
+        document.write('<div id="rg_embed_link_' + songId + '" class="rg_embed_link" data-song-id="' + songId + '"></div>'
+          + '<script crossorigin="anonymous" src="https://genius.com/songs/' + songId + '/embed.js"'
+          + ' onload="finishLoading()" onerror="clearTimeout(timeout); showUnavailable()"><' + '/script>');
+      } catch {
+        showUnavailable();
+      }
+    }
+  </script>
+</body>
+</html>

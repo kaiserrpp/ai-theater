@@ -29,6 +29,7 @@ type Props = {
   number: SharedMusicalNumberAsset;
   audios: SharedSongAudioAsset[];
   lyrics: string;
+  hasGeniusLyrics: boolean;
   guion: Dialogue[];
   workRoles: string[];
   choirPart: ChoirPart | null;
@@ -42,7 +43,7 @@ type Props = {
 };
 
 export const MusicalNumberCard = ({
-  number, audios, lyrics, guion, workRoles, choirPart, rememberedKaraoke,
+  number, audios, lyrics, hasGeniusLyrics, guion, workRoles, choirPart, rememberedKaraoke,
   onRememberKaraoke, karaokeLoaded, expanded, onToggle, onPlay, onRehearse,
 }: Props) => {
   const { ui, palette } = usePracticeTheme();
@@ -114,7 +115,7 @@ export const MusicalNumberCard = ({
       </Disclosure> : <Text style={ui.text}>{currentMode === 'vocal_guide' ? 'Guía del personaje pendiente.'
         : currentMode === 'karaoke' ? 'Karaoke del personaje pendiente.' : 'Pistas pendientes.'}</Text>}
       {currentMode === 'karaoke' && !audios.some(isNumberInstrumental) ? <Text style={ui.text}>Instrumental pendiente.</Text> : null}
-      <Disclosure title="Letra"><Text selectable style={[ui.text, { color: palette.ink }]}>{lyrics || 'Letra pendiente.'}</Text></Disclosure>
+      <Disclosure title="Letra"><Text selectable style={[ui.text, { color: palette.ink }]}>{lyrics || (hasGeniusLyrics ? 'Disponible en el reproductor.' : 'Letra pendiente.')}</Text></Disclosure>
       <Disclosure title="Tramo de escena" summary={blocks.length ? number.sceneTitle ?? undefined : 'Vínculo al guion pendiente'}>
         {blocks.length ? blocks.map((block) => <View key={block.startLineIndex} style={{ gap: 3 }}>
           <Text style={ui.label}>{block.kind === 'song' ? 'Canto' : 'Diálogo'}</Text>
