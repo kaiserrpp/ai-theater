@@ -65,6 +65,14 @@ export const PracticeHome = (props: Props) => {
   const [musicBusy, setMusicBusy] = useState(false);
   const reportStatus = useFeedbackOutbox();
   const shareId = props.manifest?.shareId;
+  const canOpenVoicePilot = Boolean(shareId && props.manifest?.auditionScenes?.length && getNativePrototypeInfo()?.platform === 'ios');
+  const openVoicePilot = () => {
+    if (!canOpenVoicePilot || !shareId || typeof window === 'undefined') return;
+    const url = new URL('/prueba-voz-privada.html', window.location.origin);
+    url.searchParams.set('share', shareId);
+    if (props.myRoles[0]) url.searchParams.set('role', props.myRoles[0]);
+    window.location.assign(url);
+  };
   useEffect(() => {
     void feedbackOutbox.flush();
     const retry = () => { void feedbackOutbox.flush(); };
@@ -157,6 +165,11 @@ export const PracticeHome = (props: Props) => {
 
     {tab === 'scenes' ? <View style={{ flex: 1 }}>
       {!inRehearsal ? <View style={{ paddingHorizontal: 22, paddingTop: 14, paddingBottom: 6, gap: 12 }}><Text style={ui.title}>Escenas</Text><View style={ui.wrap}><Chip label="Audiciones" selected={scope === 'auditions'} onPress={() => setScope('auditions')} /><Chip label="Obra" selected={scope === 'work'} onPress={() => setScope('work')} /></View></View> : null}
+      {!inRehearsal && scope === 'auditions' && canOpenVoicePilot ? (
+        <View style={{ paddingHorizontal: 22, paddingBottom: 8 }}>
+          <Button label="Ensayar con OpenAI" secondary onPress={openVoicePilot} />
+        </View>
+      ) : null}
       {scope === 'auditions' ? <AuditionScenesPanel practiceOnly initialSceneId={initialAudition} initialMode={initialAudition ? lastAudition?.mode : undefined} sharedScript={props.manifest} obraTitle={props.script?.obra || ''}
         autoStartRequest={directAuditionRequest} onCompleted={() => { setInRehearsal(false); setVoiceWanted(true); chooseTab('home'); }}
         onEnsureShared={props.onEnsureShared} onManifestUpdated={props.onManifestUpdated} onExit={() => chooseTab('home')}
@@ -201,13 +214,7 @@ export const PracticeHome = (props: Props) => {
         engine={recognitionEngine} onEngineChange={(next) => { setRecognitionEngine(next); savePreference(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, next); }}
         showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
       <Button label="Ensayar en Comparativa" secondary onPress={openRecognitionComparison} />
-      {getNativePrototypeInfo()?.platform === 'ios' && typeof window !== 'undefined' ? (
-        <Button label="Prueba privada de voz" secondary onPress={() => {
-          const url = new URL('/prueba-voz-privada.html', window.location.origin);
-          if (shareId) url.searchParams.set('share', shareId);
-          window.location.assign(url);
-        }} />
-      ) : null}
+      {canOpenVoicePilot ? <Button label="Ensayar con OpenAI" secondary onPress={openVoicePilot} /> : null}
       {storageNotice ? <Text style={ui.error}>{storageNotice}</Text> : null}
     </Sheet>
     <Sheet title="Materiales y gestión" visible={sheet === 'materials'} onClose={() => setSheet(null)}>

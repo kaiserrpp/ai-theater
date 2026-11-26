@@ -1,209 +1,312 @@
-const byId = id => document.getElementById(id);
-const endpoint = '/api/shared-script?resource=voice-pilot';
+import { pilotEndpoint, pilotHeaders, pilotError, openPilotConnection } from './voice-pilot-connection.mjs';
+import { hasCompleteLiveLine } from './voice-pilot-ending.mjs';
+
+const $ = id => document.getElementById(id);
 const native = window.__AI_THEATRE_NATIVE_V1__;
-const share = new URLSearchParams(location.search).get('share');
-if (/^[a-z0-9-]{1,40}$/i.test(share || '')) byId('back').href = `/?share=${encodeURIComponent(share)}&nativePrototype=1`;
+const params = new URLSearchParams(location.search);
+const rawShare = params.get('share');
+const share = /^[a-z0-9-]{1,40}$/i.test(rawShare || '') ? rawShare : 'd92b33981047';
+$('back').href = `/?share=${encodeURIComponent(share)}&nativePrototype=1`;
 
 if (native?.platform === 'ios') {
-  byId('unsupported').hidden = true;
-  byId('pilot').hidden = false;
+  $('unsupported').hidden = true;
+  $('pilot').hidden = false;
 }
 
-let code = '';
-let available = 0;
-let reservedPerAttempt = 45;
-let active = null;
-const status = (message, error = false) => {
-  byId('status').textContent = message;
-  byId('status').toggleAttribute('data-error', error);
+let code = '', budget = 0, scripts = [], rehearsal = null, active = null;
+const status = (text, error = false) => {
+  $('status').textContent = text;
+  $('status').toggleAttribute('data-error', error);
 };
-const updateButtons = () => {
-  byId('quota').textContent = `Tiempo sin reservar ${Math.floor(available / 60)} min ${available % 60} s. Cada intento reserva hasta ${reservedPerAttempt} s.`;
-  byId('start').hidden = Boolean(active);
-  byId('start').disabled = available <= 0;
-  byId('repeat').hidden = active?.phase !== 'ready';
-  byId('finish').hidden = active?.phase !== 'listening';
-  byId('stop').hidden = !active;
+const updateBudget = seconds => {
+  budget = seconds;
+  $('quota').textContent = `Tiempo por reservar ${Math.floor(budget / 60)} min ${budget % 60} s. Cada conexión reserva hasta 3 min.`;
+  $('quota').hidden = false;
+  $('begin').disabled = !$('scene').value || budget === 0;
+  $('resume').disabled = budget === 0;
 };
-const headers = () => ({ 'Content-Type': 'application/json', 'x-ai-theatre-pilot': code });
-const readError = async response => {
-  const body = await response.json().catch(() => null);
-  const details = body?.provider;
-  const suffix = details?.status ? ` OpenAI indicó ${details.status}${details.code ? ` (${details.code})` : ''}.` : '';
-  return new Error((body?.error || 'No se pudo conectar con el piloto.') + suffix);
+const readBudget = async () => {
+  const response = await fetch(pilotEndpoint, { headers: pilotHeaders(code), cache: 'no-store', signal: AbortSignal.timeout(7500) });
+  if (!response.ok) throw await pilotError(response);
+  updateBudget((await response.json()).remainingSeconds);
 };
-const refreshBudget = async () => {
-  const response = await fetch(endpoint, { headers: headers(), cache: 'no-store', signal: AbortSignal.timeout(7500) });
-  if (!response.ok) throw await readError(response);
-  const budget = await response.json();
-  available = budget.remainingSeconds;
-  reservedPerAttempt = budget.attemptSeconds;
-  updateButtons();
+const readAuditionScenes = audition => {
+  const scenes = [];
+  let current = { id: 0, title: audition.title, lines: [] };
+  audition.scriptData.guion.forEach((line, index) => {
+    if (line.p === 'ESCENA_SISTEMA') {
+      if (current.lines.length) scenes.push(current);
+      current = { id: index, title: line.t, lines: [] };
+      return;
+    }
+    if (line.p === 'CANCION_SISTEMA' || line.k === 'song') return;
+    const spoken = line.t?.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!spoken) return;
+    current.lines.push({ index, role: line.p, roles: Array.isArray(line.r) && line.r.length ? line.r : [line.p],
+      text: line.t, spoken, direction: line.a });
+  });
+  if (current.lines.length) scenes.push(current);
+  return scenes;
+};
+const options = (select, items, selected) => {
+  select.replaceChildren(...items.map(item => new Option(item.label, item.value)));
+  if (items.some(item => item.value === selected)) select.value = selected;
+};
+const selectedScript = () => scripts.find(audition => audition.id === $('script').value);
+const chooseScene = preferred => {
+  const audition = selectedScript();
+  const scenes = audition?.scenes.filter(scene => scene.lines.some(line => line.roles.includes($('role').value))) ?? [];
+  options($('scene'), scenes.map(scene => ({ value: String(scene.id), label: scene.title })), preferred);
+  $('begin').disabled = !scenes.length || budget === 0;
+};
+const chooseRole = preferred => {
+  const roles = [...new Set(selectedScript()?.scenes.flatMap(scene => scene.lines.flatMap(line => line.roles)) ?? [])];
+  options($('role'), roles.map(role => ({ value: role, label: role })), preferred);
+  chooseScene();
 };
 
-byId('access').addEventListener('submit', async event => {
+$('access').addEventListener('submit', async event => {
   event.preventDefault();
   if (native?.platform !== 'ios') return;
-  code = byId('code').value.trim();
-  byId('check').disabled = true;
+  code = $('code').value.trim();
+  $('check').disabled = true;
   try {
-    await refreshBudget();
-    byId('code').value = '';
-    byId('access').hidden = true;
-    byId('controls').hidden = false;
-    status('Acceso confirmado.');
+    await readBudget();
+    const response = await fetch(`/api/shared-script?shareId=${encodeURIComponent(share)}`, {
+      cache: 'no-store', signal: AbortSignal.timeout(9000),
+    });
+    if (!response.ok) throw new Error('No se pudo abrir el miniguion de esta obra.');
+    const manifest = await response.json();
+    scripts = (manifest.auditionScenes ?? []).map(audition => ({ ...audition, scenes: readAuditionScenes(audition) }))
+      .filter(audition => audition.scenes.length);
+    if (!scripts.length) throw new Error('Esta obra no tiene miniguiones con escenas para el ensayo privado.');
+    options($('script'), scripts.map(audition => ({ value: audition.id, label: audition.title })));
+    chooseRole(params.get('role'));
+    $('access').hidden = true;
+    $('code').value = '';
+    $('setup').hidden = false;
+    status(budget ? 'Elige tu personaje y una escena.' : 'Se agotó el tiempo del ensayo privado.');
   } catch (error) {
     status(error.message, true);
-  } finally { byId('check').disabled = false; }
+  } finally { $('check').disabled = false; }
 });
+$('script').addEventListener('change', () => chooseRole($('role').value));
+$('role').addEventListener('change', () => chooseScene($('scene').value));
 
-const release = (run, message, error = false) => {
-  if (active !== run) return;
-  active = null;
-  clearTimeout(run.deadlineTimer);
-  clearTimeout(run.resultTimer);
+const current = () => rehearsal?.scene.lines[rehearsal.index];
+const isMine = line => line?.roles.includes(rehearsal.role);
+const showLine = () => {
+  const line = current();
+  $('position').textContent = `${rehearsal.scene.title} · ${Math.min(rehearsal.index + 1, rehearsal.scene.lines.length)} de ${rehearsal.scene.lines.length}`;
+  $('character').textContent = line?.role || 'Escena terminada';
+  $('direction').textContent = line?.direction || '';
+  $('direction').hidden = !line?.direction;
+  $('line').textContent = line?.text || '';
+  $('dialogue').toggleAttribute('data-actor', Boolean(isMine(line)));
+  $('transcript').hidden = !isMine(line);
+  $('heard').textContent = '';
+  $('timing').textContent = '';
+};
+const showControls = () => {
+  const phase = active?.phase;
+  $('pause').hidden = !active;
+  $('resume').hidden = Boolean(active) || !current();
+  $('resume').disabled = budget === 0;
+  $('retry').hidden = !['actor', 'repeat'].includes(phase);
+  $('skip').hidden = !current();
+  $('skip').disabled = Boolean(active) && !['actor', 'other', 'repeat'].includes(phase);
+};
+const mute = run => {
+  if (!run.gate) return;
+  const time = run.audio.currentTime;
+  run.gate.gain.cancelScheduledValues(time);
+  run.gate.gain.setValueAtTime(0, time);
+};
+const stopCurrent = run => {
+  mute(run);
   cancelAnimationFrame(run.meter);
+  clearTimeout(run.resultTimer);
+  if (run.turn?.item) run.retired.add(run.turn.item);
+  run.turn = null;
+  const player = run.player;
+  run.player = null;
+  try { player?.stop(); } catch { /* It may already have ended. */ }
+};
+const pause = (run, message, error = false) => {
+  if (active !== run) return;
+  stopCurrent(run);
+  active = null;
   run.abort.abort();
-  try { run.voice?.stop(); } catch { /* The cue may already have ended. */ }
-  run.peer?.close();
+  run.link?.close();
   for (const track of run.stream?.getTracks() ?? []) track.stop();
   for (const track of run.output?.stream.getTracks() ?? []) track.stop();
   if (run.audio?.state !== 'closed') void run.audio?.close().catch(() => {});
   if (run.oldAudioType !== undefined) {
-    try { navigator.audioSession.type = run.oldAudioType; } catch { /* The device may be switching outputs. */ }
+    try { navigator.audioSession.type = run.oldAudioType; } catch { /* The route may be switching. */ }
   }
-  updateButtons();
+  showControls();
   status(message, error);
-  if (run.requested) void refreshBudget().catch(() => {});
+  if (run.connectionRequested) void readBudget().catch(() => {});
 };
 
-const firstEvent = async response => {
-  if (!response.ok) throw await readError(response);
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('El iPhone no pudo leer los datos de conexión.');
-  const decoder = new TextDecoder();
-  let text = '';
-  while (text.length < 24_000) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    text += decoder.decode(chunk.value, { stream: true });
-    const end = text.indexOf('\n\n');
-    if (end !== -1 && text.startsWith('data: ')) return { reader, value: JSON.parse(text.slice(6, end)) };
-  }
-  throw new Error('El servidor no entregó la conexión de voz.');
+const changePhase = (run, phase) => {
+  run.phase = phase;
+  showControls();
 };
-
-const waitForIce = peer => new Promise(resolve => {
-  if (peer.iceGatheringState === 'complete') { resolve(); return; }
-  const finish = () => { clearTimeout(timer); peer.removeEventListener('icegatheringstatechange', changed); resolve(); };
-  const changed = () => { if (peer.iceGatheringState === 'complete') finish(); };
-  const timer = setTimeout(finish, 1500);
-  peer.addEventListener('icegatheringstatechange', changed);
-});
-
-const watchConnection = async (run, reader) => {
-  try {
-    while (!(await reader.read()).done) { /* The connection stays open until the server closes the session. */ }
-    release(run, 'Se cerró el intento. Puedes iniciar otro si queda tiempo.');
-  } catch {
-    release(run, 'La conexión se interrumpió. Puedes iniciar otro intento.', true);
-  }
-};
-
 const timing = turn => {
-  if (!turn.firstText) return '';
-  if (!turn.firstSignal) return 'Ya hay texto. No se detectó un inicio de voz claro para medirlo.';
-  return `Primer texto ${Math.max(0, turn.firstText - turn.firstSignal).toFixed(0)} ms después de la primera señal de voz estimada.`;
+  if (!turn.firstText || !turn.firstVoice) return '';
+  return `Primer texto ${Math.max(0, turn.firstText - turn.firstVoice).toFixed(0)} ms después de la primera señal de voz estimada.`;
 };
-const monitor = run => {
-  if (active !== run || run.phase !== 'listening') return;
+const finishTurn = (run, turn) => {
+  if (active !== run || run.turn !== turn || run.phase !== 'actor') return;
+  mute(run);
+  cancelAnimationFrame(run.meter);
+  changePhase(run, 'confirming');
+  status('Comprobando el final de tu réplica…');
+  try { run.link.send('input_audio_buffer.commit'); }
+  catch (error) { pause(run, error.message, true); return; }
+  run.resultTimer = setTimeout(() => {
+    if (active === run && run.turn === turn) pause(run, 'OpenAI no confirmó el final. Puedes reanudar desde esta réplica.', true);
+  }, 4500);
+};
+const monitor = (run, turn) => {
+  if (active !== run || run.phase !== 'actor' || run.turn !== turn) return;
+  const now = performance.now();
   run.analyser.getFloatTimeDomainData(run.levels);
-  const rms = Math.sqrt(run.levels.reduce((sum, value) => sum + value * value, 0) / run.levels.length);
-  if (!run.turn.firstSignal && rms > 0.025) {
-    run.turn.firstSignal = performance.now();
-    byId('timing').textContent = timing(run.turn);
+  const rms = Math.sqrt(run.levels.reduce((total, value) => total + value * value, 0) / run.levels.length);
+  if (rms > 0.017) {
+    turn.firstVoice ||= now;
+    turn.lastVoice = now;
   }
-  run.meter = requestAnimationFrame(() => monitor(run));
-};
-
-const playCue = run => {
-  if (active !== run || run.phase !== 'ready') return;
-  if (performance.now() + 6000 > run.deadline) {
-    release(run, 'Queda poco tiempo en este intento. Inicia otro para probar una réplica completa.');
+  if (turn.complete && now - Math.max(turn.lastVoice, turn.lastWord) >= 400) {
+    finishTurn(run, turn);
     return;
   }
-  run.phase = 'cue';
-  run.turn = { item: null, text: '', firstSignal: 0, firstText: 0 };
-  byId('result').hidden = false;
-  byId('words').textContent = '';
-  byId('timing').textContent = '';
-  status('Escucha a la otra voz…');
-  updateButtons();
-  const voice = run.audio.createBufferSource();
-  run.voice = voice;
-  voice.buffer = run.cue;
-  voice.connect(run.audio.destination);
-  const startsAt = run.audio.currentTime + 0.055;
-  const endsAt = startsAt + run.cue.duration;
-  run.gate.gain.setValueAtTime(0, run.audio.currentTime);
-  run.gate.gain.setValueAtTime(1, endsAt);
-  voice.onended = () => {
-    if (active !== run || run.voice !== voice) return;
-    run.voice = null;
-    run.phase = 'listening';
-    status('Tu turno. Empieza a hablar.');
-    updateButtons();
-    monitor(run);
-  };
-  voice.start(startsAt);
+  if (!turn.firstText && turn.firstVoice && now - turn.firstVoice >= 4500 && !turn.warned) {
+    turn.warned = true;
+    status('El micrófono detecta voz. OpenAI todavía no ha devuelto palabras.', true);
+  }
+  run.meter = requestAnimationFrame(() => monitor(run, turn));
 };
-
-const handleEvent = (run, event) => {
+const actorTurn = (run, gateAlreadyScheduled = false) => {
   if (active !== run) return;
+  showLine();
+  run.turn = { item: null, text: '', firstVoice: 0, lastVoice: 0, firstText: 0, lastWord: 0, complete: false };
+  run.bufferDirty = true;
+  if (!gateAlreadyScheduled) run.gate.gain.setValueAtTime(1, run.audio.currentTime);
+  changePhase(run, 'actor');
+  status('Tu turno.');
+  monitor(run, run.turn);
+};
+
+const onProviderEvent = (run, link, event) => {
+  if (active !== run || run.link !== link) return;
+  if (event.type === 'input_audio_buffer.cleared') { run.clearDone?.(); return; }
   if (event.type === 'error' || event.type === 'conversation.item.input_audio_transcription.failed') {
-    const label = event.error?.code;
-    const detail = typeof label === 'string' && /^[a-z0-9_-]{1,80}$/i.test(label) ? ` (${label})` : '';
-    release(run, `OpenAI no pudo completar la escucha${detail}.`, true);
+    pause(run, 'OpenAI interrumpió la escucha. Puedes reanudar en esta línea.', true);
     return;
   }
-  if (event.type === 'session.created' || event.type === 'transcription_session.created') {
-    if (run.phase !== 'connecting') return;
-    if (event.session?.type && event.session.type !== 'transcription') {
-      release(run, 'El servicio abrió una sesión distinta de la de transcripción.', true);
-      return;
-    }
-    run.phase = 'ready';
-    updateButtons();
-    playCue(run);
-    return;
-  }
-  if (!['listening', 'finishing'].includes(run.phase) || !event.item_id || run.retired.has(event.item_id)) return;
   const turn = run.turn;
-  if (turn.item && turn.item !== event.item_id) return;
-  if (event.type === 'conversation.item.input_audio_transcription.delta') {
-    if (typeof event.delta !== 'string' || !event.delta) return;
+  if (!turn || !event.item_id || run.retired.has(event.item_id) || (turn.item && turn.item !== event.item_id)) return;
+  if (event.type === 'conversation.item.input_audio_transcription.delta' && ['actor', 'confirming'].includes(run.phase)) {
+    if (!event.delta || typeof event.delta !== 'string') return;
     turn.item = event.item_id;
     turn.text += event.delta;
-    if (turn.text.trim()) turn.firstText ||= performance.now();
-    byId('words').textContent = turn.text;
-    byId('timing').textContent = timing(turn);
-  } else if (event.type === 'conversation.item.input_audio_transcription.completed' && run.phase === 'finishing') {
+    if (turn.text.trim()) {
+      turn.firstText ||= performance.now();
+      turn.lastWord = performance.now();
+      turn.complete = hasCompleteLiveLine(current().spoken, turn.text);
+      if (turn.warned && run.phase === 'actor') status('Tu turno.');
+    }
+    $('heard').textContent = turn.text;
+    $('timing').textContent = timing(turn);
+  }
+  if (event.type === 'conversation.item.input_audio_transcription.completed' && run.phase === 'confirming') {
     clearTimeout(run.resultTimer);
     run.retired.add(event.item_id);
-    byId('words').textContent = event.transcript?.trim() || 'OpenAI no devolvió palabras en este turno.';
-    byId('timing').textContent = timing(turn);
-    run.phase = 'ready';
-    status(event.transcript?.trim() ? 'Réplica terminada. Comprueba si entró la primera palabra.' : 'Réplica sin texto. Puedes probar otra.', !event.transcript?.trim());
-    updateButtons();
+    run.bufferDirty = false;
+    const result = typeof event.transcript === 'string' ? event.transcript.trim() : '';
+    $('heard').textContent = result;
+    if (result && hasCompleteLiveLine(current().spoken, result)) {
+      rehearsal.index += 1;
+      void drive(run);
+    } else {
+      changePhase(run, 'repeat');
+      status('La transcripción final no confirmó el cierre. Puedes repetir o pasar la línea.', true);
+    }
   }
+};
+
+const ensureLink = async (run, minimumMs) => {
+  if (run.link && !run.link.closed && run.link.deadline - performance.now() >= minimumMs) return;
+  if (!budget) {
+    if (run.link && !run.link.closed && run.link.deadline - performance.now() > 6500) return;
+    throw new Error('Se agotó el tiempo del ensayo privado.');
+  }
+  run.link?.close();
+  run.link = null;
+  run.retired.clear();
+  run.bufferDirty = false;
+  run.connectionRequested = true;
+  status('Conectando la escucha de OpenAI…');
+  const link = await openPilotConnection({
+    code, output: run.output.stream, signal: run.abort.signal,
+    onEvent: (connection, event) => onProviderEvent(run, connection, event),
+    onDisconnect: (connection, message) => {
+      if (active === run && run.link === connection) pause(run, `${message} Puedes reanudar desde esta línea.`, true);
+    },
+  });
+  if (active !== run) { link.close(); return; }
+  run.link = link;
+  updateBudget(link.remainingSeconds);
+};
+
+const drive = async run => {
+  if (active !== run) return;
+  stopCurrent(run);
+  showLine();
+  const line = current();
+  if (!line) { pause(run, 'Escena terminada. Puedes elegir otra.'); return; }
+  changePhase(run, 'opening');
+  try {
+    const next = rehearsal.scene.lines[rehearsal.index + 1];
+    const userLine = isMine(line) ? line : isMine(next) ? next : null;
+    const buffer = isMine(line) ? null : run.clips.get(line.index);
+    if (userLine) {
+      const speechMs = userLine.spoken.split(/\s+/).length * 450;
+      const waitMs = (buffer?.duration ?? 0) * 1000 + Math.min(64_000, 24_000 + speechMs);
+      await ensureLink(run, waitMs);
+      if (active !== run) return;
+    }
+    if (isMine(line)) { actorTurn(run); return; }
+    changePhase(run, 'other');
+    status('Escucha al otro personaje.');
+    const player = run.audio.createBufferSource();
+    run.player = player;
+    player.buffer = buffer;
+    player.connect(run.audio.destination);
+    const startAt = run.audio.currentTime + 0.025;
+    if (userLine) run.gate.gain.setValueAtTime(1, startAt + buffer.duration);
+    player.onended = () => {
+      if (active !== run || run.player !== player) return;
+      run.player = null;
+      rehearsal.index += 1;
+      if (userLine) actorTurn(run, true);
+      else void drive(run);
+    };
+    player.start(startAt);
+  } catch (error) { pause(run, error.message, true); }
 };
 
 const start = async () => {
-  if (active || available <= 0 || native?.platform !== 'ios' || !native.foreground || document.hidden) return;
-  const run = { phase: 'connecting', abort: new AbortController(), retired: new Set() };
+  if (!current() || active || !budget || !native?.foreground || document.hidden) return;
+  const run = { phase: 'opening', abort: new AbortController(), retired: new Set(), clips: new Map() };
   active = run;
-  status('Preparando el micrófono y la conexión…');
-  updateButtons();
+  $('setup').hidden = true;
+  $('dialogue').hidden = false;
+  showLine();
+  showControls();
+  status('Preparando las voces de la escena…');
   try {
     if (navigator.audioSession) {
       run.oldAudioType = navigator.audioSession.type;
@@ -216,10 +319,24 @@ const start = async () => {
     });
     if (active !== run) { stream.getTracks().forEach(track => track.stop()); return; }
     run.stream = stream;
-    stream.getAudioTracks().forEach(track => track.addEventListener('ended', () => release(run, 'El iPhone cerró la entrada del micrófono.', true)));
-    const cue = await fetch('/audio/voice-pilot-cue.mp3', { signal: run.abort.signal });
-    if (!cue.ok) throw new Error('No se pudo preparar la voz del personaje.');
-    run.cue = await run.audio.decodeAudioData(await cue.arrayBuffer());
+    stream.getAudioTracks().forEach(track => track.addEventListener('ended', () => pause(run, 'El iPhone cerró la entrada del micrófono.', true)));
+    if (!rehearsal.pack) {
+      const query = new URLSearchParams({ action: 'voice-pack', share, audition: rehearsal.audition.id,
+        revision: String(rehearsal.audition.revision), scene: String(rehearsal.scene.id) });
+      const response = await fetch(`${pilotEndpoint}&${query}`, {
+        headers: pilotHeaders(code), cache: 'no-store', signal: run.abort.signal,
+      });
+      if (!response.ok) throw await pilotError(response);
+      const pack = await response.json();
+      if (active !== run) return;
+      rehearsal.pack = pack.clips;
+    }
+    await Promise.all(rehearsal.scene.lines.filter(line => !isMine(line)).map(async line => {
+      const raw = rehearsal.pack?.[line.index];
+      if (!raw) throw new Error('Falta la voz de un personaje para esta escena.');
+      const data = Uint8Array.from(atob(raw), char => char.charCodeAt(0));
+      run.clips.set(line.index, await run.audio.decodeAudioData(data.buffer));
+    }));
     if (active !== run) return;
     const input = run.audio.createMediaStreamSource(stream);
     run.analyser = run.audio.createAnalyser();
@@ -229,55 +346,62 @@ const start = async () => {
     run.output = run.audio.createMediaStreamDestination();
     input.connect(run.analyser);
     run.analyser.connect(run.gate).connect(run.output);
-    const peer = run.peer = new RTCPeerConnection();
-    peer.addTrack(run.output.stream.getAudioTracks()[0], run.output.stream);
-    const channel = run.channel = peer.createDataChannel('oai-events');
-    channel.addEventListener('message', message => {
-      try { handleEvent(run, JSON.parse(message.data)); } catch { release(run, 'Llegó una respuesta de voz que no se pudo leer.', true); }
-    });
-    channel.addEventListener('close', () => release(run, 'Terminó la conexión con OpenAI.'));
-    peer.addEventListener('connectionstatechange', () => {
-      if (['failed', 'disconnected'].includes(peer.connectionState)) release(run, 'Se perdió la conexión de voz. Puedes iniciar otro intento.', true);
-    });
-    await peer.setLocalDescription(await peer.createOffer());
-    await waitForIce(peer);
-    if (active !== run) return;
-    run.requested = true;
-    run.deadlineTimer = setTimeout(() => release(run, 'La conexión tardó demasiado en abrirse.', true), 22_000);
-    const response = await fetch(endpoint, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ sdp: peer.localDescription.sdp }), signal: run.abort.signal,
-    });
-    const { reader, value } = await firstEvent(response);
-    if (active !== run) return;
-    available = value.remainingSeconds;
-    run.deadline = performance.now() + value.remainingMs;
-    clearTimeout(run.deadlineTimer);
-    run.deadlineTimer = setTimeout(() => release(run, 'Se agotó el tiempo reservado para este intento.'), value.remainingMs);
-    updateButtons();
-    void watchConnection(run, reader);
-    await peer.setRemoteDescription({ type: 'answer', sdp: value.answer });
+    void drive(run);
   } catch (error) {
-    release(run, error.name === 'NotAllowedError' ? 'El iPhone requiere permiso de micrófono para probar la voz.' : error.message, true);
+    pause(run, error.name === 'NotAllowedError' ? 'El iPhone necesita permiso de micrófono para ensayar.' : error.message, true);
   }
 };
-
-byId('start').addEventListener('click', () => void start());
-byId('repeat').addEventListener('click', () => { if (active) playCue(active); });
-byId('stop').addEventListener('click', () => { if (active) release(active, 'Prueba detenida.'); });
-byId('finish').addEventListener('click', () => {
+const clearTurn = async run => {
+  if (!run.bufferDirty || !run.link || run.link.closed) return;
+  await new Promise((resolve, reject) => {
+    const done = error => {
+      clearTimeout(timer);
+      run.clearDone = null;
+      if (error) reject(error); else resolve();
+    };
+    const timer = setTimeout(() => done(new Error('OpenAI no confirmó el reinicio de la réplica.')), 1700);
+    run.clearDone = () => done();
+    try { run.link.send('input_audio_buffer.clear'); } catch (error) { done(error); }
+  });
+  run.bufferDirty = false;
+};
+const move = async skip => {
+  if (!current()) return;
   const run = active;
-  if (run?.phase !== 'listening' || run.channel.readyState !== 'open') return;
-  run.phase = 'finishing';
-  run.gate.gain.setValueAtTime(0, run.audio.currentTime);
-  cancelAnimationFrame(run.meter);
-  run.channel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-  run.resultTimer = setTimeout(() => release(run, 'OpenAI no confirmó la réplica. Puedes iniciar otro intento.', true), 4500);
-  status('Recibiendo el final de la réplica…');
-  updateButtons();
+  if (!run) { if (skip) rehearsal.index += 1; showLine(); showControls(); return; }
+  if (!['actor', 'other', 'repeat'].includes(run.phase)) return;
+  // During the last other voice the microphone gate may already be scheduled.
+  stopCurrent(run);
+  changePhase(run, 'opening');
+  try {
+    await clearTurn(run);
+    if (active !== run) return;
+    if (skip) rehearsal.index += 1;
+    void drive(run);
+  } catch (error) { pause(run, error.message, true); }
+};
+
+$('begin').addEventListener('click', () => {
+  const audition = selectedScript();
+  const scene = audition?.scenes.find(scene => String(scene.id) === $('scene').value);
+  if (!scene) return;
+  rehearsal = { audition, scene, role: $('role').value, index: 0, pack: null };
+  void start();
+});
+$('pause').addEventListener('click', () => { if (active) pause(active, 'Ensayo en pausa.'); });
+$('resume').addEventListener('click', () => void start());
+$('retry').addEventListener('click', () => void move(false));
+$('skip').addEventListener('click', () => void move(true));
+$('leave').addEventListener('click', () => {
+  if (active) pause(active, 'Elige una escena.');
+  rehearsal = null;
+  $('dialogue').hidden = true;
+  $('setup').hidden = false;
+  status('Elige tu personaje y una escena.');
 });
 const stopOnHide = () => {
-  if (active && (document.hidden || !native?.foreground)) release(active, 'Prueba detenida al dejar el ensayo.');
+  if (active && (document.hidden || !native?.foreground)) pause(active, 'Ensayo en pausa al dejar la app.');
 };
 document.addEventListener('visibilitychange', stopOnHide);
 window.addEventListener('ai-theatre-native-visibility', stopOnHide);
-window.addEventListener('pagehide', () => { if (active) release(active, 'Prueba detenida.'); });
+window.addEventListener('pagehide', () => { if (active) pause(active, 'Ensayo en pausa.'); });

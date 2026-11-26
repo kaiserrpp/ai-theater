@@ -1,7 +1,8 @@
 {
+  "fluid": true,
   "functions": {
     "api/shared-script/index.js": {
-      "maxDuration": 60
+      "maxDuration": 205
     }
   }
 }

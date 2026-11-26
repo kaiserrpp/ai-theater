@@ -1,11 +1,12 @@
 const { createHash, timingSafeEqual } = require('node:crypto');
 const sharedStorage = require('./shared-storage');
-const { getStorageNamespace, parseJsonBody } = require('../api/shared-script/_shared');
+const { getStorageNamespace, parseJsonBody, getSongAdminPasswordFromRequest, isAuthorizedSongAdminRequest } = require('../api/shared-script/_shared');
 const { isAllowedOrigin } = require('./admin-session');
 
 const MODEL = 'gpt-live-transcribe';
 const LEASE_MS = 45_000;
 const LEASE_COUNT = 40;
+const REHEARSAL_SLOTS = 4;
 const PREFIX = 'voice-pilot/production';
 const OPENAI_URL = 'https://api.openai.com/v1/realtime';
 
@@ -24,24 +25,58 @@ const reservedPaths = async storage => {
 const remaining = paths => Array.from({ length: LEASE_COUNT }, (_, slot) => pathname(slot))
   .filter(path => !paths.has(path)).length;
 
-const reserve = async (storage, now) => {
+const reserve = async (storage, now, slotsWanted) => {
   const used = await reservedPaths(storage);
+  const createdAt = now();
+  let slots = 0;
   for (let slot = 0; slot < LEASE_COUNT; slot += 1) {
     const path = pathname(slot);
     if (used.has(path)) continue;
-    const createdAt = now();
     try {
       await storage.put(path, JSON.stringify({ createdAt, reservedMs: LEASE_MS }), {
         contentType: 'application/json', allowOverwrite: false,
       });
       used.add(path);
-      return { deadline: createdAt + LEASE_MS, remainingSeconds: remaining(used) * LEASE_MS / 1000 };
+      slots += 1;
+      if (slots === slotsWanted) break;
     } catch (error) {
       if (error.status !== 409) throw error;
       used.add(path);
     }
   }
-  return null;
+  return slots ? { deadline: createdAt + slots * LEASE_MS, remainingSeconds: remaining(used) * LEASE_MS / 1000 } : null;
+};
+
+const voicePackPath = ({ share, audition, revision, scene } = {}) => {
+  const validId = value => typeof value === 'string' && /^[a-z0-9-]{1,80}$/i.test(value);
+  const validNumber = value => typeof value === 'string' && /^\d{1,6}$/.test(value);
+  return validId(share) && validId(audition) && validNumber(revision) && validNumber(scene)
+    ? `voice-pilot-media/production/${share}/${audition}/${revision}/${scene}.json` : null;
+};
+
+const handleVoicePack = async (request, response, storage, canPublish) => {
+  const path = voicePackPath(request.query);
+  if (!path) return response.status(400).json({ error: 'Selecciona una escena válida.' });
+  try {
+    if (request.method === 'GET') return response.status(200).json(await storage.readJson(path));
+    if (request.method !== 'PUT' || !canPublish(request)) {
+      return response.status(403).json({ error: 'La preparación de voces requiere acceso de gestión.' });
+    }
+    const clips = parseJsonBody(request)?.clips;
+    const entries = Object.entries(clips && typeof clips === 'object' && !Array.isArray(clips) ? clips : {});
+    if (!entries.length || entries.length > 80 || entries.some(([index, clip]) =>
+      !/^\d{1,6}$/.test(index) || typeof clip !== 'string' || clip.length > 400_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(clip)
+    )) return response.status(400).json({ error: 'La selección de voces no es válida.' });
+    const data = JSON.stringify({ clips });
+    if (data.length > 3_500_000) return response.status(413).json({ error: 'Las voces superan el tamaño de una escena.' });
+    await storage.put(path, data, { contentType: 'application/json', allowOverwrite: false });
+    return response.status(201).json({ count: entries.length });
+  } catch (error) {
+    if (error.status === 409) return response.status(409).json({ error: 'Las voces de esta revisión ya están preparadas.' });
+    return response.status(error.notFound ? 404 : 503).json({
+      error: error.notFound ? 'Las voces de esta escena aún no están preparadas.' : 'No se pudieron consultar las voces de la escena.',
+    });
+  }
 };
 
 const providerError = async (response, stage) => {
@@ -109,7 +144,8 @@ const waitForClose = (response, ms) => new Promise(resolve => {
   if (response.destroyed) finish();
 });
 
-const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = negotiate, disconnect = hangUp }) =>
+const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = negotiate, disconnect = hangUp,
+  canPublish = request => isAuthorizedSongAdminRequest(request, getSongAdminPasswordFromRequest(request)) }) =>
   async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     const config = settings();
@@ -117,10 +153,12 @@ const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = 
     if (!isAllowedOrigin(request) || !verifyCode(request.headers?.['x-ai-theatre-pilot'], config.code)) {
       return response.status(403).json({ error: 'El código de acceso no es válido.' });
     }
+    if (request.query?.action === 'voice-pack') return handleVoicePack(request, response, storage, canPublish);
     if (request.method === 'GET') {
       try {
         const count = remaining(await reservedPaths(storage));
-        return response.status(200).json({ remainingSeconds: count * LEASE_MS / 1000, attemptSeconds: LEASE_MS / 1000 });
+        return response.status(200).json({ remainingSeconds: count * LEASE_MS / 1000,
+          attemptSeconds: Math.min(count, REHEARSAL_SLOTS) * LEASE_MS / 1000 });
       } catch {
         return response.status(503).json({ error: 'No se pudo comprobar el tiempo disponible.' });
       }
@@ -129,14 +167,15 @@ const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = 
       response.setHeader('Allow', 'GET, POST');
       return response.status(405).json({ error: 'Método no permitido.' });
     }
-    const offer = parseJsonBody(request)?.sdp;
+    const body = parseJsonBody(request);
+    const offer = body?.sdp;
     if (typeof offer !== 'string' || offer.length > 14_000 || !offer.startsWith('v=0') ||
         !/^m=audio /m.test(offer) || !/^m=application /m.test(offer)) {
       return response.status(400).json({ error: 'La conexión de audio no es válida.' });
     }
     let lease, call;
     try {
-      lease = await reserve(storage, now);
+      lease = await reserve(storage, now, body.rehearsal === true ? REHEARSAL_SLOTS : 1);
       if (!lease) return response.status(409).json({ error: 'Se han reservado los 30 minutos del piloto.' });
       const safetyId = createHash('sha256').update(config.code).digest('hex');
       call = await connect(config.key, offer, safetyId);
@@ -172,7 +211,7 @@ const handler = createVoicePilotHandler({
     return process.env.VERCEL_ENV === 'production' && getStorageNamespace() === 'production' &&
       key && code && sharedStorage.isSupabaseReady() ? { key, code } : null;
   },
-  storage: sharedStorage.selectStorage({}),
+  storage: { ...sharedStorage.selectStorage({}), readJson: sharedStorage.readJson },
 });
 
 module.exports = handler;
