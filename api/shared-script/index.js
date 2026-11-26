@@ -4,11 +4,13 @@ const { hasSharedStorage } = require('../../server/shared-storage');
 const appearance = require('../../server/work-appearance');
 const warmup = require('../../server/warmup-catalog');
 const storageSetup = require('../../server/storage-setup');
+const voicePilot = require('../../server/voice-pilot');
 
 module.exports = async (request, response) => {
   if (request.query?.resource === 'storage-setup') return storageSetup(request, response);
   if (request.query?.resource === 'warmup') return warmup(request, response);
   if (request.query?.resource === 'appearance') return appearance(request, response);
+  if (request.query?.resource === 'voice-pilot') return voicePilot(request, response);
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
     response.status(405).json({ error: 'Metodo no permitido.' });

@@ -22,6 +22,7 @@ import type { NumberKaraokeChoices } from '../hooks/useNumberKaraokeChoices';
 import type { NumberRehearsalRequest } from '../utils/musicalNumberPractice';
 import { getScriptIdentity } from '../utils/scriptIdentity';
 import { RehearsalView } from './RehearsalView';
+import { getNativePrototypeInfo } from '../utils/nativePrototype';
 
 interface Props {
   script: ScriptData | null; manifest: SharedScriptManifest | null;
@@ -200,6 +201,13 @@ export const PracticeHome = (props: Props) => {
         engine={recognitionEngine} onEngineChange={(next) => { setRecognitionEngine(next); savePreference(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, next); }}
         showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
       <Button label="Ensayar en Comparativa" secondary onPress={openRecognitionComparison} />
+      {getNativePrototypeInfo()?.platform === 'ios' && typeof window !== 'undefined' ? (
+        <Button label="Prueba privada de voz" secondary onPress={() => {
+          const url = new URL('/prueba-voz-privada.html', window.location.origin);
+          if (shareId) url.searchParams.set('share', shareId);
+          window.location.assign(url);
+        }} />
+      ) : null}
       {storageNotice ? <Text style={ui.error}>{storageNotice}</Text> : null}
     </Sheet>
     <Sheet title="Materiales y gestión" visible={sheet === 'materials'} onClose={() => setSheet(null)}>
