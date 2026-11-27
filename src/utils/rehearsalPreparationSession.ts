@@ -16,7 +16,7 @@ export type PreparationStorage = {
   read: (key: string) => Promise<string | null>;
   write: (key: string, value: string) => Promise<void>;
 };
-const engines = new Set(['default', 'native', 'vosk', 'whisper']);
+const engines = new Set(['default', 'native', 'vosk', 'whisper', 'openai']);
 const validCalibration = (value: MicrophoneCalibrationSnapshot | null | undefined) => Boolean(value &&
   (value.status === 'ready' || value.status === 'weak') &&
   (value.measurement === undefined || value.measurement === 'rms' || value.measurement === 'native_peak') &&

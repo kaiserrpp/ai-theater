@@ -1,7 +1,7 @@
-const { createHash, timingSafeEqual } = require('node:crypto');
+const { createHmac } = require('node:crypto');
 const sharedStorage = require('./shared-storage');
-const { getStorageNamespace, parseJsonBody, getSongAdminPasswordFromRequest, isAuthorizedSongAdminRequest } = require('../api/shared-script/_shared');
-const { isAllowedOrigin } = require('./admin-session');
+const { getStorageNamespace, parseJsonBody } = require('../api/shared-script/_shared');
+const { readAdminSession } = require('./admin-session');
 
 const MODEL = 'gpt-live-transcribe';
 const LEASE_MS = 45_000;
@@ -9,13 +9,6 @@ const LEASE_COUNT = 40;
 const REHEARSAL_SLOTS = 4;
 const PREFIX = 'voice-pilot/production';
 const OPENAI_URL = 'https://api.openai.com/v1/realtime';
-
-const cleanCode = value => typeof value === 'string' ? value.replace(/[\s-]/g, '').toUpperCase() : '';
-const verifyCode = (supplied, expected) => {
-  const actual = cleanCode(supplied), required = cleanCode(expected);
-  return /^[0-9A-F]{24}$/.test(actual) && /^[0-9A-F]{24}$/.test(required) &&
-    timingSafeEqual(Buffer.from(actual), Buffer.from(required));
-};
 
 const pathname = slot => `${PREFIX}/${String(slot).padStart(2, '0')}.json`;
 const reservedPaths = async storage => {
@@ -54,13 +47,14 @@ const voicePackPath = ({ share, audition, revision, scene } = {}) => {
     ? `voice-pilot-media/production/${share}/${audition}/${revision}/${scene}.json` : null;
 };
 
-const handleVoicePack = async (request, response, storage, canPublish) => {
+const handleVoicePack = async (request, response, storage) => {
   const path = voicePackPath(request.query);
   if (!path) return response.status(400).json({ error: 'Selecciona una escena válida.' });
   try {
     if (request.method === 'GET') return response.status(200).json(await storage.readJson(path));
-    if (request.method !== 'PUT' || !canPublish(request)) {
-      return response.status(403).json({ error: 'La preparación de voces requiere acceso de gestión.' });
+    if (request.method !== 'PUT') {
+      response.setHeader('Allow', 'GET, PUT');
+      return response.status(405).json({ error: 'Método no permitido.' });
     }
     const clips = parseJsonBody(request)?.clips;
     const entries = Object.entries(clips && typeof clips === 'object' && !Array.isArray(clips) ? clips : {});
@@ -144,16 +138,17 @@ const waitForClose = (response, ms) => new Promise(resolve => {
   if (response.destroyed) finish();
 });
 
-const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = negotiate, disconnect = hangUp,
-  canPublish = request => isAuthorizedSongAdminRequest(request, getSongAdminPasswordFromRequest(request)) }) =>
+const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = negotiate, disconnect = hangUp }) =>
   async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
-    const config = settings();
-    if (!config) return response.status(404).json({ error: 'El piloto privado no está disponible.' });
-    if (!isAllowedOrigin(request) || !verifyCode(request.headers?.['x-ai-theatre-pilot'], config.code)) {
-      return response.status(403).json({ error: 'El código de acceso no es válido.' });
+    const admin = readAdminSession(request, getStorageNamespace());
+    if (!admin) return response.status(401).json({ error: 'Entra como administrador para usar OpenAI en el ensayo.' });
+    if (request.method !== 'GET' && request.headers?.['x-ai-theatre-admin'] !== '1') {
+      return response.status(403).json({ error: 'Abre OpenAI desde los ajustes del ensayo.' });
     }
-    if (request.query?.action === 'voice-pack') return handleVoicePack(request, response, storage, canPublish);
+    const config = settings();
+    if (!config) return response.status(404).json({ error: 'OpenAI no está disponible para el ensayo.' });
+    if (request.query?.action === 'voice-pack') return handleVoicePack(request, response, storage);
     if (request.method === 'GET') {
       try {
         const count = remaining(await reservedPaths(storage));
@@ -176,11 +171,11 @@ const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = 
     let lease, call;
     try {
       lease = await reserve(storage, now, body.rehearsal === true ? REHEARSAL_SLOTS : 1);
-      if (!lease) return response.status(409).json({ error: 'Se han reservado los 30 minutos del piloto.' });
-      const safetyId = createHash('sha256').update(config.code).digest('hex');
+      if (!lease) return response.status(409).json({ error: 'Se ha agotado el tiempo de prueba de OpenAI.' });
+      const safetyId = createHmac('sha256', config.key).update('ai-theatre-rehearsal-admin').digest('hex');
       call = await connect(config.key, offer, safetyId);
       // Leave time for the close request before the reserved interval expires.
-      const remainingMs = lease.deadline - now() - 5000;
+      const remainingMs = Math.min(lease.deadline - 5000, admin.exp * 1000) - now();
       if (remainingMs < 5000 || response.destroyed) {
         if (!response.destroyed) response.status(503).json({ error: 'La conexión tardó demasiado en abrirse.' });
         return;
@@ -207,9 +202,8 @@ const createVoicePilotHandler = ({ settings, storage, now = Date.now, connect = 
 const handler = createVoicePilotHandler({
   settings: () => {
     const key = process.env.AI_THEATRE_OPENAI_PILOT_KEY;
-    const code = process.env.AI_THEATRE_VOICE_PILOT_CODE;
     return process.env.VERCEL_ENV === 'production' && getStorageNamespace() === 'production' &&
-      key && code && sharedStorage.isSupabaseReady() ? { key, code } : null;
+      key && sharedStorage.isSupabaseReady() ? { key } : null;
   },
   storage: { ...sharedStorage.selectStorage({}), readJson: sharedStorage.readJson },
 });

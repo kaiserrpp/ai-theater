@@ -36,6 +36,8 @@ const hookFixture = ({ engine, nativeAvailable = true, voskAvailable = true, ios
   Native.controlledInputEnd = controlledEnd;
   class Vosk {}
   class Whisper {}
+  class OpenAi {}
+  OpenAi.controlledInputEnd = true;
   let configured;
   const hook = load('hooks/useSpeechRecognition.ts', {
     react: {
@@ -47,6 +49,10 @@ const hookFixture = ({ engine, nativeAvailable = true, voskAvailable = true, ios
     '../utils/rehearsalSpeech': { prepareRecognitionRestart: () => {} },
     '../utils/pageVisibility': { isPageVisible: () => true, observePageVisibility: () => () => {} },
     '../utils/nativePrototype': { getNativePrototypeInfo: () => controlledEnd ? { platform: ios ? 'ios' : 'android' } : null },
+    '../store/adminSession': { invalidateAdminSession: () => {} },
+    '../utils/openAiRehearsalRecognition': {
+      createOpenAiRehearsalRecognition: () => ({ Constructor: OpenAi, close: () => calls.push('openai:close') }),
+    },
     '../utils/localSpeechRecognition': {
       getLocalSpeechRecognitionConstructor: () => { calls.push('vosk:constructor'); return voskAvailable ? Vosk : null; },
       preloadLocalSpeechRecognition: async () => { calls.push('vosk:load'); },
@@ -65,7 +71,7 @@ const hookFixture = ({ engine, nativeAvailable = true, voskAvailable = true, ios
   const result = hook.useSpeechRecognition({ enabled: false, lang: 'es-ES', lineKey: null, prepareLocal: true,
     ...(engine ? { engine } : {}) });
   const cleanups = effects.map(effect => effect()).filter(cleanup => typeof cleanup === 'function');
-  return { result, configured, calls, Native, Vosk, Whisper, dispose: () => cleanups.forEach(cleanup => cleanup()) };
+  return { result, configured, calls, Native, Vosk, Whisper, OpenAi, dispose: () => cleanups.forEach(cleanup => cleanup()) };
 };
 
 test('default Safari uses the native session and retains the iPhone natural-end protection without loading local models', () => {
@@ -77,6 +83,18 @@ test('default Safari uses the native session and retains the iPhone natural-end 
   assert.equal(typeof f.configured.prepareRestart, 'function');
   assert(!f.calls.some(call => /:constructor|:load/.test(call)));
   f.dispose();
+});
+
+test('OpenAI uses its own adapter and controlled turn changes without native recovery or local downloads', () => {
+  const f = hookFixture({ engine: 'openai', controlledEnd: true });
+  assert.equal(f.configured.Constructor, f.OpenAi);
+  assert.equal(f.configured.controlledEnd, true);
+  assert.equal(f.configured.restartOnLineChange, true);
+  assert.equal(f.configured.recoverNativeInput, false);
+  assert.equal(f.result.isLocal, false);
+  assert(!f.calls.some(call => /:constructor|:load/.test(call)));
+  f.dispose();
+  assert(f.calls.includes('openai:close'));
 });
 
 test('only the installed bridge owns explicit native closure and bypasses the Safari restart cue', () => {

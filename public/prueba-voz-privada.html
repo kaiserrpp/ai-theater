@@ -4,64 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Ensayar con OpenAI · AI-Theatre</title>
-  <style>
-    :root{color-scheme:light;font:16px/1.5 system-ui,sans-serif;color:#30232d;background:#faf9f6}
-    *{box-sizing:border-box} body{margin:0} [hidden]{display:none!important}
-    main{max-width:37rem;margin:auto;padding:1.35rem max(1rem,env(safe-area-inset-right)) max(2rem,env(safe-area-inset-bottom)) max(1rem,env(safe-area-inset-left))}
-    h1{font-size:1.85rem;line-height:1.15;margin:.55rem 0 1rem} h2{font-size:1.13rem;margin:0 0 .5rem}
-    p{margin:.55rem 0} a{color:#683757} section,form{margin:1rem 0;padding:1rem;border:1px solid #e2d4de;border-radius:1rem;background:white}
-    label{display:block;font-weight:600} input,select,button{font:inherit}
-    input,select{display:block;width:100%;min-height:2.8rem;margin:.35rem 0 .75rem;padding:.5rem .65rem;border:1px solid #ad899e;border-radius:.5rem;background:white;color:#30232d}
-    button{min-height:2.8rem;border:1px solid #633855;border-radius:.55rem;padding:.45rem .85rem;color:white;background:#633855;cursor:pointer}
-    button.secondary{background:white;color:#633855} button:disabled{opacity:.5;cursor:default}
-    .buttons{display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.8rem}
-    #status{font-weight:650;min-height:1.5em} #status[data-error]{color:#983323}
-    #line,#heard{overflow-wrap:anywhere} #line{font-size:1.27rem;line-height:1.46}
-    #position,#quota,#timing,.detail{color:#614a5a;font-size:.92rem}
-    #dialogue[data-actor]{border-color:#b882a4;background:#fff9fd}
-  </style>
-  <script type="module" src="/asr/voice-pilot.mjs"></script>
+  <title>AI-Theatre</title>
 </head>
 <body>
-<main>
-  <a id="back" href="/">Volver a AI-Theatre</a>
-  <h1>Ensayar con OpenAI</h1>
-  <p id="unsupported">Abre la app instalada en el iPhone y entra en «Escenas» → «Ensayar con OpenAI».</p>
-  <div id="pilot" hidden>
-    <form id="access">
-      <label for="code">Código privado</label>
-      <input id="code" type="password" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" required>
-      <button id="check" type="submit">Comprobar acceso</button>
-    </form>
-    <section id="setup" hidden>
-      <label for="script">Miniguion</label><select id="script"></select>
-      <label for="role">Mi personaje</label><select id="role"></select>
-      <label for="scene">Escena</label><select id="scene"></select>
-      <p class="detail">La app reproduce a los demás personajes. OpenAI transcribe tu voz durante tus réplicas.</p>
-      <button id="begin">Ensayar escena</button>
-    </section>
-    <p id="quota" hidden></p>
-    <p id="status" role="status" aria-live="polite"></p>
-    <section id="dialogue" hidden>
-      <p id="position"></p>
-      <h2 id="character"></h2>
-      <p id="direction" class="detail"></p>
-      <p id="line"></p>
-      <div id="transcript" hidden>
-        <p class="detail">Lo que ha oído OpenAI</p>
-        <p id="heard" aria-live="off"></p>
-        <p id="timing"></p>
-      </div>
-      <div class="buttons">
-        <button id="pause" class="secondary">Pausar</button>
-        <button id="resume" hidden>Reanudar</button>
-        <button id="retry" class="secondary" hidden>Repetir réplica</button>
-        <button id="skip" class="secondary">Siguiente línea</button>
-        <button id="leave" class="secondary">Elegir escena</button>
-      </div>
-    </section>
-  </div>
-</main>
+  <p>Abre una escena y elige OpenAI en «Micrófono y voz» con tu sesión de administrador.</p>
+  <a href="/">Volver a AI-Theatre</a>
+  <script>
+    const home = new URL('/', location.origin);
+    const share = new URLSearchParams(location.search).get('share');
+    if (share && /^[a-z0-9-]{1,40}$/i.test(share)) home.searchParams.set('share', share);
+    location.replace(home);
+  </script>
 </body>
 </html>

@@ -8,7 +8,7 @@ import { AUDITION_PREFERENCES_STORAGE_PREFIX, REHEARSAL_LISTEN_MODE_STORAGE_KEY,
 import { resolveRecognitionEngine, type RecognitionEngine } from '../utils/scriptRecognitionContext';
 import { RehearsalMode, ScriptData } from '../types/script';
 import { SharedScriptListItem, SharedScriptManifest } from '../types/sharedScript';
-import { resolveListenPreference, resolveTranscriptPreference, supportsRecognition, type ListenPreference } from '../utils/rehearsalPreferences';
+import { resolveListenPreference, resolveRehearsalListenPreference, resolveTranscriptPreference, supportsRecognition, type RehearsalListenPreference } from '../utils/rehearsalPreferences';
 import { getScenesForRolesAndSongs } from '../utils/scriptScenes';
 import { AuditionScenesPanel } from './AuditionScenesPanel';
 import { MicrophoneSettings } from './MicrophoneSettings';
@@ -22,7 +22,8 @@ import type { NumberKaraokeChoices } from '../hooks/useNumberKaraokeChoices';
 import type { NumberRehearsalRequest } from '../utils/musicalNumberPractice';
 import { getScriptIdentity } from '../utils/scriptIdentity';
 import { RehearsalView } from './RehearsalView';
-import { getNativePrototypeInfo } from '../utils/nativePrototype';
+import { supportsOpenAiRecognition } from '../utils/openAiVoiceConnection';
+import { useIsAdmin } from '../store/adminSession';
 
 interface Props {
   script: ScriptData | null; manifest: SharedScriptManifest | null;
@@ -54,7 +55,7 @@ export const PracticeHome = (props: Props) => {
   const [lastAudition, setLastAudition] = useState<{ id: string; mode: AuditionRehearsalMode } | null>(null);
   const [canResumeAudition, setCanResumeAudition] = useState(false);
   const [initialAudition, setInitialAudition] = useState<string | null>(null);
-  const [mode, setMode] = useState<ListenPreference>(() => resolveListenPreference(null, supportsRecognition()));
+  const [mode, setMode] = useState<RehearsalListenPreference>(() => resolveListenPreference(null, supportsRecognition()));
   const [showTranscript, setShowTranscript] = useState(true);
   const [recognitionEngine, setRecognitionEngine] = useState<RecognitionEngine>('native');
   const [storageNotice, setStorageNotice] = useState('');
@@ -65,14 +66,8 @@ export const PracticeHome = (props: Props) => {
   const [musicBusy, setMusicBusy] = useState(false);
   const reportStatus = useFeedbackOutbox();
   const shareId = props.manifest?.shareId;
-  const canOpenVoicePilot = Boolean(shareId && props.manifest?.auditionScenes?.length && getNativePrototypeInfo()?.platform === 'ios');
-  const openVoicePilot = () => {
-    if (!canOpenVoicePilot || !shareId || typeof window === 'undefined') return;
-    const url = new URL('/prueba-voz-privada.html', window.location.origin);
-    url.searchParams.set('share', shareId);
-    if (props.myRoles[0]) url.searchParams.set('role', props.myRoles[0]);
-    window.location.assign(url);
-  };
+  const isAdmin = useIsAdmin();
+  const canUseOpenAi = isAdmin && supportsOpenAiRecognition();
   useEffect(() => {
     void feedbackOutbox.flush();
     const retry = () => { void feedbackOutbox.flush(); };
@@ -95,7 +90,7 @@ export const PracticeHome = (props: Props) => {
   useEffect(() => {
     let cancelled = false;
     void Promise.all([AsyncStorage.getItem(REHEARSAL_LISTEN_MODE_STORAGE_KEY), AsyncStorage.getItem(REHEARSAL_TRANSCRIPT_STORAGE_KEY), AsyncStorage.getItem(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY)])
-      .then(([storedMode, storedTranscript, storedEngine]) => { if (!cancelled) { setMode(resolveListenPreference(storedMode, supportsRecognition())); setShowTranscript(resolveTranscriptPreference(storedTranscript)); setRecognitionEngine(resolveRecognitionEngine(storedEngine)); } }).catch(() => {});
+      .then(([storedMode, storedTranscript, storedEngine]) => { if (!cancelled) { setMode(resolveRehearsalListenPreference(storedMode, supportsRecognition())); setShowTranscript(resolveTranscriptPreference(storedTranscript)); setRecognitionEngine(resolveRecognitionEngine(storedEngine)); } }).catch(() => {});
     return () => { cancelled = true; };
   }, [sheet]);
   useEffect(() => {
@@ -165,11 +160,6 @@ export const PracticeHome = (props: Props) => {
 
     {tab === 'scenes' ? <View style={{ flex: 1 }}>
       {!inRehearsal ? <View style={{ paddingHorizontal: 22, paddingTop: 14, paddingBottom: 6, gap: 12 }}><Text style={ui.title}>Escenas</Text><View style={ui.wrap}><Chip label="Audiciones" selected={scope === 'auditions'} onPress={() => setScope('auditions')} /><Chip label="Obra" selected={scope === 'work'} onPress={() => setScope('work')} /></View></View> : null}
-      {!inRehearsal && scope === 'auditions' && canOpenVoicePilot ? (
-        <View style={{ paddingHorizontal: 22, paddingBottom: 8 }}>
-          <Button label="Ensayar con OpenAI" secondary onPress={openVoicePilot} />
-        </View>
-      ) : null}
       {scope === 'auditions' ? <AuditionScenesPanel practiceOnly initialSceneId={initialAudition} initialMode={initialAudition ? lastAudition?.mode : undefined} sharedScript={props.manifest} obraTitle={props.script?.obra || ''}
         autoStartRequest={directAuditionRequest} onCompleted={() => { setInRehearsal(false); setVoiceWanted(true); chooseTab('home'); }}
         onEnsureShared={props.onEnsureShared} onManifestUpdated={props.onManifestUpdated} onExit={() => chooseTab('home')}
@@ -210,11 +200,11 @@ export const PracticeHome = (props: Props) => {
       <AppearanceSettings onBusyChange={setAppearanceBusy} />
     </Sheet>
     <Sheet title="Micrófono y voz" visible={sheet === 'mic'} onClose={() => setSheet(null)}>
-      <MicrophoneSettings mode={mode} supported={supportsRecognition()} onModeChange={(next) => { setMode(next); savePreference(REHEARSAL_LISTEN_MODE_STORAGE_KEY, next); }}
+      <MicrophoneSettings mode={mode === 'openai' && !canUseOpenAi ? resolveListenPreference(null, supportsRecognition()) : mode} supported={supportsRecognition()}
+        canUseOpenAi={canUseOpenAi} onModeChange={(next) => { setMode(next); savePreference(REHEARSAL_LISTEN_MODE_STORAGE_KEY, next); }}
         engine={recognitionEngine} onEngineChange={(next) => { setRecognitionEngine(next); savePreference(REHEARSAL_RECOGNITION_ENGINE_STORAGE_KEY, next); }}
         showTranscript={showTranscript} onTranscriptChange={(visible) => { setShowTranscript(visible); savePreference(REHEARSAL_TRANSCRIPT_STORAGE_KEY, String(visible)); }} />
       <Button label="Ensayar en Comparativa" secondary onPress={openRecognitionComparison} />
-      {canOpenVoicePilot ? <Button label="Ensayar con OpenAI" secondary onPress={openVoicePilot} /> : null}
       {storageNotice ? <Text style={ui.error}>{storageNotice}</Text> : null}
     </Sheet>
     <Sheet title="Materiales y gestión" visible={sheet === 'materials'} onClose={() => setSheet(null)}>

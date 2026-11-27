@@ -1,15 +1,16 @@
 import React, { useState, useSyncExternalStore } from 'react';
 import { Platform, Switch, Text, TouchableOpacity, View } from 'react-native';
-import { ListenPreference } from '../utils/rehearsalPreferences';
+import type { RehearsalListenPreference } from '../utils/rehearsalPreferences';
 import { rehearsalPreparationSession } from '../utils/rehearsalPreparationSession';
 import { Button, Disclosure, Icon, usePracticeTheme } from './PracticeUI';
 import type { RecognitionEngine } from '../utils/scriptRecognitionContext';
 import { getNativePrototypeInfo } from '../utils/nativePrototype';
 import { getSpeechOutputHelp } from '../utils/speechOutputHelp';
 
-export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, onRepeatPreparation, engine = 'native', onEngineChange }: {
-  mode: ListenPreference; onModeChange: (mode: ListenPreference) => void;
+export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTranscriptChange, supported, canUseOpenAi, onRepeatPreparation, engine = 'native', onEngineChange }: {
+  mode: RehearsalListenPreference; onModeChange: (mode: RehearsalListenPreference) => void;
   showTranscript: boolean; onTranscriptChange: (visible: boolean) => void; supported: boolean;
+  canUseOpenAi: boolean;
   onRepeatPreparation?: () => void;
   engine?: RecognitionEngine; onEngineChange?: (engine: RecognitionEngine) => void;
 }) => {
@@ -21,9 +22,11 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
   <Text style={ui.text}>Los ajustes se guardan en este dispositivo.</Text>
   {([
     ['intelligent', 'Inteligente', 'Comprueba tus palabras y avanza al completar la réplica.'],
+    ['openai', 'OpenAI', 'Transcribe tu voz con OpenAI en tus turnos. Requiere conexión.'],
     ['manual', 'Manual', 'Avanza tú con el botón siguiente.'],
     ['auto', 'Al terminar de hablar', 'Avanza al detectar silencio, sin comparar el texto. Requiere calibrar el micro.'],
-  ] as const).map(([value, label, hint]) => <TouchableOpacity key={value} accessibilityRole="radio"
+  ] as const).filter(([value]) => value !== 'openai' || canUseOpenAi).map(([value, label, hint]) => <TouchableOpacity key={value} accessibilityRole="radio"
+    accessibilityLabel={label} accessibilityHint={hint}
     aria-checked={mode === value}
     accessibilityState={{ checked: mode === value, disabled: value === 'intelligent' && !supported }}
     disabled={value === 'intelligent' && !supported} onPress={() => onModeChange(value)}
@@ -32,7 +35,7 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
     <View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 16 }]}>{label}</Text><Text style={ui.text}>{hint}</Text></View>
   </TouchableOpacity>)}
   {!supported ? <Text style={ui.text}>Este navegador no ofrece reconocimiento de voz. Puedes ensayar en modo manual.</Text> : null}
-  {onEngineChange ? <View style={ui.card}>
+  {onEngineChange && mode !== 'openai' ? <View style={ui.card}>
     <Disclosure title="Motor de reconocimiento" summary={engine === 'native' ? native ? 'Nativo del teléfono' : 'Safari / navegador' : engine === 'vosk' ? 'Vosk' : engine === 'whisper' ? 'Whisper' : 'Comparativa'}>
     <Text style={ui.text}>{native ? 'El prototipo usa el reconocimiento integrado del teléfono. Inteligente conserva las pausas y decide el avance por tus palabras. Vosk, Whisper y la comparativa siguen disponibles para las pruebas.' : 'Safari es la opción por defecto en iPhone; en otros dispositivos se usa el reconocimiento del navegador. Puedes elegir Vosk o Whisper y seguir comparando los tres. En Inteligente, las pausas se conservan.'}</Text>
     {([['native', native ? `${native.platform === 'ios' ? 'Apple · iPhone' : 'Android'} · reconocimiento nativo` : 'Safari / navegador · por defecto'], ['vosk', 'Vosk · local en español'], ['whisper', 'Whisper con contexto del guion'], ['comparison', 'Comparativa durante el ensayo · tres motores']] as const).map(([value, label]) =>
@@ -44,7 +47,7 @@ export const MicrophoneSettings = ({ mode, onModeChange, showTranscript, onTrans
     {engine === 'comparison' ? <Text style={ui.text}>En Comparativa, dos segundos sin voz cierran la toma y se avanza aunque la coincidencia sea 0 %. El informe guarda los tres resultados.</Text> : null}
   </View> : null}
   <View style={[ui.card, ui.row]}><View style={{ flex: 1, gap: 4 }}><Text style={[ui.subtitle, { fontSize: 16 }]}>Mostrar transcripción</Text>
-    <Text style={ui.text}>Muestra lo que la app oye en modo inteligente.</Text></View>
+    <Text style={ui.text}>Muestra lo que la app oye durante tu réplica.</Text></View>
     <Switch accessibilityLabel="Mostrar transcripción" value={showTranscript} onValueChange={onTranscriptChange} trackColor={{ true: palette.plum }} />
   </View>
   <View style={ui.card}>

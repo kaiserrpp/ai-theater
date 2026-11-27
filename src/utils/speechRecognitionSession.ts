@@ -26,7 +26,7 @@ export type SpeechRecognitionHandle = {
   finishInput?: () => boolean;
 };
 
-export type SpeechRecognitionConstructor = { new (): SpeechRecognitionHandle; controlledInputEnd?: boolean };
+export type SpeechRecognitionConstructor = { new (lineKey?: string | null): SpeechRecognitionHandle; controlledInputEnd?: boolean };
 export type SpeechRecognitionCommand = {
   accepts: (text: string) => boolean;
   onRecognized: () => void;
@@ -53,6 +53,7 @@ type RecognitionOptions = {
   // it. Browser Safari keeps its existing natural-end protection.
   controlledEnd?: boolean;
   recoverNativeInput?: boolean;
+  restartOnLineChange?: boolean;
   startTimeoutMs?: number;
   pageVisible?: boolean;
   prepareRestart?: (callbacks: { onDone: () => void; onError: (error: Error) => void }) => () => void;
@@ -89,6 +90,8 @@ const recognitionErrorMessage = (code?: string, detail = '') => {
       return 'El navegador no puede reconocer el idioma de esta réplica.';
     case 'local-recognition-failed':
       return 'No se ha podido preparar la escucha local. Comprueba la conexión y reintenta; la primera preparación descarga el modelo.';
+    case 'openai-recognition-failed':
+      return detail || 'No se pudo abrir la escucha de OpenAI.';
     default:
       return 'No se pudo iniciar la escucha. Pulsa Activar micrófono para intentarlo de nuevo.';
   }
@@ -274,7 +277,7 @@ export const createSpeechRecognitionSession = (
     try {
       diagnosticStartedAt ??= now();
       diagnostics.startCount++;
-      current = new Constructor();
+      current = options.restartOnLineChange ? new Constructor(lineKey) : new Constructor();
       recognition = current;
       current.continuous = continuous;
       current.interimResults = true;
@@ -532,7 +535,7 @@ export const createSpeechRecognitionSession = (
       diagnostics.inputAlreadyActive ||= Boolean(recognition && snapshot.isAudioActive && !languageChanged && !continuousChanged && !hadPartialResult);
       enabled = true;
       armEvidence();
-      if (languageChanged || continuousChanged || (lineChanged && (hadPartialResult || options.getCommand?.(lineKey)))) {
+      if (languageChanged || continuousChanged || (lineChanged && (options.restartOnLineChange || hadPartialResult || options.getCommand?.(lineKey)))) {
         if ((options.naturalEnd || options.controlledEnd) && recognition) {
           closingForChange = true; update({ status: 'finishing' }); requestControlledEnd(); return;
         }
