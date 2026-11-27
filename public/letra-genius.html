@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://genius.com; style-src 'unsafe-inline'; img-src https://genius.com https://*.genius.com data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-tuxKuedbafKClEraLoY6LcZAu4Skh9BhwwxIMOZa1fk=' https://genius.com/songs/; worker-src blob:; style-src 'unsafe-inline' https://assets.genius.com/stylesheets/compiled/; img-src https://assets.genius.com/images/; base-uri 'none'; form-action 'none'">
   <title>Letra de Genius</title>
   <style>
     html, body { height: 100%; }
@@ -17,49 +17,130 @@
   <p id="status" role="status">Cargando letra…</p>
   <button id="retry" type="button" hidden>Reintentar letra</button>
   <script>
-    const status = document.getElementById('status');
-    const retry = document.getElementById('retry');
-    const songId = new URLSearchParams(location.search).get('cancion') || '';
-    retry.onclick = () => location.reload();
+(() => {
+  const status = document.getElementById('status');
+  const retry = document.getElementById('retry');
+  const songId = new URLSearchParams(location.search).get('cancion') || '';
 
-    const showUnavailable = () => {
-      status.textContent = 'No se ha podido cargar la letra de Genius.';
-      retry.hidden = false;
-    };
-    const finishLoading = () => {
-      clearTimeout(timeout);
-      if (document.getElementById('rg_embed_' + songId)) {
-        status.hidden = true;
-        retry.hidden = true;
-      } else showUnavailable();
-    };
-    let timeout;
+  if (window === window.top || window.origin !== 'null' || !/^\d{1,12}$/.test(songId)) {
+    status.textContent = 'Abre la letra desde el reproductor de AI-Theatre.';
+    return;
+  }
 
-    if (window === window.top || window.origin !== 'null' || !/^\d{1,12}$/.test(songId)) {
-      status.textContent = 'Abre la letra desde el reproductor de AI-Theatre.';
-    } else {
-      try {
-        // Only the main app document should use the installed WebView's native bridge.
-        for (const name of ['ReactNativeWebView', 'webkit']) {
-          for (let object = window; object; object = Object.getPrototypeOf(object)) {
-            if (Object.prototype.hasOwnProperty.call(object, name)) {
-              Object.defineProperty(object, name, { value: undefined, writable: false, configurable: false });
+  // WKWebView exposes its native message handlers in Window, even in a sandbox.
+  // The official embed writes HTML in a worker with no Window or native bridge.
+  async function loadGeniusEmbed(id) {
+    const chunks = [];
+    self.document = {
+      getElementById: name => name === 'rg_embed_link_' + id ? {} : null,
+      write: (...parts) => chunks.push(...parts),
+    };
+    await import('https://genius.com/songs/' + id + '/embed.js');
+    self.postMessage(chunks.join(''));
+  }
+
+  const geniusOrigin = 'https://genius.com';
+  const htmlNamespace = 'http://www.w3.org/1999/xhtml';
+  const allowedElements = new Set(['a', 'b', 'br', 'div', 'em', 'i', 'p', 'span', 'strong']);
+
+  function appendEmbedContent(target, source) {
+    for (const node of source.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        target.append(node.textContent);
+      } else if (node.namespaceURI === htmlNamespace && allowedElements.has(node.localName)) {
+        const element = document.createElement(node.localName);
+        element.className = node.className;
+        if (node.localName === 'a' && node.hasAttribute('href')) {
+          try {
+            const link = new URL(node.getAttribute('href'), geniusOrigin);
+            if (link.origin === geniusOrigin && !link.username && !link.password) {
+              element.href = link.href;
+              element.target = '_blank';
+              element.rel = 'noopener noreferrer';
             }
+          } catch {
+            // Keep the text of a link even if its URL is malformed.
           }
         }
-        if (window.ReactNativeWebView !== undefined || window.webkit?.messageHandlers) {
-          throw new Error('The native bridge must be inaccessible to the lyrics viewer.');
-        }
+        appendEmbedContent(element, node);
+        target.append(element);
+      }
+    }
+  }
 
-        timeout = setTimeout(showUnavailable, 12000);
-        // The official Genius snippet runs while the frame's document is being parsed.
-        document.write('<div id="rg_embed_link_' + songId + '" class="rg_embed_link" data-song-id="' + songId + '"></div>'
-          + '<script crossorigin="anonymous" src="https://genius.com/songs/' + songId + '/embed.js"'
-          + ' onload="finishLoading()" onerror="clearTimeout(timeout); showUnavailable()"><' + '/script>');
+  function showEmbed(markup) {
+    const template = document.createElement('template');
+    template.innerHTML = markup;
+    const embed = template.content.querySelector('#rg_embed_' + songId);
+    if (!embed) throw new Error('Missing Genius embed');
+
+    // Build fresh elements from the inert template. Scripts, event handlers
+    // and frames provided by Genius never enter the lyrics document.
+    const lyrics = document.createElement('div');
+    lyrics.id = embed.id;
+    lyrics.className = embed.className;
+    appendEmbedContent(lyrics, embed);
+    if (!lyrics.textContent.trim()) throw new Error('Empty Genius embed');
+
+    const css = template.content.querySelector('link[rel="stylesheet"]')?.getAttribute('href');
+    if (/^https:\/\/assets\.genius\.com\/stylesheets\/compiled\/embedded_song-[a-f\d]+\.css$/.test(css)) {
+      const stylesheet = document.createElement('link');
+      stylesheet.rel = 'stylesheet';
+      stylesheet.href = css;
+      document.head.append(stylesheet);
+    }
+    document.body.append(lyrics);
+    status.hidden = true;
+  }
+
+  function showUnavailable() {
+    status.textContent = 'No se ha podido cargar la letra de Genius.';
+    retry.hidden = false;
+  }
+
+  function loadLyrics() {
+    status.textContent = 'Cargando letra…';
+    retry.hidden = true;
+    const workerSource = '(' + loadGeniusEmbed.toString() + ')(' + JSON.stringify(songId) + ')'
+      + '.catch(() => self.postMessage(null));';
+    const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+    let worker;
+    try {
+      worker = new Worker(workerUrl);
+    } catch {
+      showUnavailable();
+      return;
+    } finally {
+      URL.revokeObjectURL(workerUrl);
+    }
+
+    const finish = () => {
+      clearTimeout(timeout);
+      worker.terminate();
+    };
+    const fail = () => {
+      finish();
+      showUnavailable();
+    };
+    const timeout = setTimeout(fail, 12000);
+    worker.onerror = fail;
+    worker.onmessage = ({ data }) => {
+      finish();
+      if (typeof data !== 'string') {
+        showUnavailable();
+        return;
+      }
+      try {
+        showEmbed(data);
       } catch {
         showUnavailable();
       }
-    }
+    };
+  }
+
+  retry.addEventListener('click', loadLyrics);
+  loadLyrics();
+})();
   </script>
 </body>
 </html>
